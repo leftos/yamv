@@ -1,0 +1,234 @@
+/* YAMV document page. Every colour, font and size comes from a --yamv-* token (docs/design/themes.md). */
+
+@font-face { font-family: "Inter V"; src: url("fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; font-style: normal; }
+@font-face { font-family: "Inter V"; src: url("fonts/inter-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; }
+@font-face { font-family: "Source Serif V"; src: url("fonts/source-serif-4-normal.woff2") format("woff2"); font-weight: 200 900; font-style: normal; }
+@font-face { font-family: "Source Serif V"; src: url("fonts/source-serif-4-italic.woff2") format("woff2"); font-weight: 200 900; font-style: italic; }
+@font-face { font-family: "JetBrains Mono V"; src: url("fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; font-style: normal; }
+@font-face { font-family: "JetBrains Mono V"; src: url("fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+
+/* The same files under their real family names, which theme files use, so a theme naming them never needs them installed. */
+@font-face { font-family: "Inter"; src: url("fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("fonts/inter-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; }
+@font-face { font-family: "Source Serif 4"; src: url("fonts/source-serif-4-normal.woff2") format("woff2"); font-weight: 200 900; font-style: normal; }
+@font-face { font-family: "Source Serif 4"; src: url("fonts/source-serif-4-italic.woff2") format("woff2"); font-weight: 200 900; font-style: italic; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; font-style: normal; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+
+/* Studio light, so the page renders before a theme arrives. The theme block in <style id="yamv-theme"> overrides these. */
+:root {
+  --yamv-page-background: #ffffff;
+  --yamv-text: #1f2328;
+  --yamv-text-secondary: #31373d;
+  --yamv-text-muted: #656d76;
+  --yamv-heading: #111418;
+  --yamv-accent: #0969da;
+  --yamv-accent-soft: #b6d4f5;
+  --yamv-line: #d8dee4;
+  --yamv-quote: #d0d7de;
+  --yamv-chrome-background: #f6f8fa;
+  --yamv-sidebar-background: #f6f8fa;
+  --yamv-selection-background: #e3edfa;
+  --yamv-selection-text: #0b3d7a;
+  --yamv-hover-background: #eaeef2;
+  --yamv-warning: #9a6700;
+  --yamv-warning-background: #fff8c5;
+  --yamv-warning-line: #e5d17b;
+  --yamv-code-background: #f6f8fa;
+  --yamv-code-line: #e4e8ec;
+  --yamv-find-match: #fff1a8;
+  --yamv-find-current: #ffb340;
+  --yamv-syntax-keyword: #cf222e;
+  --yamv-syntax-string: #0a3069;
+  --yamv-syntax-comment: #6e7781;
+  --yamv-syntax-type: #8250df;
+  --yamv-syntax-number: #0550ae;
+  --yamv-ui-font: "Inter V";
+  --yamv-body-font: "Inter V";
+  --yamv-heading-font: "Inter V";
+  --yamv-mono-font: "JetBrains Mono V";
+  --yamv-body-size: 15.5px;
+  --yamv-line-height: 1.62;
+  --yamv-h1-size: 2.05em;
+  --yamv-heading-weight: 700;
+  /* A bool token: 1 draws the rule under h2, 0 leaves it out. */
+  --yamv-h2-rule: 1;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--yamv-page-background); }
+
+body {
+  margin: 0;
+  background: var(--yamv-page-background);
+  color: var(--yamv-text);
+  font-family: var(--yamv-body-font), "Inter V", sans-serif;
+  font-size: var(--yamv-body-size);
+  line-height: var(--yamv-line-height);
+}
+
+::selection { background: var(--yamv-selection-background); color: var(--yamv-selection-text); }
+
+/* ---------- content column ---------- */
+/* --yamv-content-width is set by the host: a px value, or none for full width. */
+.yamv-content { max-width: var(--yamv-content-width, 800px); margin: 0 auto; padding: 40px 44px 64px; }
+.yamv-content.yamv-pending { visibility: hidden; }
+
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-family: var(--yamv-heading-font), "Inter V", sans-serif; color: var(--yamv-heading); line-height: 1.25; }
+.md h1 { font-weight: var(--yamv-heading-weight); font-size: var(--yamv-h1-size); letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .5em; }
+.md h2 {
+  font-weight: var(--yamv-heading-weight);
+  font-size: 1.32em;
+  margin: 1.6em 0 .55em;
+  padding-bottom: calc(var(--yamv-h2-rule) * .3em);
+  border-bottom: calc(var(--yamv-h2-rule) * 1px) solid var(--yamv-line);
+}
+.md h3 { font-size: 1.12em; font-weight: 650; margin: 1.4em 0 .5em; }
+.md h4, .md h5, .md h6 { font-size: 1em; font-weight: 650; margin: 1.3em 0 .4em; }
+.md h6 { color: var(--yamv-text-muted); }
+.md p { margin: 0 0 1em; }
+.md a { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; }
+.md a:hover { text-decoration-color: var(--yamv-accent); }
+.md strong { font-weight: 650; }
+.md del { color: var(--yamv-text-muted); }
+
+/* ---------- code ---------- */
+.md code, .md kbd, .md samp { font-family: var(--yamv-mono-font), "JetBrains Mono V", monospace; }
+.md code { font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md pre {
+  background: var(--yamv-code-background);
+  border: 1px solid var(--yamv-code-line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-family: var(--yamv-mono-font), "JetBrains Mono V", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 1.2em;
+  overflow-x: auto;
+}
+.md pre code { background: none; padding: 0; font-size: inherit; border-radius: 0; }
+.md kbd {
+  font-size: .8em;
+  padding: .1em .45em;
+  border: 1px solid var(--yamv-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--yamv-code-background);
+  color: var(--yamv-text);
+}
+
+/* highlight.js tokens mapped onto the syntax tokens */
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-meta .hljs-keyword, .hljs-doctag, .hljs-template-tag { color: var(--yamv-syntax-keyword); }
+.hljs-string, .hljs-regexp, .hljs-attr, .hljs-symbol, .hljs-template-variable, .hljs-addition, .hljs-meta .hljs-string { color: var(--yamv-syntax-string); }
+.hljs-comment, .hljs-quote, .hljs-deletion { color: var(--yamv-syntax-comment); font-style: italic; }
+.hljs-type, .hljs-title, .hljs-title.class_, .hljs-title.function_, .hljs-class .hljs-title, .hljs-section, .hljs-selector-id, .hljs-selector-class, .hljs-name, .hljs-tag { color: var(--yamv-syntax-type); }
+.hljs-number, .hljs-literal, .hljs-variable.constant_, .hljs-attribute, .hljs-bullet, .hljs-link { color: var(--yamv-syntax-number); }
+.hljs-meta { color: var(--yamv-syntax-comment); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 650; }
+
+/* ---------- tables ---------- */
+.md table { border-collapse: collapse; margin: 0 0 1.2em; font-size: .9em; width: 100%; display: block; overflow-x: auto; }
+.md th, .md td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--yamv-line); }
+.md th { font-family: var(--yamv-ui-font), "Inter V", sans-serif; font-weight: 600; font-size: .86em; color: var(--yamv-text-muted); }
+
+/* ---------- blocks ---------- */
+.md blockquote { margin: 0 0 1.1em; padding: .1em 0 .1em 1.1em; border-left: 3px solid var(--yamv-quote); color: var(--yamv-text-muted); }
+.md blockquote > :last-child { margin-bottom: 0; }
+.md ul, .md ol { margin: 0 0 1em; padding-left: 1.6em; }
+.md li > ul, .md li > ol { margin-bottom: 0; }
+.md li + li { margin-top: .2em; }
+.md hr { border: 0; border-top: 1px solid var(--yamv-line); margin: 1.8em 0; }
+.md img { max-width: 100%; border-radius: 8px; }
+.md p > img:only-child { display: block; margin: 0 0 .2em; }
+.md dt { font-weight: 650; }
+.md dd { margin: 0 0 .6em 1.4em; }
+
+/* ---------- task lists ---------- */
+.md ul.contains-task-list { list-style: none; padding-left: .2em; }
+.md li.task-list-item:has(> input:checked) { color: var(--yamv-text-muted); text-decoration: line-through; text-decoration-color: var(--yamv-line); }
+.md li.task-list-item > input[type="checkbox"] {
+  appearance: none;
+  margin: 0 .6em 0 0;
+  vertical-align: baseline;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--yamv-text-muted);
+  border-radius: 4px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  transform: translateY(2px);
+}
+.md li.task-list-item > input[type="checkbox"]:checked { background: var(--yamv-accent); border-color: var(--yamv-accent); }
+.md li.task-list-item > input[type="checkbox"]:checked::after {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border: 2px solid var(--yamv-page-background);
+  border-top: 0;
+  border-right: 0;
+  transform: rotate(-45deg) translate(1px, -1px);
+}
+
+/* ---------- footnotes ---------- */
+.md .footnotes { font-size: .88em; color: var(--yamv-text-muted); margin-top: 2.4em; }
+.md .footnotes hr { margin: 0 0 1em; }
+.md .footnote-ref { font-size: .8em; }
+.md .footnote-back-ref { text-decoration: none; }
+
+/* ---------- diagrams and math ---------- */
+.md pre.mermaid { background: none; border: 0; padding: 0; text-align: center; font-family: var(--yamv-ui-font), "Inter V", sans-serif; }
+.md pre.mermaid svg { max-width: 100%; height: auto; }
+.md div.math { margin: 0 0 1.2em; overflow-x: auto; overflow-y: hidden; }
+.md .yamv-render-error { color: var(--yamv-warning); background: var(--yamv-warning-background); border: 1px solid var(--yamv-warning-line); border-radius: 4px; padding: 0 .3em; }
+
+/* ---------- find ---------- */
+mark.yamv-find { background: var(--yamv-find-match); color: inherit; border-radius: 2px; padding: 0 1px; }
+mark.yamv-find-current { background: var(--yamv-find-current); box-shadow: 0 0 0 2px color-mix(in srgb, var(--yamv-find-current) 40%, transparent); }
+
+.yamv-findbar {
+  position: fixed;
+  top: 10px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--yamv-page-background);
+  border: 1px solid var(--yamv-line);
+  border-radius: 8px;
+  padding: 5px 6px 5px 10px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--yamv-text) 14%, transparent);
+  font-family: var(--yamv-ui-font), "Inter V", sans-serif;
+  font-size: 13px;
+  line-height: 1.2;
+}
+.yamv-findbar[hidden] { display: none; }
+.yamv-find-field {
+  width: 200px;
+  height: 26px;
+  border: 1px solid var(--yamv-accent);
+  border-radius: 5px;
+  box-shadow: 0 0 0 3px var(--yamv-accent-soft);
+  padding: 0 8px;
+  font: inherit;
+  color: var(--yamv-text);
+  background: var(--yamv-page-background);
+  outline: none;
+}
+.yamv-find-count { font-size: 12px; color: var(--yamv-text-muted); min-width: 52px; text-align: right; }
+.yamv-find-button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--yamv-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.yamv-find-button:hover { background: var(--yamv-hover-background); color: var(--yamv-text); }

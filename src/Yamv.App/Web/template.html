@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: https:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YAMV</title>
+<link rel="stylesheet" href="yamv.css">
+<style id="yamv-theme"></style>
+</head>
+<body>
+<div id="yamv-findbar" class="yamv-findbar" hidden>
+  <input id="yamv-find-field" class="yamv-find-field" type="text" spellcheck="false" autocomplete="off" aria-label="Find in document">
+  <span id="yamv-find-count" class="yamv-find-count"></span>
+  <button id="yamv-find-prev" class="yamv-find-button" type="button" title="Previous match (Shift+Enter)" aria-label="Previous match">&#8593;</button>
+  <button id="yamv-find-next" class="yamv-find-button" type="button" title="Next match (Enter)" aria-label="Next match">&#8595;</button>
+  <button id="yamv-find-close" class="yamv-find-button" type="button" title="Close (Esc)" aria-label="Close find">&#10005;</button>
+</div>
+<main id="yamv-content" class="yamv-content md"></main>
+<script src="vendor/highlight/highlight.min.js"></script>
+<script src="yamv.js"></script>
+</body>
+</html>
