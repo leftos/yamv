@@ -12,7 +12,7 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
 ## Window
 
 - **Custom title bar**, drawn into the window's title area. It shows the document name in semibold, then its location inside its group in muted text (`yamv / docs / plans`). Window controls are on the right on Windows; on macOS the traffic lights stay on the left. The bar is 38 px tall and takes the theme's chrome colours.
-- The document pane is on the left, centred to the theme's measure. The **tree sidebar is on the right** and 250–280 px wide, resizable by a splitter, and its width is remembered.
+- The document pane is on the left. Its text column is centred at the content width ([content-width.md](content-width.md)), which is set per folder with the title bar's `⟷` popover. The **tree sidebar is on the right** and 250–280 px wide, resizable by a splitter, and its width is remembered.
 - There are no tabs. The tree is the only list of open documents.
 
 ## Tree

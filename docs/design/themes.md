@@ -21,7 +21,7 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
   "description": "Warm off-white, serif body, rust accent.",
 
   // Shared by both variants
-  "tokens": { "bodyFont": "Source Serif 4", "bodySize": 17.5, "lineHeight": 1.65, "measure": 720 },
+  "tokens": { "bodyFont": "Source Serif 4", "bodySize": 17.5, "lineHeight": 1.65 },
   "css": "",
 
   // Either or both. A variant's tokens override the shared ones; its css is appended after the shared css
@@ -76,7 +76,6 @@ Each token is also a CSS custom property on the document page, `--yamv-<kebab-ca
 | Type | `monoFont` | font family | code |
 | Layout | `bodySize` | number, px, 10–32 | body font size |
 | Layout | `lineHeight` | number, 1.0–2.5 | body line height |
-| Layout | `measure` | number, px, 400–1600 | max text width |
 | Layout | `h1Size` | number, em, 1.0–4.0 | h1 size |
 | Layout | `headingWeight` | number, 100–900 | h1/h2 weight |
 | Layout | `h2Rule` | bool | rule under h2 |
