@@ -32,7 +32,7 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
 
 - The **visual editor**:
   - **Left:** the theme list, in two sections, Built-in and Yours.
-  - **Middle:** every token, grouped (Page, Tree, Code, Syntax, Type, Layout). It has Shared / Light / Dark tabs, colour swatches with hex fields and a picker, and value fields for fonts and sizes.
+  - **Middle:** every token, grouped as in the [token table](themes.md#tokens) (Page, Chrome, Code, Syntax, Type, Layout). It has Shared / Light / Dark tabs, colour swatches with hex fields and a picker, and value fields for fonts and sizes.
   - **Right:** a live preview.
 - Footer: **Import…**, **Export…**, **Edit as text** (opens the file in the default editor), **Revert**, **Save**. A built-in theme is read-only: editing one starts with "Duplicate" into Yours.
 - Editing a theme file outside the app re-applies it live.

@@ -1,6 +1,7 @@
 bin/
 obj/
 .tmp/
+.playwright-mcp/
 publish/
 .vs/
 .idea/

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV content width control</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1880px; }
+h1.page { font: 600 28px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 30px; font-size: 15px; max-width: 1500px; }
+.pair { display: flex; gap: 36px; align-items: flex-start; }
+.opt > h3 { font: 600 17px "Inter V"; color: #fff; margin: 0 0 4px; }
+.opt > p { color: #e3e6e9; font-size: 13.5px; margin: 0 0 10px; width: 580px; }
+.win { --bg: #fff; --chrome: #f6f8fa; --line: #d8dee4; --text: #1f2328; --muted: #656d76; --accent: #0969da; --soft: #b6d4f5; --sel: #e3edfa;
+       width: 580px; height: 430px; border-radius: 10px; overflow: hidden; position: relative; display: flex; flex-direction: column;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--bg); color: var(--text); font-size: 13px; }
+.tb { height: 36px; display: flex; align-items: center; gap: 8px; padding-left: 12px; background: var(--chrome); border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.tb b { color: var(--text); }
+.tb .sp { flex: 1; }
+.tb .ib { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--muted); }
+.tb .ib.on { background: var(--sel); color: var(--accent); }
+.tb .ctl { width: 40px; text-align: center; }
+.body { flex: 1; display: flex; min-height: 0; }
+.doc { flex: 1; padding: 26px 0; position: relative; }
+.col { margin: 0 auto; width: 300px; }
+.col .ln { height: 7px; border-radius: 4px; background: #d0d7de; margin-bottom: 9px; }
+.col .ln.h { height: 14px; width: 60%; background: #1f2328; margin-bottom: 14px; }
+.side { width: 150px; background: var(--chrome); border-left: 1px solid var(--line); }
+.pop { position: absolute; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(31,35,40,.22); padding: 14px 14px 12px; width: 300px; z-index: 2; }
+.pop .row { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; margin-bottom: 10px; }
+.pop .row b { font-size: 13px; }
+.pop .val { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+.track { position: relative; height: 4px; background: #d8dee4; border-radius: 2px; margin: 14px 4px 8px; }
+.track .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 42%; background: var(--accent); border-radius: 2px; }
+.track .thumb { position: absolute; left: 42%; top: -6px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); }
+.ticks { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin: 0 0 12px; }
+.scope { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 10px; }
+.scope .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 6px 0 8px; }
+.scope .seg span { flex: 1; text-align: center; padding: 5px 0; font-size: 11.5px; color: var(--text); border-right: 1px solid var(--line); }
+.scope .seg span:last-child { border-right: 0; }
+.scope .seg span.on { background: var(--sel); color: #0b3d7a; font-weight: 600; }
+.scope code { font: 11px Consolas, monospace; background: var(--chrome); padding: 1px 4px; border-radius: 3px; color: var(--text); }
+.links { display: flex; gap: 14px; font-size: 12px; color: var(--accent); margin-top: 8px; }
+.status { height: 26px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-top: 1px solid var(--line); background: var(--chrome); font-size: 11.5px; color: var(--muted); }
+.status .mini { width: 130px; height: 3px; background: #d8dee4; border-radius: 2px; position: relative; }
+.status .mini::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 42%; background: var(--accent); border-radius: 2px; }
+.status .mini::before { content: ""; position: absolute; left: 42%; top: -4px; width: 11px; height: 11px; margin-left: -5px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); }
+.status .sp { flex: 1; }
+.handle { position: absolute; top: 26px; bottom: 26px; width: 6px; border-radius: 3px; background: var(--soft); }
+.handle.l { left: calc(50% - 150px - 12px); } .handle.r { left: calc(50% + 150px + 6px); }
+.tip { position: absolute; top: 40%; left: calc(50% + 150px + 18px); background: #1f2328; color: #fff; font-size: 11.5px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+h2 { font: 650 22px "Inter V"; color: #fff; margin: 40px 0 4px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: where the content-width slider lives</h1>
+<p class="page">The slider runs from 480 px up to the pane's width and snaps to <b>Full</b> at the end. The width belongs to a folder, and a document uses the nearest folder above it that has one, else the app default. Each option is shown with the slider set to 760 px.</p>
+
+<div class="pair">
+  <div class="opt"><h3>A · Title-bar button + popover</h3><p>A ⟷ button in the title bar opens a popover with the slider, the folder it saves to, and Reset / Make default. Ctrl+[ and Ctrl+] step the width.</p>
+    <div class="win"><div class="tb"><b>MAIN.md</b>yamv / docs / plans<span class="sp"></span><span class="ib on">⟷</span><span class="ctl">–</span><span class="ctl">▢</span><span class="ctl">✕</span></div>
+      <div class="body"><div class="doc"><div class="col" data-lines></div></div><div class="side"></div></div>
+      <div class="pop" style="top:42px;right:120px">
+        <div class="row"><b>Content width</b><span class="val">760 px</span></div>
+        <div class="track"><div class="fill"></div><div class="thumb"></div></div>
+        <div class="ticks"><span>480</span><span>Full</span></div>
+        <div class="scope">Saved for
+          <div class="seg"><span class="on">docs/plans</span><span>yamv (repo)</span><span>All documents</span></div>
+          Inherited from <code>yamv</code> before you changed it.
+          <div class="links"><span>Reset to inherited</span><span>Clear all overrides here</span></div></div>
+      </div></div></div>
+  <div class="opt"><h3>B · Always-visible status strip</h3><p>A slim strip under the document holds a mini slider and a readout. Clicking the readout opens the same scope popover as A.</p>
+    <div class="win"><div class="tb"><b>MAIN.md</b>yamv / docs / plans<span class="sp"></span><span class="ctl">–</span><span class="ctl">▢</span><span class="ctl">✕</span></div>
+      <div class="body"><div class="doc"><div class="col" data-lines></div></div><div class="side"></div></div>
+      <div class="status"><span>Width</span><div class="mini"></div><span style="color:#0969da;font-weight:600">760 px</span><span>· docs/plans</span><span class="sp"></span><span>UTF-8 · 412 words</span></div></div></div>
+  <div class="opt"><h3>C · Drag the column edges</h3><p>Hover near the edge of the text column and handles appear; drag them to resize. A tooltip shows the width and the folder it saves to. The menu and the shortcuts reach the popover from A.</p>
+    <div class="win"><div class="tb"><b>MAIN.md</b>yamv / docs / plans<span class="sp"></span><span class="ctl">–</span><span class="ctl">▢</span><span class="ctl">✕</span></div>
+      <div class="body"><div class="doc"><div class="handle l"></div><div class="col" data-lines></div><div class="handle r"></div><div class="tip">760 px · saved for docs/plans</div></div><div class="side"></div></div></div></div>
+</div>
+
+<script>
+for (const el of document.querySelectorAll("[data-lines]")) {
+  el.innerHTML = '<div class="ln h"></div>' + Array.from({length: 14}, (_, i) => `<div class="ln" style="width:${[100,96,100,72,100,98,88,100,94,60,100,97,100,80][i]}%"></div>`).join("");
+}
+</script>
+</body>
+</html>
