@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV chrome, tree, edge states, theme settings</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1880px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 36px; font-size: 16px; max-width: 1500px; }
+section { margin-bottom: 56px; }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > p { color: #eef0f2; margin: 0 0 16px; font-size: 15px; max-width: 1500px; }
+.pair { display: flex; gap: 40px; align-items: flex-start; }
+.opt { flex: none; }
+.opt > h3 { font: 600 17px "Inter V"; color: #fff; margin: 0 0 10px; }
+.opt > h3 small { font-weight: 450; color: #e3e6e9; font-size: 14px; margin-left: 8px; }
+
+/* Studio light tokens, standing in for whichever theme is active */
+.win { --doc-bg: #fff; --chrome-bg: #f6f8fa; --side-bg: #f6f8fa; --line: #d8dee4; --text: #1f2328; --text-2: #31373d; --muted: #656d76; --faint: #9aa3ad;
+       --accent: #0969da; --accent-soft: #b6d4f5; --sel-bg: #e3edfa; --sel-text: #0b3d7a; --hover-bg: #eaeef2; --warn: #9a6700; --warn-bg: #fff8c5; --warn-line: #e5d17b;
+       width: 880px; height: 520px; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; position: relative;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--doc-bg); color: var(--text); font-size: 13px; }
+.win.short { height: 300px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--chrome-bg); border-bottom: 1px solid var(--line);
+            font: 500 12.5px "Inter V"; color: var(--muted); padding-left: 14px; }
+.titlebar .name { color: var(--text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; }
+.titlebar .ctl svg { stroke: var(--muted); }
+.titlebar.native { background: #fff; border-bottom: 0; color: #1f2328; font: 400 12px "Segoe UI", "Inter V"; padding-left: 12px; }
+.titlebar.native .appicon { width: 16px; height: 16px; border-radius: 3px; background: var(--accent); margin-right: 10px; }
+.crumb { height: 30px; flex: none; display: flex; align-items: center; padding: 0 44px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); background: var(--doc-bg); }
+.crumb b { color: var(--text); font-weight: 600; }
+.body { flex: 1; display: flex; min-height: 0; }
+.doc { flex: 1; overflow: hidden; padding: 30px 44px 0; position: relative; }
+.side { width: 250px; flex: none; background: var(--side-bg); border-left: 1px solid var(--line); padding: 12px 8px; overflow: hidden; }
+.md h1 { font: 700 27px/1.15 "Inter V"; letter-spacing: -.025em; margin: 0 0 12px; }
+.md p { font-size: 15px; line-height: 1.62; margin: 0 0 12px; color: var(--text); }
+.md h2 { font: 650 19px "Inter V"; margin: 22px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
+.md mark { background: #fff1a8; color: inherit; border-radius: 2px; padding: 0 1px; }
+.md mark.cur { background: #ffb340; box-shadow: 0 0 0 2px #ffb34066; }
+
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--text); }
+.grp-h .chev { width: 10px; color: var(--muted); }
+.grp-h .sub { display: block; font-weight: 400; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.badge.dir { color: var(--muted); border-color: var(--line); }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--text-2); position: relative; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--sel-bg); color: var(--sel-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--accent); }
+.row.hover { background: var(--hover-bg); }
+.row .x { margin-left: auto; color: var(--muted); font-size: 14px; }
+.row.missing { color: var(--faint); }
+.row.missing .name { text-decoration: line-through; text-decoration-color: var(--faint); }
+.tag { margin-left: auto; font: 600 9.5px "Inter V"; text-transform: uppercase; letter-spacing: .05em; color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 4px; padding: 1px 5px; }
+.tip { position: absolute; background: #1f2328; color: #fff; font-size: 11.5px; padding: 5px 8px; border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.25); white-space: nowrap; }
+
+.empty { flex: 1; display: grid; place-items: center; text-align: center; color: var(--muted); }
+.empty .mark { width: 54px; height: 54px; border-radius: 14px; border: 1.5px dashed var(--faint); display: grid; place-items: center; margin: 0 auto 16px; color: var(--faint); font: 600 18px "JetBrains Mono V"; }
+.empty h4 { margin: 0 0 6px; color: var(--text); font: 600 17px "Inter V"; }
+.empty p { margin: 0 0 18px; font-size: 13.5px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--doc-bg); color: var(--text); font: 550 12.5px "Inter V"; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.kbd { font: 500 11px "JetBrains Mono V"; color: var(--muted); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+.missing-pane { padding: 70px 40px; text-align: center; color: var(--muted); }
+.missing-pane h4 { color: var(--text); font: 600 17px "Inter V"; margin: 0 0 6px; }
+.missing-pane code { font: 12px "JetBrains Mono V"; background: var(--chrome-bg); padding: 2px 6px; border-radius: 4px; color: var(--text-2); }
+.banner { display: flex; align-items: center; gap: 12px; padding: 9px 14px; background: var(--warn-bg); border-bottom: 1px solid var(--warn-line); color: #4d3800; font-size: 12.5px; }
+.banner .spacer { flex: 1; }
+.findbar { position: absolute; top: 10px; right: 16px; display: flex; align-items: center; gap: 6px; background: var(--doc-bg); border: 1px solid var(--line); border-radius: 8px;
+           padding: 5px 6px 5px 10px; box-shadow: 0 8px 24px rgba(31,35,40,.14); }
+.findbar .field { width: 200px; height: 26px; border: 1px solid var(--accent); border-radius: 5px; box-shadow: 0 0 0 3px var(--accent-soft); display: flex; align-items: center; padding: 0 8px; font-size: 13px; }
+.findbar .count { font-size: 12px; color: var(--muted); min-width: 52px; text-align: right; }
+.findbar .ib { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px; color: var(--muted); font-size: 13px; }
+
+/* theme settings */
+.dlg { display: flex; flex-direction: column; height: 100%; }
+.dlg-body { flex: 1; display: flex; min-height: 0; }
+.dlg-foot { height: 52px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; padding: 0 16px; background: var(--chrome-bg); }
+.dlg-foot .spacer { flex: 1; }
+.cards { padding: 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-content: start; flex: 1; }
+.card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--doc-bg); }
+.card.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.card .prev { height: 92px; display: flex; }
+.card .prev .pg { flex: 1; padding: 12px; }
+.card .prev .sb { width: 38%; border-left: 1px solid rgba(0,0,0,.08); padding: 12px 8px; }
+.card .ln { height: 6px; border-radius: 3px; margin-bottom: 6px; }
+.card .meta { padding: 9px 12px; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); }
+.card .meta b { font-size: 13px; }
+.card .meta span { font-size: 11px; color: var(--muted); }
+.card .meta .src { margin-left: auto; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg span { padding: 6px 12px; font-size: 12.5px; color: var(--text-2); border-right: 1px solid var(--line); }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--sel-bg); color: var(--sel-text); font-weight: 600; }
+.tlist { width: 190px; border-right: 1px solid var(--line); background: var(--side-bg); padding: 12px 8px; }
+.tlist .h { font: 600 10.5px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 6px 8px; }
+.tokens { width: 330px; border-right: 1px solid var(--line); padding: 10px 14px; overflow: hidden; }
+.tokens .h { font: 600 10.5px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 10px 0 6px; }
+.tok { display: flex; align-items: center; gap: 8px; height: 29px; font-size: 12.5px; color: var(--text-2); }
+.tok .sw { width: 18px; height: 18px; border-radius: 4px; border: 1px solid rgba(0,0,0,.15); flex: none; }
+.tok .val { margin-left: auto; font: 11.5px "JetBrains Mono V"; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; background: var(--doc-bg); }
+.tok.edit .val { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); color: var(--text); }
+.livep { flex: 1; padding: 22px 26px; background: #fbf8f2; color: #2d2822; font-family: Georgia, serif; }
+.livep h1 { font: 650 24px Georgia, serif; margin: 0 0 8px; }
+.livep p { font-size: 14.5px; line-height: 1.6; margin: 0 0 8px; }
+.livep a { color: #b04a1c; }
+.livep code { font: 12px "JetBrains Mono V"; background: #f1eadf; padding: 1px 5px; border-radius: 4px; }
+.livep .lbl { font: 600 10.5px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: #8a7f70; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: window chrome, tree, edge states and theme settings</h1>
+<p class="page">These are shown in Studio light, but every surface takes its colours from the active theme. Sections 1 to 4 are choices. Section 5 holds proposals; tell me only if you want them changed.</p>
+
+<template id="ico"><svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg></template>
+<template id="ctl"><span class="spacer"></span><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+<template id="doc"><div class="md"><h1>Release checklist</h1><p>YAMV ships as a single executable on Windows and an app bundle on macOS. Before tagging a release, walk through the list below.</p><h2>Targets</h2><p>Windows 11 on <code>win-x64</code>, and macOS 14 or later on Apple silicon and Intel.</p></div></template>
+
+<section>
+  <h2>1 · Title bar</h2>
+  <p>A custom bar draws into the title area: the document name, then its location inside the group. A native bar keeps the OS title bar ("MAIN.md — YAMV") and adds a slim breadcrumb strip above the page. On macOS the custom bar keeps the traffic lights on the left.</p>
+  <div class="pair">
+    <div class="opt"><h3>A · Custom title bar <small>more room for the page</small></h3>
+      <div class="win short"><div class="titlebar" data-ctl><span class="name">MAIN.md</span><span>yamv / docs / plans</span></div>
+        <div class="body"><div class="doc" data-doc></div><div class="side" data-tree="badge"></div></div></div></div>
+    <div class="opt"><h3>B · Native title bar + breadcrumb <small>looks like every other app</small></h3>
+      <div class="win short"><div class="titlebar native" data-ctl><span class="appicon"></span>MAIN.md — YAMV</div>
+        <div class="crumb">yamv&nbsp;/&nbsp;docs&nbsp;/&nbsp;plans&nbsp;/&nbsp;<b>MAIN.md</b></div>
+        <div class="body"><div class="doc" data-doc></div><div class="side" data-tree="badge"></div></div></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>2 · Group headers in the tree</h2>
+  <p>How a repo or folder group says where it lives.</p>
+  <div class="pair">
+    <div class="opt"><h3>A · Name + GIT/DIR badge, path on hover <small>compact</small></h3>
+      <div class="win short"><div class="titlebar" data-ctl><span class="name">MAIN.md</span><span>yamv / docs / plans</span></div>
+        <div class="body"><div class="doc" data-doc></div><div class="side" data-tree="badge" style="position:relative"><div class="tip" style="left:20px;top:36px">X:\dev\yamv</div></div></div></div></div>
+    <div class="opt"><h3>B · Name with the path as a subtitle <small>always visible</small></h3>
+      <div class="win short"><div class="titlebar" data-ctl><span class="name">MAIN.md</span><span>yamv / docs / plans</span></div>
+        <div class="body"><div class="doc" data-doc></div><div class="side" data-tree="sub"></div></div></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>3 · A document from last time no longer exists</h2>
+  <p>On restore (or while open), the file was moved or deleted.</p>
+  <div class="pair">
+    <div class="opt"><h3>A · Keep it as a greyed "missing" row <small>reappears if the file comes back</small></h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">v1-build.md</span><span>yamv / docs / plans</span></div>
+        <div class="body"><div class="doc"><div class="missing-pane"><h4>This file is no longer there</h4><p>It was moved or deleted:<br><br><code>X:\dev\yamv\docs\plans\v1-build.md</code></p><p style="margin-top:20px"><span class="btn">Locate…</span>&nbsp;&nbsp;<span class="btn">Remove from list</span></p><p style="font-size:12px">YAMV keeps watching, and reopens it if it comes back.</p></div></div>
+          <div class="side" data-tree="missing"></div></div></div></div>
+    <div class="opt"><h3>B · Drop it, with a one-time notice <small>the tree only ever shows real files</small></h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">MAIN.md</span><span>yamv / docs / plans</span></div>
+        <div class="banner">⚠&nbsp; 1 document from last time no longer exists: <b>docs/plans/v1-build.md</b> (yamv)<span class="spacer"></span><span class="btn">Dismiss</span></div>
+        <div class="body"><div class="doc" data-doc></div><div class="side" data-tree="dropped"></div></div></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>4 · Theme settings window</h2>
+  <p>Both read and write the same <code>.yamv-theme.json</code> files in the themes folder, and both have Import and Export. Editing a theme file in a text editor updates the app live either way.</p>
+  <div class="pair">
+    <div class="opt"><h3>A · Gallery <small>pick, import, export; edit as text</small></h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">Themes</span></div>
+        <div class="dlg"><div style="padding:16px 20px 0;display:flex;align-items:center;gap:12px"><span style="font-size:13px;color:var(--muted)">Appearance</span><div class="seg"><span class="on">Match system</span><span>Light</span><span>Dark</span></div></div>
+          <div class="dlg-body"><div class="cards" data-cards></div></div>
+          <div class="dlg-foot"><span class="btn">Import…</span><span class="btn">Export…</span><span class="btn">Open themes folder</span><span class="spacer"></span><span class="btn">Duplicate &amp; edit in text editor</span><span class="btn primary">Done</span></div></div></div></div>
+    <div class="opt"><h3>B · Visual editor <small>every token, colour pickers, live preview</small></h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">Themes</span><span>Paper (copy) · light</span></div>
+        <div class="dlg"><div class="dlg-body">
+          <div class="tlist"><div class="h">Built-in</div><div class="row">Paper</div><div class="row">Studio</div><div class="row">Ink</div><div class="h" style="margin-top:8px">Yours</div><div class="row sel">Paper (copy)</div><div class="row">Solarized</div></div>
+          <div class="tokens"><div class="seg" style="margin-bottom:4px"><span>Shared</span><span class="on">Light</span><span>Dark</span></div>
+            <div class="h">Page</div>
+            <div class="tok"><span class="sw" style="background:#fbf8f2"></span>Background<span class="val">#fbf8f2</span></div>
+            <div class="tok"><span class="sw" style="background:#2d2822"></span>Text<span class="val">#2d2822</span></div>
+            <div class="tok edit"><span class="sw" style="background:#b04a1c"></span>Accent<span class="val">#b04a1c</span></div>
+            <div class="tok"><span class="sw" style="background:#f1eadf"></span>Code background<span class="val">#f1eadf</span></div>
+            <div class="h">Type</div>
+            <div class="tok">Body font<span class="val">Source Serif 4</span></div>
+            <div class="tok">Body size / line height<span class="val">17.5 / 1.65</span></div>
+            <div class="tok">Measure<span class="val">720 px</span></div></div>
+          <div class="livep"><div class="lbl">Live preview</div><h1>Release checklist</h1><p>YAMV ships as a single executable. Read <a href="#">the notes</a> first, then run <code>publish.ps1</code>.</p></div>
+        </div>
+        <div class="dlg-foot"><span class="btn">Import…</span><span class="btn">Export…</span><span class="btn">Edit as text</span><span class="spacer"></span><span class="btn">Revert</span><span class="btn primary">Save</span></div></div></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>5 · Proposals: empty main window, find bar</h2>
+  <p>The empty state appears in the main window on a first run or after you close everything. Find opens with Ctrl+F (Cmd+F on Mac), counts its matches and steps through them with Enter and Shift+Enter; Esc closes it.</p>
+  <div class="pair">
+    <div class="opt"><h3>Empty main window</h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">YAMV</span></div>
+        <div class="body"><div class="empty"><div><div class="mark">md</div><h4>No documents open</h4><p>Drop markdown files here, or open some.<br>They stay open next time.</p><span class="btn primary">Open files…</span><p style="margin-top:14px;font-size:12px"><span class="kbd">Ctrl</span> <span class="kbd">O</span></p></div></div></div></div></div>
+    <div class="opt"><h3>Find bar</h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">MAIN.md</span><span>yamv / docs / plans</span></div>
+        <div class="body"><div class="doc"><div class="findbar"><div class="field">release</div><span class="count">2 of 5</span><span class="ib">↑</span><span class="ib">↓</span><span class="ib">✕</span></div>
+          <div class="md"><h1><mark class="cur">Release</mark> checklist</h1><p>YAMV ships as a single executable on Windows and an app bundle on macOS. Before tagging a <mark>release</mark>, walk through the list below, and read the architecture notes if anything in the build changed.</p><h2>Targets</h2><p>Each <mark>release</mark> builds for Windows 11 and macOS 14 or later. <mark>Release</mark> notes come from the changelog, and the <mark>release</mark> tag triggers CI.</p></div></div>
+          <div class="side" data-tree="badge"></div></div></div></div>
+  </div>
+</section>
+
+<script>
+const ico = document.getElementById("ico").innerHTML;
+const row = (name, cls = "", extra = "") => `<div class="row ${cls}">${ico}<span class="name">${name}</span>${extra}</div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+function head(kind, name, path, badge) {
+  if (kind === "sub") return `<div class="grp-h"><span class="chev">▾</span><span>${name}<span class="sub">${path}</span></span></div>`;
+  return `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge ${badge === "dir" ? "dir" : ""}">${badge}</span></div>`;
+}
+function tree(kind) {
+  const k = kind === "sub" ? "sub" : "badge";
+  let yamv = head(k, "yamv", "X:\\dev\\yamv", "git") + row("README.md") + folder("docs/plans");
+  if (kind === "missing") yamv += row("MAIN.md", "in") + row("v1-build.md", "in missing sel", '<span class="tag">missing</span>');
+  else if (kind === "dropped") yamv += row("MAIN.md", "in sel");
+  else yamv += row("MAIN.md", "in sel") + row("v1-build.md", "in hover", '<span class="x">×</span>');
+  const yaat = head(k, "yaat", "X:\\dev\\yaat", "git") + folder("docs") + row("ARCHITECTURE.md", "in") + row("glossary.md", "in");
+  const dl = head(k, "~\\Downloads", "C:\\Users\\lefto\\Downloads", "dir") + row("notes.md");
+  return `<div class="grp">${yamv}</div><div class="grp">${yaat}</div><div class="grp">${dl}</div>`;
+}
+for (const el of document.querySelectorAll("[data-tree]")) el.insertAdjacentHTML("afterbegin", tree(el.dataset.tree));
+for (const el of document.querySelectorAll("[data-doc]")) el.innerHTML = document.getElementById("doc").innerHTML;
+for (const el of document.querySelectorAll("[data-ctl]")) el.insertAdjacentHTML("beforeend", document.getElementById("ctl").innerHTML);
+const themes = [
+  ["Paper", "light", "#fbf8f2", "#f2ece2", "#2d2822", "#a4542a", "built-in"], ["Studio", "light", "#ffffff", "#f6f8fa", "#1f2328", "#0969da", "built-in"],
+  ["Ink", "dark", "#0e1013", "#08090b", "#e9e7e4", "#5eead4", "built-in"], ["Solarized", "light + dark", "#fdf6e3", "#eee8d5", "#586e75", "#268bd2", "yours"],
+  ["Paper (copy)", "light", "#fbf8f2", "#f2ece2", "#2d2822", "#b04a1c", "yours"],
+];
+document.querySelector("[data-cards]").innerHTML = themes.map(([n, v, bg, sb, tx, ac, src], i) => `
+  <div class="card ${i === 1 ? "on" : ""}"><div class="prev" style="background:${bg}"><div class="pg">
+    <div class="ln" style="background:${tx};width:60%;height:9px"></div><div class="ln" style="background:${tx};opacity:.35"></div><div class="ln" style="background:${tx};opacity:.35;width:80%"></div><div class="ln" style="background:${ac};width:35%"></div></div>
+    <div class="sb" style="background:${sb}"><div class="ln" style="background:${tx};opacity:.5;width:70%"></div><div class="ln" style="background:${ac};opacity:.6"></div><div class="ln" style="background:${tx};opacity:.3"></div></div></div>
+    <div class="meta"><b>${n}</b><span>${v}</span><span class="src">${src}</span></div></div>`).join("");
+</script>
+</body>
+</html>
