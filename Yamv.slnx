@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Yamv.App/Yamv.App.csproj" />
+    <Project Path="src/Yamv.Core/Yamv.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Yamv.Core.Tests/Yamv.Core.Tests.csproj" />
+  </Folder>
+</Solution>

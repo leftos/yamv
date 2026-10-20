@@ -1,0 +1,9 @@
+bin/
+obj/
+.tmp/
+publish/
+.vs/
+.idea/
+*.user
+TestResults/
+.DS_Store
