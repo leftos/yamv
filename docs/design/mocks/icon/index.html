@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV app icon options</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 56px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1680px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 32px; font-size: 16px; max-width: 1300px; line-height: 1.5; }
+code { font: 500 .92em "JetBrains Mono V"; }
+section { margin-bottom: 48px; }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > h2 .tag { display: inline-block; width: 34px; height: 34px; line-height: 34px; text-align: center; border-radius: 8px;
+                    background: #fff; color: #0969da; margin-right: 12px; font-weight: 700; }
+section > p { color: #eef0f2; margin: 0 0 16px; font-size: 15px; max-width: 1300px; line-height: 1.5; }
+.row { display: flex; gap: 24px; align-items: stretch; margin-bottom: 20px; }
+.tile { flex: 1; border-radius: 12px; padding: 22px 26px 18px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.tile.light { background: #f6f8fa; color: #656d76; }
+.tile.dark { background: #0d1117; color: #8b949e; }
+.tile h3 { font: 600 13px "Inter V"; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 16px; }
+.sizes { display: flex; align-items: flex-end; gap: 26px; }
+.sizes figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.sizes figcaption { font: 500 11.5px "JetBrains Mono V"; }
+.sizes img { display: block; }
+.zoom { image-rendering: pixelated; width: 96px; height: 96px; }
+.sep { width: 1px; align-self: stretch; background: currentColor; opacity: .25; }
+
+.strip-label { font: 600 13px "Inter V"; color: #fff; margin: 0 0 8px; }
+.strip-label small { font-weight: 450; color: #e3e6e9; margin-left: 8px; }
+.taskbar { height: 48px; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 0; }
+.taskbar.light { background: #eef1f5; border-top: 1px solid #d8dee4; }
+.taskbar.dark { background: #1c1c1c; border-top: 1px solid #2b2b2b; }
+.tb-slot { width: 44px; height: 44px; border-radius: 6px; display: grid; place-items: center; position: relative; }
+.tb-slot.active.light { background: #fbfcfd; box-shadow: 0 0 0 1px #e1e5ea; }
+.tb-slot.active.dark { background: #2c2c2c; }
+.tb-slot.active::after { content: ""; position: absolute; bottom: 2px; left: 15px; width: 14px; height: 3px; border-radius: 2px; background: #0969da; }
+.tb-slot.dark.active::after { background: #4cc2ff; }
+.ph-win { width: 32px; height: 32px; border-radius: 7px; }
+.ph-win.p1 { background: linear-gradient(#9aa3ad, #6e7781); }
+.ph-win.p2 { background: linear-gradient(#c3c9d0, #9aa3ad); }
+.ph-win.p2::after { content: ""; display: block; margin: 9px; width: 14px; height: 14px; border-radius: 50%; background: #eef1f5; opacity: .9; }
+.ph-win.p1::after { content: ""; display: block; margin: 10px 8px; width: 16px; height: 12px; border-radius: 2px; background: #eef1f5; opacity: .85; }
+.titlebar { height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 12px; font: 400 12px "Segoe UI", "Inter V"; }
+.titlebar.light { background: #fff; color: #1f2328; border-bottom: 1px solid #d8dee4; }
+.titlebar.dark { background: #202020; color: #e6edf3; border-bottom: 1px solid #2b2b2b; }
+.win-pair { display: flex; gap: 24px; }
+.win-pair > div { flex: 1; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.win-pair .desk { height: 40px; }
+.win-pair .light .desk { background: #dfe6ee; }
+.win-pair .dark .desk { background: #101418; }
+
+.dock-pair { display: flex; gap: 24px; }
+.dock-wrap { flex: 1; height: 112px; border-radius: 12px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;
+             box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.dock-wrap.light { background: linear-gradient(#c9d6e6, #e6ecf3); }
+.dock-wrap.dark { background: linear-gradient(#1b2330, #0d1117); }
+.dock { display: flex; gap: 0; padding: 4px 6px 6px; border-radius: 20px; }
+.dock-wrap.light .dock { background: rgba(255,255,255,.55); box-shadow: inset 0 0 0 1px rgba(255,255,255,.7), 0 4px 16px rgba(0,0,0,.12); }
+.dock-wrap.dark .dock { background: rgba(60,64,72,.55); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 4px 16px rgba(0,0,0,.4); }
+.dock-item { width: 64px; height: 64px; position: relative; display: grid; place-items: center; }
+.dock-item.running::after { content: ""; position: absolute; bottom: -4px; left: 30px; width: 4px; height: 4px; border-radius: 50%; }
+.dock-wrap.light .dock-item.running::after { background: #1f2328; }
+.dock-wrap.dark .dock-item.running::after { background: #e6edf3; }
+.ph-mac { width: 51.5px; height: 51.5px; border-radius: 11.6px; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.ph-mac.p1 { background: linear-gradient(#b4bcc6, #7d8590); }
+.ph-mac.p2 { background: linear-gradient(#f2f4f6, #d0d6dc); }
+.ph-mac.p1::after { content: ""; display: block; margin: 14px 12px; width: 27px; height: 22px; border-radius: 3px; background: #f6f8fa; opacity: .85; }
+.ph-mac.p2::after { content: ""; display: block; margin: 13px; width: 25px; height: 25px; border-radius: 50%; border: 4px solid #8c959f; }
+.note { font-size: 13.5px; color: #eef0f2; margin: 12px 0 0; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV app icon: three options</h1>
+<p class="page">Each option is one 1024 px master on the macOS Big Sur grid (an 824 px rounded body, 100 px margin). The
+sizes row is that master rasterized at 256, 64, 32 and 16 px, then the 16 px icon magnified six times, for the macOS art and
+for the Windows art. Windows uses the same art with the body cropped to fill the square (<code>viewBox="100 100 824 824"</code>),
+so the title bar and taskbar below show that crop. Studio light palette: accent <code>#0969da</code>, accent-soft
+<code>#b6d4f5</code>, line <code>#d8dee4</code>.</p>
+<section id="option-a">
+<h2><span class="tag">A</span>md monogram</h2>
+<p>The accent rounded square from the chrome mock, carrying a bold white <code>md</code> in JetBrains Mono ExtraBold (outlined to paths), letters pulled together. The same mark the empty state draws dashed, made solid. Master: <code>option-a.svg</code>.</p>
+<div class="row"><div class="tile light"><h3>Light, #f6f8fa</h3><div class="sizes"><figure><img src="option-a-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure><figure><img src="option-a-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure><figure><img src="option-a-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure><figure><img src="option-a-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure><div class="sep"></div><figure><img class="zoom" src="option-a-16.png" alt=""><figcaption>16 mac &times;6</figcaption></figure><figure><img class="zoom" src="option-a-win-16.png" alt=""><figcaption>16 win &times;6</figcaption></figure></div></div><div class="tile dark"><h3>Dark, #0d1117</h3><div class="sizes"><figure><img src="option-a-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure><figure><img src="option-a-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure><figure><img src="option-a-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure><figure><img src="option-a-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure><div class="sep"></div><figure><img class="zoom" src="option-a-16.png" alt=""><figcaption>16 mac &times;6</figcaption></figure><figure><img class="zoom" src="option-a-win-16.png" alt=""><figcaption>16 win &times;6</figcaption></figure></div></div></div>
+<p class="strip-label">Windows<small>title bar at 16 px, taskbar at 32 px, between two placeholder apps</small></p>
+<div class="win-pair"><div class="light"><div class="titlebar light"><img src="option-a-win-16.png" width="16" height="16" alt="">README.md &ndash; YAMV</div><div class="desk"></div><div class="taskbar light"><div class="tb-slot light"><div class="ph-win p1"></div></div><div class="tb-slot light active"><img src="option-a-win-32.png" width="32" height="32" alt=""></div><div class="tb-slot light"><div class="ph-win p2"></div></div></div></div><div class="dark"><div class="titlebar dark"><img src="option-a-win-16.png" width="16" height="16" alt="">README.md &ndash; YAMV</div><div class="desk"></div><div class="taskbar dark"><div class="tb-slot dark"><div class="ph-win p1"></div></div><div class="tb-slot dark active"><img src="option-a-win-32.png" width="32" height="32" alt=""></div><div class="tb-slot dark"><div class="ph-win p2"></div></div></div></div></div>
+<p class="strip-label" style="margin-top:20px">macOS Dock<small>64 px with the Big Sur grid margin, between two placeholder apps</small></p>
+<div class="dock-pair"><div class="dock-wrap light"><div class="dock"><div class="dock-item"><div class="ph-mac p1"></div></div><div class="dock-item running"><img src="option-a-64.png" width="64" height="64" alt=""></div><div class="dock-item"><div class="ph-mac p2"></div></div></div></div><div class="dock-wrap dark"><div class="dock"><div class="dock-item"><div class="ph-mac p1"></div></div><div class="dock-item running"><img src="option-a-64.png" width="64" height="64" alt=""></div><div class="dock-item"><div class="ph-mac p2"></div></div></div></div></div>
+</section>
+<section id="option-b">
+<h2><span class="tag">B</span>Page with a heading mark</h2>
+<p>A white page with a folded corner on the accent square, a bold accent <code>#</code> (the markdown heading mark, JetBrains Mono ExtraBold outlined) and two text lines. Says &ldquo;a document&rdquo; first, &ldquo;markdown&rdquo; second. Master: <code>option-b.svg</code>.</p>
+<div class="row"><div class="tile light"><h3>Light, #f6f8fa</h3><div class="sizes"><figure><img src="option-b-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure><figure><img src="option-b-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure><figure><img src="option-b-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure><figure><img src="option-b-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure><div class="sep"></div><figure><img class="zoom" src="option-b-16.png" alt=""><figcaption>16 mac &times;6</figcaption></figure><figure><img class="zoom" src="option-b-win-16.png" alt=""><figcaption>16 win &times;6</figcaption></figure></div></div><div class="tile dark"><h3>Dark, #0d1117</h3><div class="sizes"><figure><img src="option-b-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure><figure><img src="option-b-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure><figure><img src="option-b-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure><figure><img src="option-b-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure><div class="sep"></div><figure><img class="zoom" src="option-b-16.png" alt=""><figcaption>16 mac &times;6</figcaption></figure><figure><img class="zoom" src="option-b-win-16.png" alt=""><figcaption>16 win &times;6</figcaption></figure></div></div></div>
+<p class="strip-label">Windows<small>title bar at 16 px, taskbar at 32 px, between two placeholder apps</small></p>
+<div class="win-pair"><div class="light"><div class="titlebar light"><img src="option-b-win-16.png" width="16" height="16" alt="">README.md &ndash; YAMV</div><div class="desk"></div><div class="taskbar light"><div class="tb-slot light"><div class="ph-win p1"></div></div><div class="tb-slot light active"><img src="option-b-win-32.png" width="32" height="32" alt=""></div><div class="tb-slot light"><div class="ph-win p2"></div></div></div></div><div class="dark"><div class="titlebar dark"><img src="option-b-win-16.png" width="16" height="16" alt="">README.md &ndash; YAMV</div><div class="desk"></div><div class="taskbar dark"><div class="tb-slot dark"><div class="ph-win p1"></div></div><div class="tb-slot dark active"><img src="option-b-win-32.png" width="32" height="32" alt=""></div><div class="tb-slot dark"><div class="ph-win p2"></div></div></div></div></div>
+<p class="strip-label" style="margin-top:20px">macOS Dock<small>64 px with the Big Sur grid margin, between two placeholder apps</small></p>
+<div class="dock-pair"><div class="dock-wrap light"><div class="dock"><div class="dock-item"><div class="ph-mac p1"></div></div><div class="dock-item running"><img src="option-b-64.png" width="64" height="64" alt=""></div><div class="dock-item"><div class="ph-mac p2"></div></div></div></div><div class="dock-wrap dark"><div class="dock"><div class="dock-item"><div class="ph-mac p1"></div></div><div class="dock-item running"><img src="option-b-64.png" width="64" height="64" alt=""></div><div class="dock-item"><div class="ph-mac p2"></div></div></div></div></div>
+</section>
+<section id="option-c">
+<h2><span class="tag">C</span>Page beside a tree</h2>
+<p>The app&rsquo;s own layout in miniature: a page on the left with an accent heading bar, and on the right a tree trunk with a group header and three rows, the selected one in accent. Graphite body so the white page carries it. Master: <code>option-c.svg</code>.</p>
+<div class="row"><div class="tile light"><h3>Light, #f6f8fa</h3><div class="sizes"><figure><img src="option-c-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure><figure><img src="option-c-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure><figure><img src="option-c-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure><figure><img src="option-c-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure><div class="sep"></div><figure><img class="zoom" src="option-c-16.png" alt=""><figcaption>16 mac &times;6</figcaption></figure><figure><img class="zoom" src="option-c-win-16.png" alt=""><figcaption>16 win &times;6</figcaption></figure></div></div><div class="tile dark"><h3>Dark, #0d1117</h3><div class="sizes"><figure><img src="option-c-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure><figure><img src="option-c-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure><figure><img src="option-c-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure><figure><img src="option-c-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure><div class="sep"></div><figure><img class="zoom" src="option-c-16.png" alt=""><figcaption>16 mac &times;6</figcaption></figure><figure><img class="zoom" src="option-c-win-16.png" alt=""><figcaption>16 win &times;6</figcaption></figure></div></div></div>
+<p class="strip-label">Windows<small>title bar at 16 px, taskbar at 32 px, between two placeholder apps</small></p>
+<div class="win-pair"><div class="light"><div class="titlebar light"><img src="option-c-win-16.png" width="16" height="16" alt="">README.md &ndash; YAMV</div><div class="desk"></div><div class="taskbar light"><div class="tb-slot light"><div class="ph-win p1"></div></div><div class="tb-slot light active"><img src="option-c-win-32.png" width="32" height="32" alt=""></div><div class="tb-slot light"><div class="ph-win p2"></div></div></div></div><div class="dark"><div class="titlebar dark"><img src="option-c-win-16.png" width="16" height="16" alt="">README.md &ndash; YAMV</div><div class="desk"></div><div class="taskbar dark"><div class="tb-slot dark"><div class="ph-win p1"></div></div><div class="tb-slot dark active"><img src="option-c-win-32.png" width="32" height="32" alt=""></div><div class="tb-slot dark"><div class="ph-win p2"></div></div></div></div></div>
+<p class="strip-label" style="margin-top:20px">macOS Dock<small>64 px with the Big Sur grid margin, between two placeholder apps</small></p>
+<div class="dock-pair"><div class="dock-wrap light"><div class="dock"><div class="dock-item"><div class="ph-mac p1"></div></div><div class="dock-item running"><img src="option-c-64.png" width="64" height="64" alt=""></div><div class="dock-item"><div class="ph-mac p2"></div></div></div></div><div class="dock-wrap dark"><div class="dock"><div class="dock-item"><div class="ph-mac p1"></div></div><div class="dock-item running"><img src="option-c-64.png" width="64" height="64" alt=""></div><div class="dock-item"><div class="ph-mac p2"></div></div></div></div></div>
+</section>
+</body>
+</html>

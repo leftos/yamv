@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>YAMV icon, option B: page with a heading mark</title>
+<defs>
+  <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#2f86eb"/>
+    <stop offset="1" stop-color="#0550ae"/>
+  </linearGradient>
+  <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+    <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+  </linearGradient>
+</defs>
+
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+<path d="M312,196 H602 L752,346 V788 Q752,828 712,828 H312 Q272,828 272,788 V236 Q272,196 312,196 Z" fill="#ffffff"/>
+<path d="M602,196 V318 Q602,346 630,346 H752 Z" fill="#b6d4f5"/>
+<path transform="translate(386.0 623.3) scale(0.4200)" fill="#0969da" d="M70 0 99 -170H20V-270H116L149 -460H50V-560H166L195 -730H300L271 -560H396L425 -730H530L501 -560H580V-460H484L451 -270H550V-170H434L405 0H300L329 -170H204L175 0ZM221 -270H346L379 -460H254Z"/>
+<rect x="342" y="678" width="340" height="34" rx="17" fill="#d8dee4"/>
+<rect x="342" y="736" width="211" height="34" rx="17" fill="#d8dee4"/>
+</svg>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>YAMV icon, option C: page beside a tree</title>
+<defs>
+  <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#3a424c"/>
+    <stop offset="1" stop-color="#1b1f24"/>
+  </linearGradient>
+  <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+    <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+  </linearGradient>
+</defs>
+
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+<rect x="106" y="106" width="812" height="812" rx="179" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="12"/>
+<rect x="196" y="236" width="372" height="552" rx="40" fill="#ffffff"/>
+<rect x="250" y="300" width="230" height="56" rx="18" fill="#0969da"/>
+<rect x="250" y="410" width="264" height="30" rx="15" fill="#d8dee4"/>
+<rect x="250" y="476" width="264" height="30" rx="15" fill="#d8dee4"/>
+<rect x="250" y="542" width="200" height="30" rx="15" fill="#d8dee4"/>
+<rect x="250" y="608" width="240" height="30" rx="15" fill="#d8dee4"/>
+<rect x="250" y="674" width="160" height="30" rx="15" fill="#d8dee4"/>
+<path d="M650,300 V700 M650,420 H690 M650,560 H690 M650,700 H690" stroke="#8c959f" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="626" y="250" width="200" height="52" rx="18" fill="#c9d1d9"/>
+<rect x="708" y="394" width="118" height="52" rx="18" fill="#c9d1d9"/>
+<rect x="708" y="534" width="118" height="52" rx="18" fill="#0969da"/>
+<rect x="708" y="674" width="118" height="52" rx="18" fill="#c9d1d9"/>
+</svg>

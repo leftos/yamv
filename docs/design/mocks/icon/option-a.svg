@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>YAMV icon, option A: md monogram</title>
+<defs>
+  <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#2f86eb"/>
+    <stop offset="1" stop-color="#0550ae"/>
+  </linearGradient>
+  <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+    <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+  </linearGradient>
+</defs>
+
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+<path transform="translate(194.0 723.6) scale(0.5600)" fill="#ffffff" d="M42 0V-550H160V-470H184L165 -456Q165 -503 192.0 -531.5Q219 -560 259 -560Q302 -560 326.0 -523.0Q350 -486 350 -425L332 -470H360L351 -456Q351 -503 377.0 -531.5Q403 -560 447 -560Q497 -560 528.0 -522.5Q559 -485 559 -420V0H430V-410Q430 -433 420.0 -445.5Q410 -458 391 -458Q372 -458 362.0 -445.5Q352 -433 352 -410V0H249V-410Q249 -433 239.0 -445.5Q229 -458 210 -458Q191 -458 181.0 -445.5Q171 -433 171 -410V0Z"/>
+<path transform="translate(507.4 723.6) scale(0.5600)" fill="#ffffff" d="M243 10Q160 10 110.0 -48.0Q60 -106 60 -205V-345Q60 -443 110.0 -501.5Q160 -560 243 -560Q311 -560 350.0 -520.5Q389 -481 389 -410L354 -445H389L384 -580V-730H534V0H389V-105H354L389 -140Q389 -69 350.0 -29.5Q311 10 243 10ZM297 -120Q338 -120 361.0 -143.5Q384 -167 384 -210V-340Q384 -383 361.0 -406.5Q338 -430 297 -430Q255 -430 232.5 -406.5Q210 -383 210 -340V-210Q210 -167 232.5 -143.5Q255 -120 297 -120Z"/>
+</svg>
