@@ -26,4 +26,6 @@ YAMV (Yet Another Markdown Viewer) is a Windows + macOS markdown viewer in C# on
 
 ## Backlog
 
-(none)
+- [ ] macOS: put the instance pipe at an absolute path under the data folder (`.NET` accepts an absolute pipe name on Unix, `PipeStream.Unix.cs:199-210`), so a terminal launch with a user-set `TMPDIR` still finds a main instance started from Finder (`src/Yamv.Core/Instance/InstanceCoordinator.cs` `DefaultPipeName`; review of 20caedf)
+- [ ] Windows: hash the account SID instead of `Environment.UserName` into the pipe name, so two accounts with the same short name (local vs domain) don't collide on server creation (`InstanceCoordinator.DefaultPipeName`; review of 20caedf)
+- [ ] Tests: fold the three fake logs (`CaptureLog` in GitRootFinderTests, `RecordingAppLog`, the instance tests' recorder) into one thread-safe recorder in `tests/Yamv.Core.Tests/` (review of 0b8431b–20caedf)
