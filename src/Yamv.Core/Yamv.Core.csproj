@@ -9,6 +9,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Theming\BuiltIn\*.yamv-theme.json" LogicalName="Yamv.Core.Theming.BuiltIn.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Yamv.Core.Tests" />
   </ItemGroup>
 </Project>

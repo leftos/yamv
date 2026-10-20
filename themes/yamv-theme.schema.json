@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leftos/yamv/main/themes/yamv-theme.schema.json",
+  "title": "YAMV theme",
+  "description": "A YAMV theme family, <id>.yamv-theme.json. The format is described in docs/design/themes.md.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "formatVersion": { "const": 1, "description": "The theme file format version." },
+    "name": { "type": "string", "pattern": "\\S", "description": "The name shown in the theme list." },
+    "author": { "type": "string" },
+    "description": { "type": "string" },
+    "tokens": { "$ref": "#/$defs/tokens", "description": "Tokens shared by both variants." },
+    "css": { "$ref": "#/$defs/css" },
+    "light": { "$ref": "#/$defs/variant", "description": "The light variant." },
+    "dark": { "$ref": "#/$defs/variant", "description": "The dark variant." }
+  },
+  "required": ["name"],
+  "anyOf": [{ "required": ["light"] }, { "required": ["dark"] }],
+  "additionalProperties": false,
+  "$defs": {
+    "color": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+    },
+    "font": { "type": "string", "pattern": "\\S" },
+    "css": {
+      "type": "string",
+      "description": "CSS appended to the document page after YAMV's own stylesheet. Tokens are readable as var(--yamv-<kebab-case-name>)."
+    },
+    "variant": {
+      "type": "object",
+      "properties": {
+        "tokens": { "$ref": "#/$defs/tokens", "description": "Tokens for this variant; they override the shared ones." },
+        "css": { "$ref": "#/$defs/css" }
+      },
+      "additionalProperties": false
+    },
+    "tokens": {
+      "type": "object",
+      "description": "Theme tokens. YAMV ignores an unknown token with a warning.",
+      "properties": {
+        "pageBackground": { "$ref": "#/$defs/color", "description": "Colour: document background." },
+        "text": { "$ref": "#/$defs/color", "description": "Colour: body text." },
+        "textSecondary": { "$ref": "#/$defs/color", "description": "Colour: tree rows, secondary text." },
+        "textMuted": { "$ref": "#/$defs/color", "description": "Colour: captions, folder rows, table headers, blockquotes." },
+        "heading": { "$ref": "#/$defs/color", "description": "Colour: h1–h6." },
+        "accent": { "$ref": "#/$defs/color", "description": "Colour: links, selection bar, checkboxes, primary buttons." },
+        "accentSoft": { "$ref": "#/$defs/color", "description": "Colour: link underline, focus ring, badge border." },
+        "line": { "$ref": "#/$defs/color", "description": "Colour: hairlines, table rules, borders." },
+        "quote": { "$ref": "#/$defs/color", "description": "Colour: blockquote bar." },
+        "chromeBackground": { "$ref": "#/$defs/color", "description": "Colour: title bar, dialog footers." },
+        "sidebarBackground": { "$ref": "#/$defs/color", "description": "Colour: tree." },
+        "selectionBackground": { "$ref": "#/$defs/color", "description": "Colour: selected tree row." },
+        "selectionText": { "$ref": "#/$defs/color", "description": "Colour: selected tree row text." },
+        "hoverBackground": { "$ref": "#/$defs/color", "description": "Colour: hovered tree row." },
+        "warning": { "$ref": "#/$defs/color", "description": "Colour: MISSING tag text." },
+        "warningBackground": { "$ref": "#/$defs/color", "description": "Colour: MISSING tag fill." },
+        "warningLine": { "$ref": "#/$defs/color", "description": "Colour: MISSING tag border." },
+        "codeBackground": { "$ref": "#/$defs/color", "description": "Colour: inline and block code." },
+        "codeLine": { "$ref": "#/$defs/color", "description": "Colour: code block border." },
+        "findMatch": { "$ref": "#/$defs/color", "description": "Colour: find highlight." },
+        "findCurrent": { "$ref": "#/$defs/color", "description": "Colour: current find highlight." },
+        "syntaxKeyword": { "$ref": "#/$defs/color", "description": "Colour: keywords." },
+        "syntaxString": { "$ref": "#/$defs/color", "description": "Colour: strings." },
+        "syntaxComment": { "$ref": "#/$defs/color", "description": "Colour: comments." },
+        "syntaxType": { "$ref": "#/$defs/color", "description": "Colour: types, titles, functions." },
+        "syntaxNumber": { "$ref": "#/$defs/color", "description": "Colour: numbers, literals." },
+        "uiFont": { "$ref": "#/$defs/font", "description": "Font family: app chrome. Falls back to Inter." },
+        "bodyFont": { "$ref": "#/$defs/font", "description": "Font family: document body. Falls back to Inter." },
+        "headingFont": { "$ref": "#/$defs/font", "description": "Font family: headings. Falls back to Inter." },
+        "monoFont": { "$ref": "#/$defs/font", "description": "Font family: code. Falls back to JetBrains Mono." },
+        "bodySize": { "type": "number", "minimum": 10, "maximum": 32, "description": "Body font size, in px." },
+        "lineHeight": { "type": "number", "minimum": 1.0, "maximum": 2.5, "description": "Body line height, unitless." },
+        "h1Size": { "type": "number", "minimum": 1.0, "maximum": 4.0, "description": "h1 size, in em." },
+        "headingWeight": { "type": "number", "minimum": 100, "maximum": 900, "description": "h1/h2 weight." },
+        "h2Rule": { "type": "boolean", "description": "Rule under h2." }
+      },
+      "additionalProperties": false
+    }
+  }
+}

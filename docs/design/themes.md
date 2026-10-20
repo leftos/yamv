@@ -33,10 +33,17 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
 - A file must have at least one of `light` or `dark`.
 - **Resolution** for a variant: the default token values (Studio light for a light variant, Studio dark for a dark one), then the file's shared `tokens`, then the variant's `tokens`. The result always holds every token.
 - **Errors**:
-  - A file that won't parse, a colour that isn't `#rgb`, `#rrggbb` or `#rrggbbaa`, or a number out of range makes the theme invalid. It is listed with the error and can't be selected.
+  - A file that won't parse, a colour that isn't `#rgb`, `#rrggbb` or `#rrggbbaa`, a number out of range, a font name that is empty, only whitespace or holds a control character, or a token string that isn't valid text (an unpaired surrogate such as `"\ud800"`) makes the theme invalid. It is listed with the error and can't be selected.
   - An unknown token name is a warning; the token is ignored.
+  - An unknown field (`"Light"`, `"token"`) is a warning; the field is ignored. `$schema` is allowed.
+  - A `formatVersion` other than `1` is a warning, and so is one that isn't an integer (`2.0`, `"2"`); the file still loads.
+  - A user file with a built-in theme's id replaces the built-in when it is valid. When it is invalid, the built-in stays listed and the invalid file is listed beside it with its errors, so two entries share the id.
+  - Import never replaces a built-in or an existing user theme: a file whose id is taken is imported as `<id>-2`, `<id>-3`, and so on.
+  - A user file named like a Windows device (`con`, `prn`, `aux`, `nul`, `com1`, `lpt1`…, in any case, with or without a further extension, such as `con.yamv-theme.json`) is listed as invalid on every platform, with the error `"<file name>" uses a name Windows reserves for a device; rename the file.`
   - The app never falls back silently. If the selected theme turns invalid, the window keeps the last valid version and shows the error in the theme settings window.
 - `css` is appended to the document page after YAMV's own stylesheet. It styles the document only, not the app chrome. Scripts can't run in the page (the page's Content-Security-Policy blocks them), so `css` can't run code.
+
+  Theme css can make the page load images from the web (`url(https://…)` in CSS), which can reveal that you opened a document and which links it holds. Import a theme from someone you trust, as you would a browser extension's styles. The app shows a one-line notice saying so on Import.
 
 ## Tokens
 

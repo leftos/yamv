@@ -1,0 +1,85 @@
+{
+  "$schema": "https://raw.githubusercontent.com/leftos/yamv/main/themes/yamv-theme.schema.json",
+  "formatVersion": 1,
+  "name": "Ink",
+  "author": "YAMV",
+  "description": "Dark-first and high-contrast: mono headings with their markdown markers, teal and magenta accents.",
+
+  // Shared by both variants. Anything not listed takes the default (Studio) value.
+  "tokens": {
+    "headingFont": "JetBrains Mono",
+    "lineHeight": 1.68,
+    "h1Size": 1.85,
+    "h2Rule": false,
+  },
+
+  // Extra CSS for the document page, appended after YAMV's own stylesheet.
+  // Ink writes its heading markers and upper-case table headers here; var(--yamv-*) reads any token.
+  "css": "h1::before { content: \"# \"; color: var(--yamv-accent); }\nh2::before { content: \"## \"; color: var(--yamv-accent); }\nth { text-transform: uppercase; letter-spacing: .08em; }",
+
+  // Variants can come in any order; Ink is dark-first
+  "dark": {
+    "tokens": {
+      // Page
+      "pageBackground": "#0e1013",
+      "text": "#e9e7e4",
+      "textSecondary": "#c9c6c1",
+      "textMuted": "#8a8f98",
+      "heading": "#ffffff",
+      "accent": "#5eead4",
+      "accentSoft": "#1d4a44",
+      "line": "#23272e",
+      "quote": "#f0abfc",
+
+      // Chrome
+      "chromeBackground": "#08090b",
+      "sidebarBackground": "#08090b",
+      "selectionBackground": "#13302c",
+      "selectionText": "#ffffff",
+      "hoverBackground": "#15181c",
+
+      // Code
+      "codeBackground": "#15181d",
+      "codeLine": "#23272e",
+
+      // Syntax
+      "syntaxKeyword": "#f472b6",
+      "syntaxString": "#fcd34d",
+      "syntaxComment": "#6b7280",
+      "syntaxType": "#5eead4",
+    },
+  },
+
+  // The light variant
+  "light": {
+    "tokens": {
+      // Page
+      "pageBackground": "#f7f6f3",
+      "text": "#15171a",
+      "textSecondary": "#2a2d31",
+      "textMuted": "#6b6f76",
+      "heading": "#000000",
+      "accent": "#0d7c6c",
+      "accentSoft": "#a8dcd3",
+      "line": "#d9d6cf",
+      "quote": "#c026d3",
+
+      // Chrome
+      "chromeBackground": "#ecebe7",
+      "sidebarBackground": "#ecebe7",
+      "selectionBackground": "#d5ebe6",
+      "selectionText": "#062e28",
+      "hoverBackground": "#e2e0db",
+
+      // Code
+      "codeBackground": "#ecebe6",
+      "codeLine": "#dcd9d2",
+
+      // Syntax
+      "syntaxKeyword": "#be185d",
+      "syntaxString": "#92400e",
+      "syntaxComment": "#8b8f96",
+      "syntaxType": "#0d7c6c",
+    },
+  },
+}

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://raw.githubusercontent.com/leftos/yamv/main/themes/yamv-theme.schema.json",
+  "formatVersion": 1,
+  "name": "Paper",
+  "author": "YAMV",
+  "description": "Warm off-white, serif body set for long reading, rust accent.",
+
+  // Shared by both variants. Anything not listed takes the default (Studio) value.
+  "tokens": {
+    // Fonts are tried by name, then fall back to the bundled family for their role
+    "bodyFont": "Source Serif 4",
+    "headingFont": "Source Serif 4",
+
+    // Layout: bodySize in px, h1Size in em, lineHeight and headingWeight without a unit
+    "bodySize": 17.5,
+    "lineHeight": 1.65,
+    "h1Size": 2.1,
+    "headingWeight": 650,
+    "h2Rule": false,
+  },
+
+  // Extra CSS for the document page, appended after YAMV's own stylesheet
+  "css": "blockquote { font-style: italic; }",
+
+  // The light variant: its tokens override the shared ones
+  "light": {
+    "tokens": {
+      // Page
+      "pageBackground": "#fbf8f2",
+      "text": "#2d2822",
+      "textSecondary": "#4a4339",
+      "textMuted": "#8a7f70",
+      "heading": "#221d18",
+      "accent": "#a4542a",
+      "accentSoft": "#e6c3ad",
+      "line": "#e3dacb",
+      "quote": "#d9c4ad",
+
+      // Chrome
+      "chromeBackground": "#f2ece2",
+      "sidebarBackground": "#f2ece2",
+      "selectionBackground": "#e8dfd1",
+      "selectionText": "#2d2822",
+      "hoverBackground": "#ebe4d8",
+
+      // Code
+      "codeBackground": "#f1eadf",
+      "codeLine": "#e6dccc",
+
+      // Syntax
+      "syntaxKeyword": "#a4542a",
+      "syntaxString": "#557a3a",
+      "syntaxComment": "#9a8e7e",
+      "syntaxType": "#7a5c99",
+    },
+  },
+
+  // The dark variant
+  "dark": {
+    "tokens": {
+      // Page
+      "pageBackground": "#1d1a17",
+      "text": "#e7dfd3",
+      "textSecondary": "#cfc6b8",
+      "textMuted": "#988d7e",
+      "heading": "#f3ece2",
+      "accent": "#df9a6b",
+      "accentSoft": "#5b4130",
+      "line": "#332e28",
+      "quote": "#5b4a3a",
+
+      // Chrome
+      "chromeBackground": "#171512",
+      "sidebarBackground": "#171512",
+      "selectionBackground": "#2c2722",
+      "selectionText": "#f3ece2",
+      "hoverBackground": "#24201c",
+
+      // Code
+      "codeBackground": "#26221e",
+      "codeLine": "#322c26",
+
+      // Syntax
+      "syntaxKeyword": "#e6a274",
+      "syntaxString": "#a9c38c",
+      "syntaxComment": "#7d7366",
+      "syntaxType": "#c3a6e0",
+    },
+  },
+}

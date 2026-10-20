@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/leftos/yamv/main/themes/yamv-theme.schema.json",
+  "formatVersion": 1,
+  "name": "Studio",
+  "author": "YAMV",
+  "description": "Neutral and GitHub-like: Inter sans, crisp hairlines, ruled H2s and a blue accent.",
+
+  // Studio is the default theme: every token a theme file leaves out takes its Studio value
+  // (Studio light for a light variant, Studio dark for a dark one), so Studio itself sets nothing.
+  // Copy a token from paper.yamv-theme.json or ink.yamv-theme.json to see how a theme overrides one.
+
+  // An empty variant still counts: it says the theme has a light half
+  "light": {},
+
+  // ...and a dark half
+  "dark": {}
+}
