@@ -66,9 +66,9 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
   - Tests cover: nested repos (a submodule wins), worktree `.git` files, a file at the repo root, mixed repo and non-repo files, two repos with the same name (disambiguated by parent folder), and drive roots.
 - `SessionStore`: JSON at `%APPDATA%\YAMV\session.json` or `~/Library/Application Support/YAMV/session.json`. It holds the open paths, the selected doc, per-doc scroll fraction, window bounds, sidebar width, collapsed groups and theme. Saves are debounced and written atomically (temp file + replace). A corrupt file is logged and moved to `session.json.bad`, never silently replaced by defaults. Uses System.Text.Json source generation (AOT/trim-safe).
 - `InstanceCoordinator`:
-  - `TryBecomeMain()` takes the lock file;
-  - on failure, `SignalMain("activate")` sends the message over the pipe and the process exits;
-  - the main instance runs the pipe server and raises `ActivateRequested`.
+  - `TryAcquireMainLock()` takes the lock file;
+  - on failure, the static `SignalAsync(pipeName, "activate", timeout, log)` sends the message over the pipe and the process exits;
+  - the main instance runs the pipe server with `StartServer(onMessage)`.
   - Viewer launches (with file args) skip the coordinator entirely.
   - Tests run two coordinators in-process with unique names.
 - `LaunchOptions.Parse(args)` → `Main` | `Viewer(files)` | `Register` | `Unregister`. Missing or non-file args produce a clear error. Relative paths are resolved against the cwd.

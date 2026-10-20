@@ -6,6 +6,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
 | Task | Files, in order | Deep doc |
 |---|---|---|
+| Change how the main instance is held or signalled | `src/Yamv.Core/Instance/InstanceCoordinator.cs` → `ServerFailureLog.cs` → `InstanceMessages.cs` → `tests/Yamv.Core.Tests/Instance/` | |
 | Change how documents are grouped in the tree | `src/Yamv.Core/Grouping/` → `tests/Yamv.Core.Tests/Grouping/` | |
 | Change the theme file format, a token, or a built-in theme | `src/Yamv.Core/Theming/ThemeTokens.cs` → `ThemeParser.cs` → `ThemeSerializer.cs` → `themes/yamv-theme.schema.json` → `src/Yamv.Core/Theming/BuiltIn/` → `tests/Yamv.Core.Tests/Theming/` | [themes.md](design/themes.md) |
 | Change how a document looks or behaves in the page (rendering, find, links, images) | `src/Yamv.App/Web/yamv.js` → `Web/yamv.css` → `Web/template.html` → `src/Yamv.App/Controls/DocumentView.cs` → `tools/dev/page-check/` | |
@@ -26,6 +27,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 - The page and the host speak by message name: `Web/yamv.js` posts `ready`, `rendered`, `scroll`, `link`, `key`, `find`, `blocked` and `error`, which `DocumentView`'s message handler switches on, and the host calls the `window.yamv` functions `render`, `setTheme`, `setContentWidth`, `find`, `clearFind` and `openFind`. A rename changes both sides, and the `RenderOptions` fields match the `settings.*` names the page reads.
 - Core's renderer marks diagrams as `<pre class="mermaid">` and puts `data-line` on the `code` element of a fenced block; the page's diagram loader and scroll restore read those.
 - The web view swallows Ctrl/Cmd shortcuts while it has focus; the page forwards them as `key` messages (`KeyForwarded`), so a window shortcut is handled in both `KeyDown` and `KeyForwarded`.
+- `InstanceCoordinator.StartServer`'s handler runs on a thread-pool thread: the App posts to the UI thread and never blocks in it (a `Dispose` from inside it waits out its own 5 s bound). `SignalAsync` returning true means the main instance read the frame on Windows, but only that the frame reached the socket's send buffer on Unix.
 - `ThemeCatalog.LoadAll` can list two entries with one id (an invalid user file beside the built-in it shadows): look a theme up by id preferring the valid entry.
 
 ## Test locations
