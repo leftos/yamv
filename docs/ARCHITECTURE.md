@@ -6,6 +6,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
 | Task | Files, in order | Deep doc |
 |---|---|---|
+| Change what a window holds, selects or closes, or what the title bar says | `src/Yamv.Core/Documents/DocumentWindowState.cs` → `DocumentTree.cs` → `TitleText.cs` → `tests/Yamv.Core.Tests/Documents/` | [look.md](design/look.md) |
+| Change what is saved between runs | `src/Yamv.Core/Session/SessionState.cs` → `SessionSnapshot.cs` → `SessionStore.cs` → `Debouncer.cs` → `tests/Yamv.Core.Tests/Session/` | |
 | Change what a launch, Finder open, Dock click or `activate` opens | `src/Yamv.Core/Launch/LaunchArbiter.cs` → `ActivationGate.cs` → `tests/Yamv.Core.Tests/Launch/` | |
 | Change how the main instance is held or signalled | `src/Yamv.Core/Instance/InstanceCoordinator.cs` → `ServerFailureLog.cs` → `InstanceMessages.cs` → `tests/Yamv.Core.Tests/Instance/` | |
 | Change how documents are grouped in the tree | `src/Yamv.Core/Grouping/` → `tests/Yamv.Core.Tests/Grouping/` | |
