@@ -75,7 +75,7 @@ public static class LaunchOptions
 
         if (missing.Count > 0)
         {
-            return new InvalidLaunch(string.Join(Environment.NewLine, missing.Select(path => $"File not found: {path}")));
+            return new InvalidLaunch(string.Join("\n", missing.Select(path => $"File not found: {path}")));
         }
 
         return new ViewerLaunch(files);

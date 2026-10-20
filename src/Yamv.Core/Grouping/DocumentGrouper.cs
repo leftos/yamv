@@ -66,7 +66,7 @@ public static class DocumentGrouper
         StringComparer nameComparer = StringComparer.OrdinalIgnoreCase;
         var names = groups.ToDictionary(group => group, group => BaseName(group, options));
         foreach (
-            IGrouping<string, KeyValuePair<GroupBuilder, string>>? cluster in names
+            IGrouping<string, KeyValuePair<GroupBuilder, string>> cluster in names
                 .GroupBy(pair => pair.Value, nameComparer)
                 .Where(cluster => cluster.Count() > 1)
                 .ToList()
@@ -80,7 +80,7 @@ public static class DocumentGrouper
 
             List<KeyValuePair<GroupBuilder, string>> candidateList = [.. candidates];
             foreach (
-                IGrouping<string, KeyValuePair<GroupBuilder, string>>? clash in candidateList
+                IGrouping<string, KeyValuePair<GroupBuilder, string>> clash in candidateList
                     .GroupBy(pair => pair.Value, nameComparer)
                     .Where(clash => clash.Count() > 1)
                     .ToList()
@@ -95,6 +95,19 @@ public static class DocumentGrouper
             foreach (KeyValuePair<GroupBuilder, string> pair in candidates)
             {
                 names[pair.Key] = pair.Value;
+            }
+        }
+
+        foreach (
+            IGrouping<string, KeyValuePair<GroupBuilder, string>> clash in names
+                .GroupBy(pair => pair.Value, nameComparer)
+                .Where(clash => clash.Count() > 1)
+                .ToList()
+        )
+        {
+            foreach (KeyValuePair<GroupBuilder, string> pair in clash)
+            {
+                names[pair.Key] = DisplayPath(pair.Key.RootPath, options);
             }
         }
 
@@ -139,7 +152,7 @@ public static class DocumentGrouper
             return "~";
         }
 
-        string prefix = Path.EndsInDirectorySeparator(trimmedHome) ? trimmedHome : trimmedHome + Path.DirectorySeparatorChar;
+        string prefix = trimmedHome + Path.DirectorySeparatorChar;
         return path.StartsWith(prefix, options.PathComparison) ? "~" + path[trimmedHome.Length..] : path;
     }
 

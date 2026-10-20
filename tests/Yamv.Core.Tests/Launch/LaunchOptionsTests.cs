@@ -107,7 +107,7 @@ public sealed class LaunchOptionsTests
     {
         InvalidLaunch invalid = Assert.IsType<InvalidLaunch>(LaunchOptions.Parse(["one.md", "two.md"], WorkDirectory, _ => false));
 
-        string[] lines = invalid.Message.Split(Environment.NewLine);
+        string[] lines = invalid.Message.Split('\n');
         Assert.Equal(2, lines.Length);
         Assert.Equal($"File not found: {Full("one.md")}", lines[0]);
         Assert.Equal($"File not found: {Full("two.md")}", lines[1]);

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Runtime.Versioning;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Grouping;
 
@@ -82,6 +84,47 @@ public sealed class GitRootFinderTests : IDisposable
         Assert.NotEqual(repo, fresh.FindWorkTreeRoot(second));
     }
 
+    [Fact]
+    public void FindWorkTreeRoot_UnreadableFolder_LogsWarningAndProbesAgain()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            RunUnreadableFolderCase();
+            return;
+        }
+
+        Assert.Skip("Unix file modes are needed to make a folder unreadable.");
+    }
+
+    [UnsupportedOSPlatform("windows")]
+    private void RunUnreadableFolderCase()
+    {
+        CaptureLog log = new();
+        GitRootFinder probing = new(log);
+        string repo = CreateGitDirectory("repo");
+        string locked = CreateDirectory("repo", "locked");
+        string file = WriteFile(locked, "x.md");
+
+        try
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.None);
+            string? answer = probing.FindWorkTreeRoot(file);
+            if (log.WarningCount == 0)
+            {
+                Assert.Skip("The process can read a folder with no permissions, so no probe fails.");
+            }
+
+            Assert.Equal(repo, answer);
+            Assert.Equal(repo, probing.FindWorkTreeRoot(file));
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Assert.Equal(2, log.WarningCount);
+    }
+
     private string CreateDirectory(params string[] parts) => Directory.CreateDirectory(Path.Combine(tempRoot, Path.Combine(parts))).FullName;
 
     private string CreateGitDirectory(string name)
@@ -101,9 +144,13 @@ public sealed class GitRootFinderTests : IDisposable
 
     private sealed class CaptureLog : IAppLog
     {
+        private readonly ConcurrentQueue<string> warnings = new();
+
+        public int WarningCount => warnings.Count;
+
         public void LogInfo(string message) { }
 
-        public void LogWarning(string message, Exception? exception = null) { }
+        public void LogWarning(string message, Exception? exception = null) => warnings.Enqueue(message);
 
         public void LogError(string message, Exception? exception = null) { }
     }

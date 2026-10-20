@@ -3,7 +3,10 @@ using Yamv.Core.Diagnostics;
 
 namespace Yamv.Core.Grouping;
 
-/// <summary>Finds the git work-tree root that contains a file, by walking up from the file's folder.</summary>
+/// <summary>
+/// Finds the git work-tree root that contains a file, by walking up from the file's folder. The cache never sees a later
+/// <c>git init</c> or a deleted <c>.git</c>, so a folder the finder has already answered for keeps its cached answer.
+/// </summary>
 /// <param name="log">Where a folder that cannot be probed is reported.</param>
 public sealed class GitRootFinder(IAppLog log)
 {
@@ -23,6 +26,7 @@ public sealed class GitRootFinder(IAppLog log)
         }
 
         string? root = null;
+        bool probeFailed = false;
         List<string> visited = [];
         for (string? current = directory; current is not null; current = Directory.GetParent(current)?.FullName)
         {
@@ -32,23 +36,29 @@ public sealed class GitRootFinder(IAppLog log)
             }
 
             visited.Add(current);
-            if (HasGitEntry(current))
+            bool hasGit = HasGitEntry(current, out bool failed);
+            probeFailed |= failed;
+            if (hasGit)
             {
                 root = Path.TrimEndingDirectorySeparator(current);
                 break;
             }
         }
 
-        foreach (string visitedDirectory in visited)
+        if (!probeFailed)
         {
-            knownRoots[visitedDirectory] = root;
+            foreach (string visitedDirectory in visited)
+            {
+                knownRoots[visitedDirectory] = root;
+            }
         }
 
         return root;
     }
 
-    private bool HasGitEntry(string directory)
+    private bool HasGitEntry(string directory, out bool failed)
     {
+        failed = false;
         try
         {
             File.GetAttributes(Path.Combine(directory, ".git"));
@@ -64,11 +74,13 @@ public sealed class GitRootFinder(IAppLog log)
         }
         catch (UnauthorizedAccessException exception)
         {
+            failed = true;
             log.LogWarning($"Cannot read '{directory}' while looking for a git repository.", exception);
             return false;
         }
         catch (IOException exception)
         {
+            failed = true;
             log.LogWarning($"Cannot read '{directory}' while looking for a git repository.", exception);
             return false;
         }

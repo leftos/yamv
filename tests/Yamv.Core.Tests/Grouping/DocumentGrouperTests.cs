@@ -171,6 +171,91 @@ public sealed class DocumentGrouperTests
     }
 
     [Fact]
+    public void Group_FileInDriveRoot_IsItsOwnGroup()
+    {
+        string file = P("README.md");
+
+        IReadOnlyList<GroupNode> groups = DocumentGrouper.Group([file], NoRepository, Plain);
+
+        Assert.Equal($"{PlatformRoot}\n  README.md\n", Render(groups));
+    }
+
+    [Fact]
+    public void Group_PathsDifferingOnlyInCase_AreDeduplicatedWhenComparisonIgnoresCase()
+    {
+        string repo = P("dev", "yamv");
+        string spelledUpper = Path.Combine(repo, "README.md");
+        string spelledLower = Path.Combine(repo, "readme.md");
+
+        IReadOnlyList<GroupNode> groups = DocumentGrouper.Group(
+            [spelledUpper, spelledLower],
+            RepoRoots((spelledUpper, repo), (spelledLower, repo)),
+            Plain
+        );
+
+        Assert.Equal("yamv [git]\n  README.md\n", Render(groups));
+    }
+
+    [Fact]
+    public void Group_PathsDifferingOnlyInCase_AreKeptApartUnderOrdinalComparison()
+    {
+        GroupingOptions ordinal = new(null, StringComparison.Ordinal);
+        string repo = P("dev", "yamv");
+        string spelledUpper = Path.Combine(repo, "README.md");
+        string spelledLower = Path.Combine(repo, "readme.md");
+
+        IReadOnlyList<GroupNode> groups = DocumentGrouper.Group(
+            [spelledUpper, spelledLower],
+            RepoRoots((spelledUpper, repo), (spelledLower, repo)),
+            ordinal
+        );
+
+        Assert.Equal("yamv [git]\n  README.md\n  readme.md\n", Render(groups));
+    }
+
+    [Fact]
+    public void Group_FolderHoldingOneFolderAndOneFile_IsNotCompacted()
+    {
+        string repo = P("dev", "yamv");
+        string loose = Path.Combine(repo, "a", "x.md");
+        string nested = Path.Combine(repo, "a", "b", "y.md");
+
+        IReadOnlyList<GroupNode> groups = DocumentGrouper.Group([loose, nested], AllInRepo([loose, nested], repo), Plain);
+
+        Assert.Equal("yamv [git]\n  a/\n    b/\n      y.md\n    x.md\n", Render(groups));
+    }
+
+    [Fact]
+    public void Group_FileDirectlyInHomeFolder_IsGroupedAsTilde()
+    {
+        GroupingOptions options = new(P("Users", "lefto"), StringComparison.Ordinal);
+        string file = P("Users", "lefto", "x.md");
+
+        IReadOnlyList<GroupNode> groups = DocumentGrouper.Group([file], NoRepository, options);
+
+        Assert.Equal("~\n  x.md\n", Render(groups));
+    }
+
+    [Fact]
+    public void Group_SuffixedNameMatchingAnotherRepoName_UsesFullPaths()
+    {
+        string dev = P("dev", "yamv");
+        string old = P("old", "yamv");
+        string literal = P("other", "yamv (dev)");
+        string devFile = Path.Combine(dev, "README.md");
+        string oldFile = Path.Combine(old, "README.md");
+        string literalFile = Path.Combine(literal, "README.md");
+
+        IReadOnlyList<GroupNode> groups = DocumentGrouper.Group(
+            [devFile, oldFile, literalFile],
+            RepoRoots((devFile, dev), (oldFile, old), (literalFile, literal)),
+            Plain
+        );
+
+        Assert.Equal($"{dev} [git]\n  README.md\n{literal} [git]\n  README.md\nyamv (old) [git]\n  README.md\n", Render(groups));
+    }
+
+    [Fact]
     public void Group_NoFiles_ReturnsNoGroups() => Assert.Empty(DocumentGrouper.Group([], NoRepository, Plain));
 
     private static string PlatformRoot => OperatingSystem.IsWindows() ? @"C:\" : "/";
