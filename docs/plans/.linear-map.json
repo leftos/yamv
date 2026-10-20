@@ -1,0 +1,95 @@
+{
+  "issues": {
+    "L10": {
+      "id": "8aaca38a-8753-403d-9d48-a45a469c9b2d",
+      "identifier": "YAMV-3",
+      "linked": true
+    },
+    "L14": {
+      "id": "4a5f0696-a9da-4cfc-925e-75e9c4591dbf",
+      "identifier": "YAMV-4",
+      "linked": true
+    },
+    "L20": {
+      "id": "ec89624e-c0a8-4d5a-9152-97534d9fb188",
+      "identifier": "YAMV-5",
+      "linked": true
+    },
+    "L20a": {
+      "id": "c22c1321-bec3-4dce-91d7-21867c2a8e15",
+      "identifier": "YAMV-6",
+      "linked": true
+    },
+    "L20b": {
+      "id": "35967ed9-7f17-491c-9d14-6b4a9667b48c",
+      "identifier": "YAMV-7",
+      "linked": true
+    },
+    "L21": {
+      "id": "aab519f5-be1c-4d49-8b36-e5cfcdefebd0",
+      "identifier": "YAMV-8",
+      "linked": true
+    },
+    "L22": {
+      "id": "5190b2d0-e3ac-4e8b-a468-ed4d6522bf08",
+      "identifier": "YAMV-9",
+      "linked": true
+    },
+    "L23": {
+      "id": "a9ca183d-f580-45bb-a26a-5926c3c43526",
+      "identifier": "YAMV-11",
+      "linked": true
+    },
+    "L24": {
+      "id": "0d519978-d11f-4f4c-8a7a-a79cb638f21f",
+      "identifier": "YAMV-10",
+      "linked": true
+    },
+    "L25": {
+      "id": "72b888db-4b0b-41f2-b2e2-fdf354ba4004",
+      "identifier": "YAMV-12",
+      "linked": true
+    },
+    "L26": {
+      "id": "12a8c989-7912-4c65-9b54-7b83bd7ec3a8",
+      "identifier": "YAMV-13",
+      "linked": true
+    },
+    "L27": {
+      "id": "5d7e1a9e-d73f-499f-84a5-3a7949aaba5a",
+      "identifier": "YAMV-14",
+      "linked": true
+    },
+    "L31": {
+      "id": "9e1845d2-7fe6-4d01-aa51-4d7a4d079df2",
+      "identifier": "YAMV-15",
+      "linked": true
+    },
+    "L32": {
+      "id": "1f124071-d444-47d7-b011-143a257e9c75",
+      "identifier": "YAMV-16",
+      "linked": true
+    },
+    "L33": {
+      "id": "ae478a2c-ccbd-4922-a32f-593c58041f36",
+      "identifier": "YAMV-17",
+      "linked": true
+    },
+    "L34": {
+      "id": "addf8c00-6cab-4349-ae68-01f066d2c6db",
+      "identifier": "YAMV-18",
+      "linked": true
+    },
+    "L35": {
+      "id": "7b68d3ac-4604-4975-ac5d-8e41b4558246",
+      "identifier": "YAMV-19",
+      "linked": true
+    }
+  },
+  "projects": {
+    "P1": "cdc28ab9-6de3-4560-82f8-87d2ac60bad4",
+    "P2": "d1aca62f-d863-4564-8b75-0f93da2c8cde",
+    "P3": "ee514143-44ae-4cef-ab49-8518f3ab29b9",
+    "P4": "4b190fab-5e04-412a-8a75-9b57d537ad92"
+  }
+}

@@ -10,7 +10,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
 ## Layers
 
-- **`Yamv.Core`** (`src/Yamv.Core/`): owns grouping, git-root discovery, the session file, the single-instance lock and pipe, launch-argument parsing and markdown → HTML. References Markdig and the BCL only; never Avalonia.
+- **`Yamv.Core`** (`src/Yamv.Core/`): owns grouping, git-root discovery, the session file, the single-instance lock and pipe, launch-argument parsing and markdown → HTML. References Markdig and the BCL only; never Avalonia. One main instance per user is held by a lock file (flock on Unix) plus a per-user named pipe that later launches signal over; a named mutex is not used, because its behaviour differs on macOS.
 - **`Yamv.App`** (`src/Yamv.App/`): owns windows, the tree, the WebView page (`Assets/web/`) and platform glue (macOS activation, Windows registration). References Core.
 
 ## Integration Footguns

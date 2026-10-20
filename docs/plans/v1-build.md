@@ -2,7 +2,7 @@
 
 ## Context
 
-`X:\dev\yamv` is empty. The user wants a cross-platform (Windows + macOS) C# markdown viewer:
+The user wants a cross-platform (Windows + macOS) C# markdown viewer:
 
 - No arguments → the **main instance**: it reopens the documents that were open last time, with a tree on the **right** grouping them by git repo (or, outside a repo, by the folder they're in). Only one main instance may run; a second no-arg launch focuses the existing one and exits.
 - One or more file arguments → a **viewer instance** (its own process) showing just those files. It is never persisted and doesn't touch the main instance.
@@ -80,7 +80,7 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
 
 ## Step 4 — App shell (`Yamv.App`), built to the chosen mock
 
-- **Spike first** (throwaway, in `.tmp/`): confirm how `NativeWebView` loads local relative images. Either `NavigateToString(html, baseUri: file folder)` works, or a virtual host `https://yamv.local/` is served through `WebResourceRequested` (`/assets/*` from embedded resources, `/doc/<id>/*` mapped to the doc's folder). Keep whichever works on WebView2; the CI macOS run and the user's Mac test confirm WKWebView.
+- **Spike** (done in the document-view work): neither `NavigateToString(html, baseUri)` (the base is ignored) nor a virtual host through `WebResourceRequested` (observe-only in 12.1.1) works, so the page assets are extracted to a versioned folder under the local app-data dir and the page loads over `file://`. The CI macOS run and the user's Mac test confirm WKWebView.
 - The page is a `template.html` loaded once, with embedded resources `yamv.css` (the chosen theme, light and dark via CSS variables) and `yamv.js`, both bundled, with no CDN. Switching docs calls `yamv.render(bodyHtml, scrollFraction)` through `InvokeScript`, so the WebView never reloads.
   - highlight.js is bundled.
   - Mermaid and KaTeX are bundled but loaded only when a doc contains a diagram or math block.

@@ -1,6 +1,10 @@
 # YAMV
 
-Yet Another Markdown Viewer: C# / .NET 10 / Avalonia 12, Windows + macOS. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first; the plan is [docs/plans/MAIN.md](docs/plans/MAIN.md).
+Yet Another Markdown Viewer: C# / .NET 10 / Avalonia 12, Windows + macOS. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first.
+
+## Plan
+
+Every task is a Linear issue in team YAMV; [docs/plans/MAIN.md](docs/plans/MAIN.md) is a generated snapshot, changed in Linear and never by hand. A steer mid-task gets an **add** first. The rules are in `~/.claude/docs/plan-operations.md`; the nextup profile is `.claude/skills/yamv-nextup/SKILL.md`.
 
 ## Commands
 
