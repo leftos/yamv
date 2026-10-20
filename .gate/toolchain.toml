@@ -1,0 +1,3 @@
+# Tools a routed gate run needs on the builder. The .NET SDK is pinned by global.json.
+[tools]
+pwsh = "7.4"
