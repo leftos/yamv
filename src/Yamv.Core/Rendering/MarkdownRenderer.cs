@@ -1,10 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Markdig;
+using Markdig.Extensions.Abbreviations;
 using Markdig.Extensions.AutoIdentifiers;
 using Markdig.Extensions.Mathematics;
 using Markdig.Extensions.Yaml;
-using Markdig.Renderers;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -31,13 +31,8 @@ public sealed class MarkdownRenderer
         MarkdownDocument document = Markdown.Parse(markdown, Pipeline);
         MarkSourceLines(document);
 
-        using var writer = new StringWriter();
-        var renderer = new HtmlRenderer(writer);
-        Pipeline.Setup(renderer);
-        renderer.Render(document);
-
         return new RenderedDocument(
-            writer.ToString(),
+            Markdown.ToHtml(document, Pipeline),
             FindTitle(document),
             HasDiagram(document, "mermaid"),
             document.Descendants<MathInline>().Any() || document.Descendants<MathBlock>().Any()
@@ -84,7 +79,8 @@ public sealed class MarkdownRenderer
         {
             if (heading.Level == 1)
             {
-                return InlineText(heading.Inline).Trim();
+                string title = CollapseWhitespace(InlineText(heading.Inline));
+                return title.Length == 0 ? null : title;
             }
         }
 
@@ -98,28 +94,38 @@ public sealed class MarkdownRenderer
         return builder.ToString();
     }
 
+    /// <summary>Collapses whitespace runs into one space and trims, the way a window title reads.</summary>
+    private static string CollapseWhitespace(string text) => string.Join(' ', text.Split(default(char[]), StringSplitOptions.RemoveEmptyEntries));
+
     /// <summary>Walks the heading's inline tree for its text, which is what a title needs rather than rendered HTML.</summary>
     private static void AppendInlineText(Inline? inline, StringBuilder builder)
     {
         while (inline is not null)
         {
-            switch (inline)
+            if (inline is ContainerInline container)
             {
-                case LiteralInline literal:
-                    builder.Append(literal.Content.ToString());
-                    break;
-                case CodeInline code:
-                    builder.Append(code.Content);
-                    break;
-                case LineBreakInline:
-                    builder.Append(' ');
-                    break;
-                case ContainerInline container:
-                    AppendInlineText(container.FirstChild, builder);
-                    break;
+                AppendInlineText(container.FirstChild, builder);
+            }
+            else
+            {
+                builder.Append(LeafText(inline));
             }
 
             inline = inline.NextSibling;
         }
     }
+
+    /// <summary>The text of a leaf inline, which for several kinds is not rendered HTML text.</summary>
+    private static string? LeafText(Inline inline) =>
+        inline switch
+        {
+            LiteralInline literal => literal.Content.ToString(),
+            CodeInline code => code.Content,
+            HtmlEntityInline entity => entity.Transcoded.ToString(),
+            AutolinkInline autolink => autolink.Url,
+            MathInline math => math.Content.ToString(),
+            AbbreviationInline abbreviation => abbreviation.Abbreviation.Label,
+            LineBreakInline => " ",
+            _ => null,
+        };
 }

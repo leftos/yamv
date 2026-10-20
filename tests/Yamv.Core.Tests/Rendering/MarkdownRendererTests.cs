@@ -52,10 +52,11 @@ public sealed class MarkdownRendererTests
     [Fact]
     public void Render_Headings_GetGitHubStyleUniqueIds()
     {
-        string html = Render("## Hello World\n\n## Hello World").Html;
+        string html = Render("## Hello World\n\n## Hello World\n\n## 1. Intro").Html;
 
         Assert.Contains("id=\"hello-world\"", html);
         Assert.Contains("id=\"hello-world-1\"", html);
+        Assert.Contains("id=\"1-intro\"", html);
     }
 
     [Fact]
@@ -111,7 +112,37 @@ public sealed class MarkdownRendererTests
     public void Render_NoH1_HasNoTitle() => Assert.Null(Render("Just a paragraph.").Title);
 
     [Fact]
-    public void Render_Title_IsThePlainTextOfTheHeading() => Assert.Equal("Hello world code", Render("# Hello *world* `code`").Title);
+    public void Render_Title_IsThePlainTextOfTheHeading()
+    {
+        Assert.Equal("Hello world code", Render("# Hello *world* `code`").Title);
+        Assert.Equal("Hello world", Render("# Hello    world").Title);
+    }
+
+    [Fact]
+    public void Render_Title_KeepsHtmlEntities() => Assert.Equal("Fish & Chips", Render("# Fish &amp; Chips").Title);
+
+    [Fact]
+    public void Render_Title_KeepsAutolinkText() => Assert.Equal("See https://x.dev", Render("# See <https://x.dev>").Title);
+
+    [Fact]
+    public void Render_Title_KeepsInlineMath() => Assert.Equal("Euler e^{i\\pi}", Render("# Euler $e^{i\\pi}$").Title);
+
+    [Fact]
+    public void Render_Title_KeepsAbbreviatedWords()
+    {
+        RenderedDocument document = Render(
+            """
+            *[HTML]: HyperText Markup Language
+
+            # Learn HTML
+            """
+        );
+
+        Assert.Equal("Learn HTML", document.Title);
+    }
+
+    [Fact]
+    public void Render_EmptyH1_HasNoTitle() => Assert.Null(Render("#").Title);
 
     [Fact]
     public void Render_MermaidFence_SetsFlagAndRendersDiagramMarkup()

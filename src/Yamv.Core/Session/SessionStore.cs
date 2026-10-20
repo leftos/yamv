@@ -10,6 +10,10 @@ namespace Yamv.Core.Session;
 /// </remarks>
 public sealed class SessionStore(string filePath, IAppLog log)
 {
+    private const double DefaultSidebarWidth = 280;
+    private const string DefaultThemeId = "studio";
+    private const string DefaultAppearance = "system";
+
     /// <summary>The JSON file the state lives in.</summary>
     public string FilePath { get; } = filePath;
 
@@ -69,25 +73,77 @@ public sealed class SessionStore(string filePath, IAppLog log)
 
         string json = JsonSerializer.Serialize(normalized, SessionJsonContext.Default.SessionState);
         string temporary = FilePath + ".tmp";
-        File.WriteAllText(temporary, json);
+        using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var writer = new StreamWriter(stream))
+        {
+            writer.Write(json);
+            writer.Flush();
+            stream.Flush(flushToDisk: true);
+        }
+
         File.Move(temporary, FilePath, overwrite: true);
     }
 
     private static SessionState Normalize(SessionState state)
     {
-        var openFiles = new HashSet<string>(state.OpenFiles ?? [], AppPaths.PathComparer);
-        var scrollPositions = new Dictionary<string, double>(AppPaths.PathComparer);
-        foreach ((string path, double position) in state.ScrollPositions ?? new Dictionary<string, double>())
+        List<string> openFiles = FilterPaths(state.OpenFiles ?? []);
+        var open = new HashSet<string>(openFiles, AppPaths.PathComparer);
+
+        return state with
         {
-            if (openFiles.Contains(path))
+            OpenFiles = openFiles,
+            CollapsedGroups = FilterPaths(state.CollapsedGroups ?? []),
+            ScrollPositions = NormalizeScrollPositions(state.ScrollPositions ?? new Dictionary<string, double>(), open),
+            SelectedFile = state.SelectedFile is not null && open.Contains(state.SelectedFile) ? state.SelectedFile : null,
+            Window = NormalizeWindow(state.Window),
+            SidebarWidth = NormalizeSidebarWidth(state.SidebarWidth),
+            ThemeId = string.IsNullOrWhiteSpace(state.ThemeId) ? DefaultThemeId : state.ThemeId,
+            Appearance = NormalizeAppearance(state.Appearance),
+        };
+    }
+
+    /// <summary>Drops null and blank entries, which a JSON array can hold even though the type says otherwise.</summary>
+    private static List<string> FilterPaths(IReadOnlyList<string> paths)
+    {
+        List<string> result = [];
+        foreach (string path in paths)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
             {
-                scrollPositions[path] = Math.Clamp(position, 0, 1);
+                result.Add(path);
             }
         }
 
-        string? selectedFile = state.SelectedFile is not null && openFiles.Contains(state.SelectedFile) ? state.SelectedFile : null;
-        return state with { ScrollPositions = scrollPositions, SelectedFile = selectedFile };
+        return result;
     }
+
+    private static Dictionary<string, double> NormalizeScrollPositions(IReadOnlyDictionary<string, double> positions, HashSet<string> openFiles)
+    {
+        var scrollPositions = new Dictionary<string, double>(AppPaths.PathComparer);
+        foreach ((string path, double position) in positions)
+        {
+            if (openFiles.Contains(path))
+            {
+                scrollPositions[path] = double.IsFinite(position) ? Math.Clamp(position, 0, 1) : 0;
+            }
+        }
+
+        return scrollPositions;
+    }
+
+    private static WindowBounds? NormalizeWindow(WindowBounds? window) => window is { } bounds && IsUsableSize(bounds) ? bounds : null;
+
+    private static bool IsUsableSize(WindowBounds bounds) =>
+        double.IsFinite(bounds.X)
+        && double.IsFinite(bounds.Y)
+        && double.IsFinite(bounds.Width)
+        && double.IsFinite(bounds.Height)
+        && bounds.Width > 0
+        && bounds.Height > 0;
+
+    private static double NormalizeSidebarWidth(double width) => double.IsFinite(width) && width > 0 ? width : DefaultSidebarWidth;
+
+    private static string NormalizeAppearance(string appearance) => appearance is "system" or "light" or "dark" ? appearance : DefaultAppearance;
 
     private void MoveCorruptFileAside()
     {

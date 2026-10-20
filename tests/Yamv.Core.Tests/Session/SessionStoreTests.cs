@@ -28,7 +28,8 @@ public sealed class SessionStoreTests : IDisposable
             Window = new WindowBounds(10, 20, 1200, 800, IsMaximized: true),
             SidebarWidth = 340,
             CollapsedGroups = ["C:/notes"],
-            Theme = "dark",
+            ThemeId = "noir",
+            Appearance = "dark",
         };
 
         CreateStore().Save(state);
@@ -41,7 +42,8 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal(state.Window, loaded.Window);
         Assert.Equal(340, loaded.SidebarWidth);
         Assert.Equal(state.CollapsedGroups, loaded.CollapsedGroups);
-        Assert.Equal("dark", loaded.Theme);
+        Assert.Equal("noir", loaded.ThemeId);
+        Assert.Equal("dark", loaded.Appearance);
         Assert.Empty(_log.Entries);
     }
 
@@ -163,6 +165,131 @@ public sealed class SessionStoreTests : IDisposable
 
         Assert.True(Directory.Exists(_directory));
         Assert.True(File.Exists(SessionFile));
+    }
+
+    [Theory]
+    [InlineData("""{ "openFiles": null }""")]
+    [InlineData("""{ "themeId": null }""")]
+    [InlineData("""{ "appearance": null }""")]
+    public void Load_ExplicitNullForANonNullableField_MovesTheFileAside(string json)
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SessionFile, json);
+
+        Assert.Same(SessionState.Empty, CreateStore().Load());
+
+        Assert.False(File.Exists(SessionFile));
+        Assert.True(File.Exists(SessionFile + ".bad"));
+        LogEntry warning = Assert.Single(_log.Entries);
+        Assert.Equal("warning", warning.Level);
+        Assert.NotNull(warning.Exception);
+    }
+
+    [Fact]
+    public void Load_DropsNullAndBlankEntriesFromLists()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(
+            SessionFile,
+            """
+            {
+              "openFiles": ["C:/notes/a.md", null, "  "],
+              "collapsedGroups": ["C:/notes/group", null, ""],
+              "scrollPositions": { "C:/notes/a.md": 0.5 }
+            }
+            """
+        );
+
+        SessionState loaded = CreateStore().Load();
+
+        string[] expectedFiles = ["C:/notes/a.md"];
+        string[] expectedGroups = ["C:/notes/group"];
+        Assert.Equal(expectedFiles, loaded.OpenFiles);
+        Assert.Equal(expectedGroups, loaded.CollapsedGroups);
+        Assert.Equal(0.5, loaded.ScrollPositions["C:/notes/a.md"]);
+        Assert.Empty(_log.Entries);
+    }
+
+    [Fact]
+    public void Load_UnknownAppearanceAndEmptyThemeId_FallBackToDefaults()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SessionFile, """{ "themeId": "", "appearance": "sepia" }""");
+
+        SessionState loaded = CreateStore().Load();
+
+        Assert.Equal("studio", loaded.ThemeId);
+        Assert.Equal("system", loaded.Appearance);
+    }
+
+    [Fact]
+    public void SaveThenLoad_RepairsNaNValues()
+    {
+        CreateStore()
+            .Save(
+                new SessionState
+                {
+                    OpenFiles = ["C:/notes/a.md"],
+                    ScrollPositions = new Dictionary<string, double> { ["C:/notes/a.md"] = double.NaN },
+                    Window = new WindowBounds(double.NaN, 0, 1200, 800, false),
+                    SidebarWidth = double.NaN,
+                }
+            );
+
+        SessionState loaded = CreateStore().Load();
+
+        Assert.Equal(0.0, loaded.ScrollPositions["C:/notes/a.md"]);
+        Assert.Null(loaded.Window);
+        Assert.Equal(280.0, loaded.SidebarWidth);
+    }
+
+    [Fact]
+    public void SaveThenLoad_RepairsInfiniteValues()
+    {
+        CreateStore()
+            .Save(
+                new SessionState
+                {
+                    OpenFiles = ["C:/notes/a.md"],
+                    ScrollPositions = new Dictionary<string, double> { ["C:/notes/a.md"] = double.PositiveInfinity },
+                    Window = new WindowBounds(0, 0, double.PositiveInfinity, 800, true),
+                    SidebarWidth = double.NegativeInfinity,
+                }
+            );
+
+        SessionState loaded = CreateStore().Load();
+
+        Assert.Equal(0.0, loaded.ScrollPositions["C:/notes/a.md"]);
+        Assert.Null(loaded.Window);
+        Assert.Equal(280.0, loaded.SidebarWidth);
+    }
+
+    [Fact]
+    public void SaveThenLoad_RepairsNonPositiveSizes()
+    {
+        CreateStore().Save(new SessionState { Window = new WindowBounds(10, 20, 0, -5, false), SidebarWidth = 0 });
+
+        SessionState loaded = CreateStore().Load();
+
+        Assert.Null(loaded.Window);
+        Assert.Equal(280.0, loaded.SidebarWidth);
+    }
+
+    [Fact]
+    public void Load_LockedFile_LogsAnErrorAndLeavesTheFileInPlace()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SessionFile, "{}");
+
+        using (var held = new FileStream(SessionFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.Same(SessionState.Empty, CreateStore().Load());
+        }
+
+        LogEntry error = Assert.Single(_log.Entries);
+        Assert.Equal("error", error.Level);
+        Assert.True(File.Exists(SessionFile));
+        Assert.False(File.Exists(SessionFile + ".bad"));
     }
 
     private SessionStore CreateStore() => new(SessionFile, _log);

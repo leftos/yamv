@@ -27,6 +27,9 @@ public sealed record SessionState
     /// <summary>The root paths of the tree groups the user collapsed.</summary>
     public IReadOnlyList<string> CollapsedGroups { get; init; } = [];
 
-    /// <summary>The chosen theme: <c>system</c>, <c>light</c> or <c>dark</c>.</summary>
-    public string Theme { get; init; } = "system";
+    /// <summary>The id of the theme the app was using; whether it still exists is the app's business.</summary>
+    public string ThemeId { get; init; } = "studio";
+
+    /// <summary>The light or dark preference: <c>system</c>, <c>light</c> or <c>dark</c>.</summary>
+    public string Appearance { get; init; } = "system";
 }
