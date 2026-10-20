@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV look: three directions</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; font-style: normal; }
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; }
+@font-face { font-family: "Source Serif V"; src: url("../fonts/source-serif-4-normal.woff2") format("woff2"); font-weight: 200 900; font-style: normal; }
+@font-face { font-family: "Source Serif V"; src: url("../fonts/source-serif-4-italic.woff2") format("woff2"); font-weight: 200 900; font-style: italic; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; font-style: normal; }
+
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; color: #111; width: 2120px; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 36px; font-size: 16px; }
+.lane { margin-bottom: 56px; }
+.lane > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+.lane > p { color: #eef0f2; margin: 0 0 16px; font-size: 15px; max-width: 1400px; }
+.pair { display: flex; gap: 40px; }
+
+/* ---------- window frame ---------- */
+.win { width: 1000px; height: 660px; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--doc-bg); color: var(--text); }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--chrome-bg); border-bottom: 1px solid var(--line);
+            font: 500 12.5px "Inter V"; color: var(--muted); padding-left: 14px; }
+.titlebar .name { color: var(--text); font-weight: 600; margin-right: 10px; }
+.titlebar .path { opacity: .8; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; }
+.titlebar .ctl svg { stroke: var(--muted); }
+.body { flex: 1; display: flex; min-height: 0; }
+.doc { flex: 1; overflow: hidden; padding: 40px 0 0; }
+.doc .col { max-width: var(--measure); margin: 0 auto; padding: 0 44px; }
+.side { width: 264px; flex: none; background: var(--side-bg); border-left: 1px solid var(--line); padding: 14px 8px; font: 13px/1.2 "Inter V"; overflow: hidden; }
+
+/* ---------- tree ---------- */
+.grp { margin-bottom: 14px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; color: var(--group); font-weight: 650; font-size: 12.5px; }
+.grp-h .chev { width: 10px; color: var(--muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent-soft);
+         border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.badge.dir { color: var(--muted); border-color: var(--line); }
+.row { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 8px; border-radius: 6px; color: var(--text-2); position: relative; }
+.row.folder { color: var(--muted); }
+.row .ico { width: 14px; flex: none; opacity: .75; }
+.row.sel { background: var(--sel-bg); color: var(--sel-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--accent); }
+.row.hover { background: var(--hover-bg); }
+.row .x { margin-left: auto; color: var(--muted); font-size: 14px; }
+
+/* ---------- markdown ---------- */
+.md { font-family: var(--body-font); font-size: var(--body-size); line-height: var(--body-lh); color: var(--text); }
+.md h1 { font-family: var(--head-font); font-weight: var(--h1-weight); font-size: var(--h1-size); letter-spacing: var(--h1-track); line-height: 1.15; margin: 0 0 .5em; color: var(--heading); }
+.md h2 { font-family: var(--head-font); font-weight: 650; font-size: 1.32em; margin: 1.6em 0 .55em; padding-bottom: var(--h2-pad); border-bottom: var(--h2-rule); color: var(--heading); }
+.md p { margin: 0 0 1em; }
+.md a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-soft); text-underline-offset: 3px; }
+.md code { font-family: "JetBrains Mono V", monospace; font-size: .84em; background: var(--code-bg); padding: .12em .38em; border-radius: 4px; }
+.md pre { background: var(--code-bg); border: 1px solid var(--code-line); border-radius: 8px; padding: 14px 16px; font: 13px/1.6 "JetBrains Mono V", monospace; margin: 0 0 1.2em; }
+.md pre code { background: none; padding: 0; font-size: inherit; }
+.md table { border-collapse: collapse; margin: 0 0 1.2em; font-size: .9em; width: 100%; }
+.md th, .md td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); }
+.md th { font-family: "Inter V"; font-weight: 600; font-size: .86em; color: var(--muted); text-transform: var(--th-case); letter-spacing: var(--th-track); }
+.md blockquote { margin: 0 0 1.1em; padding: .1em 0 .1em 1.1em; border-left: 3px solid var(--quote); color: var(--muted); font-style: var(--quote-style); }
+.md ul.task { list-style: none; padding-left: .2em; margin: 0 0 1em; }
+.md ul.task li { display: flex; gap: .6em; align-items: baseline; }
+.md .cb { width: 15px; height: 15px; border: 1.5px solid var(--muted); border-radius: 4px; display: inline-grid; place-items: center; flex: none; transform: translateY(2px); }
+.md .cb.on { background: var(--accent); border-color: var(--accent); }
+.md .cb.on::after { content: ""; width: 7px; height: 4px; border: 2px solid var(--doc-bg); border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px,-1px); }
+.md li.done { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.md img { max-width: 100%; border-radius: 8px; display: block; margin: 0 0 1.2em; filter: var(--img-filter); }
+.k { color: var(--syn-k); } .s { color: var(--syn-s); } .c { color: var(--syn-c); font-style: italic; } .t { color: var(--syn-t); }
+
+/* ---------- lane: Paper ---------- */
+.paper { --body-font: "Source Serif V", Georgia, serif; --head-font: "Source Serif V", Georgia, serif; --body-size: 17.5px; --body-lh: 1.65; --measure: 720px;
+         --h1-size: 2.1em; --h1-weight: 650; --h1-track: -.01em; --h2-pad: 0; --h2-rule: none; --th-case: none; --th-track: 0; --quote-style: italic; }
+.paper.light { --doc-bg: #fbf8f2; --chrome-bg: #f2ece2; --side-bg: #f2ece2; --line: #e3dacb; --text: #2d2822; --text-2: #4a4339; --heading: #221d18; --muted: #8a7f70;
+               --group: #5b5145; --accent: #a4542a; --accent-soft: #e6c3ad; --sel-bg: #e8dfd1; --sel-text: #2d2822; --hover-bg: #ebe4d8;
+               --code-bg: #f1eadf; --code-line: #e6dccc; --quote: #d9c4ad;
+               --syn-k: #a4542a; --syn-s: #557a3a; --syn-c: #9a8e7e; --syn-t: #7a5c99; --img-filter: sepia(.15); }
+.paper.dark  { --doc-bg: #1d1a17; --chrome-bg: #171512; --side-bg: #171512; --line: #332e28; --text: #e7dfd3; --text-2: #cfc6b8; --heading: #f3ece2; --muted: #988d7e;
+               --group: #c9bfb1; --accent: #df9a6b; --accent-soft: #5b4130; --sel-bg: #2c2722; --sel-text: #f3ece2; --hover-bg: #24201c;
+               --code-bg: #26221e; --code-line: #322c26; --quote: #5b4a3a;
+               --syn-k: #e6a274; --syn-s: #a9c38c; --syn-c: #7d7366; --syn-t: #c3a6e0; --img-filter: invert(.88) hue-rotate(180deg) sepia(.2); }
+
+/* ---------- lane: Studio ---------- */
+.studio { --body-font: "Inter V", "Segoe UI", sans-serif; --head-font: "Inter V", sans-serif; --body-size: 15.5px; --body-lh: 1.62; --measure: 800px;
+          --h1-size: 2.05em; --h1-weight: 700; --h1-track: -.025em; --h2-pad: .3em; --h2-rule: 1px solid var(--line); --th-case: none; --th-track: 0; --quote-style: normal; }
+.studio.light { --doc-bg: #ffffff; --chrome-bg: #f6f8fa; --side-bg: #f6f8fa; --line: #d8dee4; --text: #1f2328; --text-2: #31373d; --heading: #111418; --muted: #656d76;
+                --group: #24292f; --accent: #0969da; --accent-soft: #b6d4f5; --sel-bg: #e3edfa; --sel-text: #0b3d7a; --hover-bg: #eaeef2;
+                --code-bg: #f6f8fa; --code-line: #e4e8ec; --quote: #d0d7de;
+                --syn-k: #cf222e; --syn-s: #0a3069; --syn-c: #6e7781; --syn-t: #8250df; --img-filter: none; }
+.studio.dark  { --doc-bg: #0f1318; --chrome-bg: #0a0d11; --side-bg: #0a0d11; --line: #2a3139; --text: #e6edf3; --text-2: #c9d1d9; --heading: #f0f6fc; --muted: #8b949e;
+                --group: #e6edf3; --accent: #4493f8; --accent-soft: #1f3b5e; --sel-bg: #182a40; --sel-text: #e6edf3; --hover-bg: #161b22;
+                --code-bg: #161b22; --code-line: #262c34; --quote: #3d444d;
+                --syn-k: #ff7b72; --syn-s: #a5d6ff; --syn-c: #8b949e; --syn-t: #d2a8ff; --img-filter: invert(.9) hue-rotate(180deg); }
+
+/* ---------- lane: Ink ---------- */
+.ink { --body-font: "Inter V", sans-serif; --head-font: "JetBrains Mono V", monospace; --body-size: 15.5px; --body-lh: 1.68; --measure: 760px;
+       --h1-size: 1.85em; --h1-weight: 700; --h1-track: -.02em; --h2-pad: 0; --h2-rule: none; --th-case: uppercase; --th-track: .08em; --quote-style: normal; }
+.ink.dark  { --doc-bg: #0e1013; --chrome-bg: #08090b; --side-bg: #08090b; --line: #23272e; --text: #e9e7e4; --text-2: #c9c6c1; --heading: #ffffff; --muted: #8a8f98;
+             --group: #ffffff; --accent: #5eead4; --accent-soft: #1d4a44; --sel-bg: #13302c; --sel-text: #ffffff; --hover-bg: #15181c;
+             --code-bg: #15181d; --code-line: #23272e; --quote: #f0abfc;
+             --syn-k: #f472b6; --syn-s: #fcd34d; --syn-c: #6b7280; --syn-t: #5eead4; --img-filter: invert(.92) hue-rotate(180deg) saturate(1.4); }
+.ink.light { --doc-bg: #f7f6f3; --chrome-bg: #ecebe7; --side-bg: #ecebe7; --line: #d9d6cf; --text: #15171a; --text-2: #2a2d31; --heading: #000; --muted: #6b6f76;
+             --group: #000; --accent: #0d7c6c; --accent-soft: #a8dcd3; --sel-bg: #d5ebe6; --sel-text: #062e28; --hover-bg: #e2e0db;
+             --code-bg: #ecebe6; --code-line: #dcd9d2; --quote: #c026d3;
+             --syn-k: #be185d; --syn-s: #92400e; --syn-c: #8b8f96; --syn-t: #0d7c6c; --img-filter: none; }
+.ink .md h1::before { content: "# "; color: var(--accent); }
+.ink .md h2::before { content: "## "; color: var(--accent); }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: three directions for the overall look</h1>
+<p class="page">Each lane shows the same document and tree in light and dark. The tree on the right is the only list of open documents. The fonts are bundled with the app (Inter, Source Serif 4, JetBrains Mono), so Windows and macOS render alike.</p>
+
+<section class="lane" data-theme="paper">
+  <h2>A · Paper</h2>
+  <p>A warm off-white page with serif body text set for long reading at a narrower measure. The sidebar is quiet and the accent is rust.</p>
+  <div class="pair"></div>
+</section>
+<section class="lane" data-theme="studio">
+  <h2>B · Studio</h2>
+  <p>A neutral, GitHub-like page: Inter sans, crisp hairlines and ruled H2s. The blue accent and a wider measure suit technical docs.</p>
+  <div class="pair"></div>
+</section>
+<section class="lane" data-theme="ink">
+  <h2>C · Ink</h2>
+  <p>Dark-first and high-contrast. Headings are set in mono with their markdown markers kept, accents are teal and magenta, and table headers are upper-case.</p>
+  <div class="pair"></div>
+</section>
+
+<template id="win">
+  <div class="win">
+    <div class="titlebar">
+      <span class="name">MAIN.md</span><span class="path">yamv / docs / plans</span>
+      <span class="spacer"></span>
+      <span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span>
+      <span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span>
+      <span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span>
+    </div>
+    <div class="body">
+      <div class="doc"><div class="col md">
+        <h1>Release checklist</h1>
+        <p>YAMV ships as a single executable on Windows and an app bundle on macOS. Before tagging a release, walk through the list below, and read <a href="#">the architecture notes</a> if anything in the build changed.</p>
+        <blockquote>Only one main instance runs at a time; any launch with files opens its own viewer window.</blockquote>
+        <h2>Targets</h2>
+        <table>
+          <thead><tr><th>Platform</th><th>Runtime</th><th>Artifact</th></tr></thead>
+          <tbody>
+            <tr><td>Windows 11</td><td><code>win-x64</code></td><td>yamv.exe</td></tr>
+            <tr><td>macOS 14+</td><td><code>osx-arm64</code></td><td>YAMV.app</td></tr>
+          </tbody>
+        </table>
+        <ul class="task">
+          <li class="done"><span class="cb on"></span>Run the full test suite in Release</li>
+          <li><span class="cb"></span>Check live reload with an editor that saves by rename</li>
+        </ul>
+        <pre><code><span class="k">var</span> doc = renderer.<span class="t">Render</span>(<span class="s">"# Hello"</span>); <span class="c">// title: Hello</span></code></pre>
+        <img src="figure.svg" alt="Launch modes">
+      </div></div>
+      <div class="side">
+        <div class="grp">
+          <div class="grp-h"><span class="chev">▾</span>yamv<span class="badge">git</span></div>
+          <div class="row"><svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>README.md</div>
+          <div class="row folder"><span class="ico">▾</span>docs/plans</div>
+          <div class="row sel" style="padding-left:28px"><svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>MAIN.md</div>
+          <div class="row hover" style="padding-left:28px"><svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>v1-build.md<span class="x">×</span></div>
+        </div>
+        <div class="grp">
+          <div class="grp-h"><span class="chev">▾</span>yaat<span class="badge">git</span></div>
+          <div class="row folder"><span class="ico">▾</span>docs</div>
+          <div class="row" style="padding-left:28px"><svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>ARCHITECTURE.md</div>
+          <div class="row" style="padding-left:28px"><svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>glossary.md</div>
+        </div>
+        <div class="grp">
+          <div class="grp-h"><span class="chev">▾</span>C:\Users\lefto\Downloads<span class="badge dir">dir</span></div>
+          <div class="row"><svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>notes.md</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script>
+  const tpl = document.getElementById("win");
+  for (const lane of document.querySelectorAll(".lane")) {
+    const theme = lane.dataset.theme;
+    const order = theme === "ink" ? ["dark", "light"] : ["light", "dark"];
+    for (const mode of order) {
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      node.classList.add(theme, mode);
+      lane.querySelector(".pair").appendChild(node);
+    }
+  }
+</script>
+</body>
+</html>
