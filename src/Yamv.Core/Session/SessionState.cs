@@ -24,6 +24,9 @@ public sealed record SessionState
     /// <summary>The sidebar width in device-independent pixels.</summary>
     public double SidebarWidth { get; init; } = 280;
 
+    /// <summary>True when the user hid the sidebar.</summary>
+    public bool SidebarHidden { get; init; }
+
     /// <summary>The root paths of the tree groups the user collapsed.</summary>
     public IReadOnlyList<string> CollapsedGroups { get; init; } = [];
 

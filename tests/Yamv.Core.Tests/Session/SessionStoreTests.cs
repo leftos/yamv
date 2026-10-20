@@ -48,6 +48,23 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveLoad_SidebarHidden_RoundTrips()
+    {
+        CreateStore().Save(new SessionState { SidebarHidden = true });
+
+        Assert.True(CreateStore().Load().SidebarHidden);
+    }
+
+    [Fact]
+    public void Load_FileWithoutSidebarHidden_IsVisible()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SessionFile, """{ "openFiles": ["C:/notes/a.md"] }""");
+
+        Assert.False(CreateStore().Load().SidebarHidden);
+    }
+
+    [Fact]
     public void Load_MissingFile_ReturnsEmpty()
     {
         Assert.Same(SessionState.Empty, CreateStore().Load());
