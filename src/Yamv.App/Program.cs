@@ -73,7 +73,7 @@ internal static class Program
     private static int RunMain(InstanceCoordinator coordinator, IAppLog log, string[] args)
     {
         var gate = new ActivationGate();
-        coordinator.StartServer(message => OnInstanceMessage(message, gate, log));
+        coordinator.StartServer(request => OnInstanceMessage(request.Message, gate, log));
         App.Activation = gate;
         App.StopAnswering = coordinator.StopAnswering;
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
@@ -103,9 +103,11 @@ internal static class Program
             ReadPid: () => InstanceCoordinator.TryReadMainPid(AppPaths.MainLockFile, log),
             AllowForeground: pid => AllowForeground(pid, log),
             Signal: timeout => InstanceCoordinator.SignalAsync(AppPaths.MainLockFile, InstanceMessages.Activate, timeout, log),
+            Request: (message, budget) => InstanceCoordinator.RequestAsync(AppPaths.MainLockFile, message, budget, log),
             BringForward: pid => BringForward(pid, log),
             RetryLock: coordinator.TryAcquireMainLockQuietly,
-            Delay: delay => Task.Delay(delay)
+            Delay: delay => Task.Delay(delay),
+            Time: TimeProvider.System
         );
         return new SecondLaunch(actions, log).RunAsync().GetAwaiter().GetResult();
     }

@@ -6,6 +6,8 @@ using System.Globalization;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Threading.Channels;
+using Microsoft.Extensions.Time.Testing;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Instance;
 using ThreadState = System.Threading.ThreadState;
@@ -425,7 +427,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
         Task<bool> signal = InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token);
         await Task.Delay(TimeSpan.FromMilliseconds(200), Token);
         Assert.False(signal.IsCompleted);
-        main.StartServer(message => received.TrySetResult(message));
+        main.StartServer(request => received.TrySetResult(request.Message));
 
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
         Assert.True(await signal.WaitAsync(HangGuard, Token));
@@ -512,8 +514,9 @@ public sealed class InstanceCoordinatorTests : IDisposable
         TaskCompletionSource<string> received = NewSource<string>();
         using InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
-        main.StartServer(message =>
+        main.StartServer(request =>
         {
+            string message = request.Message;
             if (message == Poison)
             {
                 throw new InvalidOperationException("handler failure under test");
@@ -537,8 +540,9 @@ public sealed class InstanceCoordinatorTests : IDisposable
         TaskCompletionSource bothArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
         using InstanceCoordinator main = new(_lockPath, _log) { FrameReadDeadline = HangGuard };
         Assert.True(main.TryAcquireMainLock());
-        main.StartServer(message =>
+        main.StartServer(request =>
         {
+            string message = request.Message;
             arrived.Enqueue(message);
             if (arrived.Count == 2)
             {
@@ -569,39 +573,620 @@ public sealed class InstanceCoordinatorTests : IDisposable
             }
         }
 
+        // Each connection is read on a task of its own, so the two frames may reach the queue in either order.
         string[] expected = ["first", "second"];
-        Assert.Equal(expected, arrived);
+        Assert.Equal(expected, arrived.Order());
         Assert.Empty(_log.Errors);
     }
 
     [Fact]
-    public async Task SignalAsync_ServerBusyReading_ReturnsFalseWithinTimeout()
+    public async Task Server_ClientStalledMidFrame_DoesNotDelayAnotherClientsFrame()
     {
-        Assert.SkipUnless(
-            OperatingSystem.IsWindows(),
-            "On Unix the kernel send buffer takes the frame at once, so the write never waits on a busy server."
-        );
         TaskCompletionSource<string> received = NewSource<string>();
         using InstanceCoordinator main = new(_lockPath, _log) { FrameReadDeadline = HangGuard };
         Assert.True(main.TryAcquireMainLock());
-        main.StartServer(message => received.TrySetResult(message));
+        main.StartServer(request => received.TrySetResult(request.Message));
 
         NamedPipeClientStream rawA = NewRawClient(main);
         await using (rawA)
         {
             await rawA.ConnectAsync(HangGuard, Token);
-            // A Windows write completes once the server has read it: the server is now mid-read, waiting for 3 more bytes.
+            // The header declares 5 bytes and 2 follow: the server reads them and waits for 3 more, which never come.
             byte[] headerAndTwoBytes = [.. Header(5), (byte)'a', (byte)'b'];
             await rawA.WriteAsync(headerAndTwoBytes, Token);
             await rawA.FlushAsync(Token);
 
-            bool sent = await InstanceCoordinator.SignalAsync(_lockPath, "unread", TimeSpan.FromSeconds(1), _log, Token);
+            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
 
-            Assert.False(sent);
-            Assert.Contains(_log.Warnings, warning => warning.Message.Contains("did not read", StringComparison.Ordinal));
+            // Handled while A is still connected mid-frame.
+            Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
+            Assert.True(rawA.IsConnected);
+        }
+    }
+
+    [Fact]
+    public async Task Server_RequestAwaitingReply_DoesNotDelayAnotherClientsFrame()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        using InstanceCoordinator main = StartRequestServer(request => requests.Writer.TryWrite(request));
+
+        Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-a", HangGuard, _log, Token);
+        InstanceRequest first = await NextAsync(requests);
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
+        InstanceRequest second = await NextAsync(requests);
+
+        Assert.Equal("open-a", first.Message);
+        Assert.Equal(InstanceMessages.Activate, second.Message);
+        Assert.False(waiting.IsCompleted);
+        Assert.True(first.TryBegin());
+        first.Complete(InstanceReply.Opened);
+        Assert.Equal(InstanceRequestOutcome.Confirmed, await waiting.WaitAsync(HangGuard, Token));
+    }
+
+    [Fact]
+    public async Task Request_HandlerCompletesOpened_ClientGetsConfirmed()
+    {
+        using InstanceCoordinator main = StartRequestServer(request =>
+        {
+            if (request.TryBegin())
+            {
+                request.Complete(InstanceReply.Opened);
+            }
+        });
+
+        InstanceRequestOutcome outcome = await InstanceCoordinator
+            .RequestAsync(_lockPath, "open-x", HangGuard, _log, Token)
+            .WaitAsync(HangGuard, Token);
+
+        Assert.Equal(InstanceRequestOutcome.Confirmed, outcome);
+        Assert.Empty(_log.Warnings);
+        Assert.Empty(_log.Errors);
+    }
+
+    [Fact]
+    public async Task Request_HandlerCompletesRefused_ClientGetsRefused()
+    {
+        using InstanceCoordinator main = StartRequestServer(request => request.Complete(InstanceReply.Refused));
+
+        InstanceRequestOutcome outcome = await InstanceCoordinator
+            .RequestAsync(_lockPath, "open-x", HangGuard, _log, Token)
+            .WaitAsync(HangGuard, Token);
+
+        Assert.Equal(InstanceRequestOutcome.Refused, outcome);
+    }
+
+    [Fact]
+    public async Task Request_UnknownReplyText_ClientGetsRefused()
+    {
+        using InstanceCoordinator unstarted = new(_lockPath, _log);
+        NamedPipeServerStream raw = new(
+            unstarted.Endpoint,
+            PipeDirection.InOut,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly
+        );
+        await using (raw)
+        {
+            Task<InstanceRequestOutcome> request = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            await raw.WaitForConnectionAsync(Token).WaitAsync(HangGuard, Token);
+            Assert.Equal("open-x", await InstanceFrame.ReadAsync(raw, Token).WaitAsync(HangGuard, Token));
+            await raw.WriteAsync(InstanceFrame.Encode("maybe"), Token).AsTask().WaitAsync(HangGuard, Token);
+
+            Assert.Equal(InstanceRequestOutcome.Refused, await request.WaitAsync(HangGuard, Token));
+        }
+    }
+
+    [Fact]
+    public async Task Request_NoServer_ReturnsNoServerWithinBudget()
+    {
+        InstanceRequestOutcome outcome = await InstanceCoordinator
+            .RequestAsync(_lockPath, "open-x", TimeSpan.FromMilliseconds(300), _log, Token)
+            .WaitAsync(HangGuard, Token);
+
+        Assert.Equal(InstanceRequestOutcome.NoServer, outcome);
+        Assert.Single(_log.Warnings);
+    }
+
+    [Fact]
+    public async Task Request_HandlerNeverCompletes_ClientGetsNoReplyAndServerSeesHangUp()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        using InstanceCoordinator main = StartRequestServer(request => requests.Writer.TryWrite(request));
+        FakeTimeProvider time = new();
+
+        // A round trip first, so a listener is known to exist before the fake clock, which never advances on its own, drives the
+        // connect retries.
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
+        Assert.Equal(InstanceMessages.Activate, (await NextAsync(requests)).Message);
+
+        Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(
+            _lockPath,
+            "open-x",
+            new InstanceCoordinator.RequestBudget(TimeSpan.FromSeconds(3), time),
+            _log,
+            Token
+        );
+        InstanceRequest request = await NextAsync(requests);
+        time.Advance(TimeSpan.FromSeconds(4));
+
+        Assert.Equal(InstanceRequestOutcome.NoReply, await waiting.WaitAsync(HangGuard, Token));
+        // The launcher hung up before returning, so the server abandons the request and a late UI job cannot take it.
+        Assert.Equal(InstanceReply.Closing, await request.Reply.WaitAsync(HangGuard, Token));
+        Assert.False(request.TryBegin());
+    }
+
+    [Fact]
+    public async Task Request_CompleteTwice_FirstWins()
+    {
+        using InstanceCoordinator main = StartRequestServer(request =>
+        {
+            Assert.True(request.TryBegin());
+            request.Complete(InstanceReply.Refused);
+            request.Complete(InstanceReply.Opened);
+        });
+
+        InstanceRequestOutcome outcome = await InstanceCoordinator
+            .RequestAsync(_lockPath, "open-x", HangGuard, _log, Token)
+            .WaitAsync(HangGuard, Token);
+
+        Assert.Equal(InstanceRequestOutcome.Refused, outcome);
+    }
+
+    [Fact]
+    public async Task Request_CompleteAfterAbandon_IsIgnored()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            DisposeWait = HangGuard,
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+        };
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+            main.StartServer(request => requests.Writer.TryWrite(request));
+            Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            InstanceRequest request = await NextAsync(requests);
+
+            main.StopAnswering();
+            Assert.Equal(InstanceReply.Closing, await request.Reply.WaitAsync(HangGuard, Token));
+
+            // A late answer must not turn the abandon reply into an opened: the launcher already gave up, and its request is
+            // never carried out.
+            request.Complete(InstanceReply.Opened);
+
+            Assert.Equal(InstanceReply.Closing, await request.Reply.WaitAsync(HangGuard, Token));
+            Assert.False(request.TryBegin());
+            Assert.Equal(InstanceRequestOutcome.Closing, await waiting.WaitAsync(HangGuard, Token));
+        }
+        finally
+        {
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Request_TwoConcurrent_CompletedInReverseOrder_EachGetsItsOwnReply()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        using InstanceCoordinator main = StartRequestServer(request => requests.Writer.TryWrite(request));
+
+        Task<InstanceRequestOutcome> a = InstanceCoordinator.RequestAsync(_lockPath, "open-a", HangGuard, _log, Token);
+        Task<InstanceRequestOutcome> b = InstanceCoordinator.RequestAsync(_lockPath, "open-b", HangGuard, _log, Token);
+        InstanceRequest[] both = [await NextAsync(requests), await NextAsync(requests)];
+        InstanceRequest requestA = Assert.Single(both, request => request.Message == "open-a");
+        InstanceRequest requestB = Assert.Single(both, request => request.Message == "open-b");
+
+        Assert.True(requestB.TryBegin());
+        requestB.Complete(InstanceReply.Opened);
+        Assert.Equal(InstanceRequestOutcome.Confirmed, await b.WaitAsync(HangGuard, Token));
+        requestA.Complete(InstanceReply.Refused);
+        Assert.Equal(InstanceRequestOutcome.Refused, await a.WaitAsync(HangGuard, Token));
+    }
+
+    [Fact]
+    public async Task Request_CompleteOnCallerThread_ReplyWriteRunsElsewhere()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        int writerThread = 0;
+        using InstanceCoordinator main = new(_lockPath, _log)
+        {
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+            ReplyWriting = () => Volatile.Write(ref writerThread, Environment.CurrentManagedThreadId),
+        };
+        Assert.True(main.TryAcquireMainLock());
+        main.StartServer(request => requests.Writer.TryWrite(request));
+
+        Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+        InstanceRequest request = await NextAsync(requests);
+        int completerThread = 0;
+        Thread completer = new(() =>
+        {
+            completerThread = Environment.CurrentManagedThreadId;
+            Assert.True(request.TryBegin());
+            request.Complete(InstanceReply.Opened);
+        })
+        {
+            IsBackground = true,
+        };
+        completer.Start();
+
+        Assert.True(completer.Join(HangGuard));
+        Assert.Equal(InstanceRequestOutcome.Confirmed, await waiting.WaitAsync(HangGuard, Token));
+        Assert.NotEqual(0, Volatile.Read(ref writerThread));
+        Assert.NotEqual(completerThread, Volatile.Read(ref writerThread));
+    }
+
+    [Fact]
+    public async Task Request_ClientNeverReads_ConnectionEndsWithinServerBound()
+    {
+        Assert.SkipUnless(
+            OperatingSystem.IsWindows(),
+            "On Unix the kernel send buffer takes the reply at once, so the server's write never waits on the client."
+        );
+        TaskCompletionSource unread = WhenWarningLogged("A launcher on pipe");
+        using InstanceCoordinator main = new(_lockPath, _log) { ReplyBound = HangGuard, ReplyWriteBound = TimeSpan.FromMilliseconds(1) };
+        Assert.True(main.TryAcquireMainLock());
+        main.StartServer(BeginAndConfirm);
+
+        NamedPipeClientStream raw = NewRawClient(main);
+        await using (raw)
+        {
+            await raw.ConnectAsync(HangGuard, Token);
+            await raw.WriteAsync(InstanceFrame.Encode("open-x"), Token);
+            await raw.FlushAsync(Token);
+
+            // The client never reads, so the reply's write runs out of its bound and the server closes the connection.
+            await unread.Task.WaitAsync(HangGuard, Token);
         }
 
-        // The listener the timed-out client connected to has been served and replaced, so a later signal still arrives.
+        Assert.Contains(_log.Warnings, warning => warning.Message.Contains("did not read its reply", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Request_ServerReplyBoundPasses_RequestAbandonedAndClosedWithoutReply()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        using InstanceCoordinator main = new(_lockPath, _log) { ReplyBound = TimeSpan.FromMilliseconds(1), ReplyWriteBound = HangGuard };
+        Assert.True(main.TryAcquireMainLock());
+        main.StartServer(request => requests.Writer.TryWrite(request));
+
+        InstanceRequestOutcome outcome = await InstanceCoordinator
+            .RequestAsync(_lockPath, "open-x", HangGuard, _log, Token)
+            .WaitAsync(HangGuard, Token);
+        InstanceRequest request = await NextAsync(requests);
+
+        // No reply was written: the launcher read the end of the stream, which it counts as closing.
+        Assert.Equal(InstanceRequestOutcome.Closing, outcome);
+        Assert.Equal(InstanceReply.Closing, await request.Reply.WaitAsync(HangGuard, Token));
+        Assert.False(request.TryBegin());
+        Assert.Contains(_log.Warnings, warning => warning.Message.Contains("got no reply within", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Request_BegunRequestCompletedAfterStop_StillWritesItsReply()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+            DisposeWait = HangGuard,
+        };
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+            main.StartServer(request =>
+            {
+                Assert.True(request.TryBegin());
+                requests.Writer.TryWrite(request);
+            });
+
+            Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            InstanceRequest request = await NextAsync(requests);
+            main.StopAnswering();
+            request.Complete(InstanceReply.Opened);
+
+            Assert.Equal(InstanceRequestOutcome.Confirmed, await waiting.WaitAsync(HangGuard, Token));
+        }
+        finally
+        {
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Server_PendingReadAndWriteOnOneStream_ReplyArrives()
+    {
+        using InstanceCoordinator main = StartRequestServer(BeginAndConfirm);
+
+        NamedPipeClientStream raw = NewRawClient(main);
+        await using (raw)
+        {
+            await raw.ConnectAsync(HangGuard, Token);
+            await raw.WriteAsync(InstanceFrame.Encode("open-x"), Token);
+            await raw.FlushAsync(Token);
+
+            // The server has a one-byte read pending on this stream, watching for a hang-up, while it writes the reply.
+            string reply = await InstanceFrame.ReadAsync(raw, Token).WaitAsync(HangGuard, Token);
+
+            Assert.Equal("opened", reply);
+        }
+    }
+
+    [Fact]
+    public async Task Signal_Activate_StillDeliveredWithoutAReply()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        using InstanceCoordinator main = StartRequestServer(request => requests.Writer.TryWrite(request));
+
+        NamedPipeClientStream raw = NewRawClient(main);
+        await using (raw)
+        {
+            await raw.ConnectAsync(HangGuard, Token);
+            await raw.WriteAsync(InstanceFrame.Encode(InstanceMessages.Activate), Token);
+            await raw.FlushAsync(Token);
+            InstanceRequest request = await NextAsync(requests);
+
+            Assert.Equal(InstanceMessages.Activate, request.Message);
+            Assert.False(request.ExpectsReply);
+            // The server closes an activate connection once it is queued, without writing anything.
+            Assert.Equal(0, await ReadOrZeroAsync(raw));
+        }
+    }
+
+    [Fact]
+    public async Task StopAnswering_WithPendingRequest_RepliesClosingBeforeWaitingOnTheHandler()
+    {
+        TaskCompletionSource firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource twoQueued = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            DisposeWait = HangGuard,
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+            FrameQueued = total =>
+            {
+                if (total == 2)
+                {
+                    twoQueued.TrySetResult();
+                }
+            },
+        };
+        Assert.True(main.TryAcquireMainLock());
+        main.StartServer(request =>
+        {
+            if (request.Message == "first")
+            {
+                firstEntered.TrySetResult();
+                release.Task.Wait(HangGuard, Token);
+            }
+        });
+        Thread stopping = new(main.StopAnswering) { IsBackground = true };
+        try
+        {
+            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "first", HangGuard, _log, Token));
+            await firstEntered.Task.WaitAsync(HangGuard, Token);
+            Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            await twoQueued.Task.WaitAsync(HangGuard, Token);
+
+            stopping.Start();
+
+            Assert.Equal(InstanceRequestOutcome.Closing, await waiting.WaitAsync(HangGuard, Token));
+            Assert.True(stopping.IsAlive, "StopAnswering returned while the handler was still blocked.");
+        }
+        finally
+        {
+            release.TrySetResult();
+            if (stopping.ThreadState != ThreadState.Unstarted)
+            {
+                Assert.True(stopping.Join(HangGuard), "StopAnswering did not return after the handler was released.");
+            }
+
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task StopAnswering_HandlerNeverCompletes_ReturnsWithinBound()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            DisposeWait = HangGuard,
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+        };
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+            main.StartServer(request => requests.Writer.TryWrite(request));
+            Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            InstanceRequest request = await NextAsync(requests);
+
+            Thread stopping = new(main.StopAnswering) { IsBackground = true };
+            stopping.Start();
+
+            Assert.True(stopping.Join(HangGuard), "StopAnswering waited on a request the app never completed.");
+            Assert.Equal(InstanceRequestOutcome.Closing, await waiting.WaitAsync(HangGuard, Token));
+            Assert.False(request.TryBegin());
+            Assert.DoesNotContain(_log.Warnings, warning => warning.Message.Contains("did not stop", StringComparison.Ordinal));
+        }
+        finally
+        {
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public void Request_CompleteOpenedBeforeBegin_ThrowsAndLeavesItPending()
+    {
+        InstanceRequest request = new("open-x", expectsReply: true);
+
+        Assert.Throws<InvalidOperationException>(() => request.Complete(InstanceReply.Opened));
+
+        Assert.False(request.Reply.IsCompleted);
+        Assert.True(request.TryBegin());
+    }
+
+    [Fact]
+    public async Task SignalAsync_InOnlyServer_StillReceivesActivate()
+    {
+        using InstanceCoordinator unstarted = new(_lockPath, _log);
+        NamedPipeServerStream raw = new(
+            unstarted.Endpoint,
+            PipeDirection.In,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly
+        );
+        await using (raw)
+        {
+            Task connected = raw.WaitForConnectionAsync(Token);
+            Task<bool> signal = InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token);
+            await Task.WhenAny(connected, signal).WaitAsync(HangGuard, Token);
+
+            Assert.True(
+                connected.IsCompletedSuccessfully,
+                $"The signal ended before connecting. Warnings: {string.Join(" | ", _log.Warnings.Select(warning => warning.Message))}"
+            );
+            Assert.Equal(InstanceMessages.Activate, await InstanceFrame.ReadAsync(raw, Token).WaitAsync(HangGuard, Token));
+            Assert.True(await signal.WaitAsync(HangGuard, Token));
+        }
+    }
+
+    [Fact]
+    public async Task StopAnswering_AbandonsOpenRequestsBeforeCancellingTheServer()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        InstanceRequest? pending = null;
+        bool? begunAtCancel = null;
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            DisposeWait = HangGuard,
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+            ShutdownCancelling = () => begunAtCancel = pending?.TryBegin(),
+        };
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+            main.StartServer(request => requests.Writer.TryWrite(request));
+            Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            pending = await NextAsync(requests);
+
+            main.StopAnswering();
+
+            // Abandoned synchronously, before the connections hear of the stop, so no UI job can take it from then on.
+            Assert.False(begunAtCancel);
+            Assert.False(pending.TryBegin());
+            Assert.Equal(InstanceRequestOutcome.Closing, await waiting.WaitAsync(HangGuard, Token));
+        }
+        finally
+        {
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Request_ReplyOverTheReplyCap_IsRefusedUnread()
+    {
+        using InstanceCoordinator unstarted = new(_lockPath, _log);
+        NamedPipeServerStream raw = new(
+            unstarted.Endpoint,
+            PipeDirection.InOut,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly
+        );
+        await using (raw)
+        {
+            Task<InstanceRequestOutcome> request = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            await raw.WaitForConnectionAsync(Token).WaitAsync(HangGuard, Token);
+            Assert.Equal("open-x", await InstanceFrame.ReadAsync(raw, Token).WaitAsync(HangGuard, Token));
+            Task write = raw.WriteAsync(InstanceFrame.Encode("opened" + new string(' ', InstanceFrame.MaxReplyPayloadBytes)), Token).AsTask();
+
+            Assert.Equal(InstanceRequestOutcome.Refused, await request.WaitAsync(HangGuard, Token));
+            // Refused at the length, before the payload is read: the reply is not one, rather than an unknown one.
+            Assert.Contains(_log.Warnings, warning => warning.Message.Contains("is not one", StringComparison.Ordinal));
+            _ = write.ContinueWith(_ => { }, TaskScheduler.Default);
+        }
+    }
+
+    [Fact]
+    public async Task Dispose_WaitsForConnectionTasksBeforeLockReleasing()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        int? openAtRelease = null;
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            DisposeWait = HangGuard,
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+        };
+        main.LockReleasing = () => openAtRelease = main.OpenConnectionCount;
+        Thread disposing = new(main.Dispose) { IsBackground = true };
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+            main.StartServer(request =>
+            {
+                // Begun and not yet answered: its connection stays open after the stop, waiting for the reply.
+                Assert.True(request.TryBegin());
+                requests.Writer.TryWrite(request);
+            });
+            Task<InstanceRequestOutcome> waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            InstanceRequest request = await NextAsync(requests);
+
+            disposing.Start();
+            await WaitUntilBlockedOrEndedAsync(disposing);
+
+            // The connection holds until the test answers the request, so Dispose cannot have released the lock yet.
+            Assert.True(disposing.IsAlive, "Dispose returned while a connection was still open.");
+            Assert.Null(openAtRelease);
+            request.Complete(InstanceReply.Opened);
+
+            Assert.True(disposing.Join(HangGuard), "Dispose did not return after the last connection ended.");
+            Assert.Equal(0, openAtRelease);
+            Assert.Equal(InstanceRequestOutcome.Confirmed, await waiting.WaitAsync(HangGuard, Token));
+        }
+        finally
+        {
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Dispose_ThenNewMain_EndpointStillReachable()
+    {
+        var requests = Channel.CreateUnbounded<InstanceRequest>();
+        InstanceCoordinator first = new(_lockPath, _log)
+        {
+            DisposeWait = HangGuard,
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+        };
+        Task<InstanceRequestOutcome> waiting;
+        try
+        {
+            Assert.True(first.TryAcquireMainLock());
+            first.StartServer(request => requests.Writer.TryWrite(request));
+            waiting = InstanceCoordinator.RequestAsync(_lockPath, "open-x", HangGuard, _log, Token);
+            await NextAsync(requests);
+        }
+        finally
+        {
+            first.Dispose();
+        }
+
+        Assert.Equal(InstanceRequestOutcome.Closing, await waiting.WaitAsync(HangGuard, Token));
+
+        // A connection closed after the lock was released would, on Unix, delete the new main's socket file.
+        using InstanceCoordinator second = StartMain(out TaskCompletionSource<string> received);
         Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
     }
@@ -644,8 +1229,9 @@ public sealed class InstanceCoordinatorTests : IDisposable
         TaskCompletionSource allArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
         using InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
-        main.StartServer(message =>
+        main.StartServer(request =>
         {
+            string message = request.Message;
             arrived.Enqueue(message);
             if (arrived.Count == messages.Length)
             {
@@ -669,7 +1255,12 @@ public sealed class InstanceCoordinatorTests : IDisposable
 
         // Dispose's bounds become the hang guard, and the handler is released once the count is logged, so Dispose returns as soon
         // as the handler does instead of waiting out a fixed bound.
-        InstanceCoordinator main = new(_lockPath, _log) { DisposeWait = HangGuard };
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            DisposeWait = HangGuard,
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+        };
         _log.WarningLogged = message =>
         {
             if (message.StartsWith("Dropped ", StringComparison.Ordinal))
@@ -685,8 +1276,9 @@ public sealed class InstanceCoordinatorTests : IDisposable
                 threeQueued.TrySetResult();
             }
         };
-        main.StartServer(message =>
+        main.StartServer(request =>
         {
+            string message = request.Message;
             if (message == "first")
             {
                 firstEntered.TrySetResult();
@@ -694,14 +1286,16 @@ public sealed class InstanceCoordinatorTests : IDisposable
             }
         });
 
+        Task<InstanceRequestOutcome> second = Task.FromResult(InstanceRequestOutcome.NoServer);
+        Task<InstanceRequestOutcome> third = second;
         try
         {
             Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "first", HangGuard, _log, Token));
             await firstEntered.Task.WaitAsync(HangGuard, Token);
-            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "second", HangGuard, _log, Token));
-            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "third", HangGuard, _log, Token));
+            second = InstanceCoordinator.RequestAsync(_lockPath, "second", HangGuard, _log, Token);
+            third = InstanceCoordinator.RequestAsync(_lockPath, "third", HangGuard, _log, Token);
 
-            // On Unix a signal returns once its frame is in the socket buffer; wait until the server has queued all three.
+            // Wait until the server has queued all three.
             await threeQueued.Task.WaitAsync(HangGuard, Token);
         }
         finally
@@ -718,6 +1312,10 @@ public sealed class InstanceCoordinatorTests : IDisposable
         }
 
         Assert.Contains(_log.Warnings, warning => warning.Message.StartsWith("Dropped 2 instance message(s)", StringComparison.Ordinal));
+
+        // The dropped requests were abandoned, and each launcher heard so.
+        Assert.Equal(InstanceRequestOutcome.Closing, await second.WaitAsync(HangGuard, Token));
+        Assert.Equal(InstanceRequestOutcome.Closing, await third.WaitAsync(HangGuard, Token));
     }
 
     [Fact]
@@ -810,7 +1408,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
         // The squatter takes the name first, without CurrentUserOnly. Its input buffer lets a client's write complete unread.
         using NamedPipeServerStream squatter = new(
             main.Endpoint,
-            PipeDirection.In,
+            PipeDirection.InOut,
             NamedPipeServerStream.MaxAllowedServerInstances,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous,
@@ -818,7 +1416,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
             outBufferSize: 0
         );
         Assert.True(main.TryAcquireMainLock());
-        main.StartServer(message => received.TrySetResult(message));
+        main.StartServer(request => received.TrySetResult(request.Message));
         await heldLogged.Task.WaitAsync(HangGuard, Token);
 
         Task squatterConnected = squatter.WaitForConnectionAsync(Token);
@@ -916,7 +1514,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
         // A leftover that is not a socket (a crashed main leaves a socket; a regular file is the case the server must still replace):
         // the server must unlink it before binding, which it skips under FirstPipeInstance.
         File.WriteAllBytes(main.Endpoint, []);
-        main.StartServer(message => received.TrySetResult(message));
+        main.StartServer(request => received.TrySetResult(request.Message));
 
         Assert.True(
             await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token),
@@ -947,7 +1545,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
         // The server starts only once the signal has met the file and retried, or has given up on it.
         Task<bool> signal = InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token);
         await Task.WhenAny(secondAttempt.Task, signal).WaitAsync(HangGuard, Token);
-        main.StartServer(message => received.TrySetResult(message));
+        main.StartServer(request => received.TrySetResult(request.Message));
 
         Assert.True(
             await signal.WaitAsync(HangGuard, Token),
@@ -984,7 +1582,38 @@ public sealed class InstanceCoordinatorTests : IDisposable
     }
 
     private static NamedPipeClientStream NewRawClient(InstanceCoordinator main) =>
-        new(".", main.Endpoint, PipeDirection.Out, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        new(".", main.Endpoint, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+    private InstanceCoordinator StartRequestServer(Action<InstanceRequest> onRequest)
+    {
+        // Both reply bounds become the hang guard, so no passing run has to beat them.
+        InstanceCoordinator main = new(_lockPath, _log) { ReplyBound = HangGuard, ReplyWriteBound = HangGuard };
+        Assert.True(main.TryAcquireMainLock());
+        main.StartServer(onRequest);
+        return main;
+    }
+
+    private static void BeginAndConfirm(InstanceRequest request)
+    {
+        Assert.True(request.TryBegin());
+        request.Complete(InstanceReply.Opened);
+    }
+
+    private static async Task<InstanceRequest> NextAsync(Channel<InstanceRequest> requests) =>
+        await requests.Reader.ReadAsync(Token).AsTask().WaitAsync(HangGuard, Token);
+
+    /// <summary>Reads one byte; 0 when the server closed the connection, which on Windows may also surface as a broken pipe.</summary>
+    private static async Task<int> ReadOrZeroAsync(NamedPipeClientStream raw)
+    {
+        try
+        {
+            return await raw.ReadAsync(new byte[1], Token).AsTask().WaitAsync(HangGuard, Token);
+        }
+        catch (IOException)
+        {
+            return 0;
+        }
+    }
 
     /// <summary>Connects to <paramref name="main"/>'s server, writes <paramref name="bytes"/> as they are and closes.</summary>
     private static async Task SendRawAsync(InstanceCoordinator main, byte[] bytes)
@@ -1016,7 +1645,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
         InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
         TaskCompletionSource<string> source = NewSource<string>();
-        main.StartServer(message => source.TrySetResult(message));
+        main.StartServer(request => source.TrySetResult(request.Message));
         received = source;
         return main;
     }
@@ -1031,7 +1660,12 @@ public sealed class InstanceCoordinatorTests : IDisposable
         TaskCompletionSource twoQueued = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Dispose's own bounds become the hang guard, so a Dispose that waits wrongly hangs to the guard instead of racing 5 s.
-        InstanceCoordinator main = new(_lockPath, _log) { DisposeWait = HangGuard };
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            DisposeWait = HangGuard,
+            ReplyBound = HangGuard,
+            ReplyWriteBound = HangGuard,
+        };
         Assert.True(main.TryAcquireMainLock());
         main.FrameQueued = total =>
         {
@@ -1040,8 +1674,9 @@ public sealed class InstanceCoordinatorTests : IDisposable
                 twoQueued.TrySetResult();
             }
         };
-        main.StartServer(message =>
+        main.StartServer(request =>
         {
+            string message = request.Message;
             if (message == "first")
             {
                 firstEntered.TrySetResult();

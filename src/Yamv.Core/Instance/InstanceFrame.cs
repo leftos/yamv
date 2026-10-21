@@ -10,6 +10,9 @@ internal static class InstanceFrame
 {
     public const int MaxPayloadBytes = 64 * 1024;
 
+    /// <summary>The largest reply a client reads: a reply is one short word, so a longer frame is not a reply.</summary>
+    public const int MaxReplyPayloadBytes = 256;
+
     private const int HeaderBytes = sizeof(int);
 
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -33,18 +36,24 @@ internal static class InstanceFrame
         return frame;
     }
 
-    /// <summary>Reads one frame from <paramref name="stream"/>.</summary>
+    /// <summary>Reads one request frame of at most <see cref="MaxPayloadBytes"/> from <paramref name="stream"/>.</summary>
     /// <exception cref="InvalidDataException">The length is negative or over <see cref="MaxPayloadBytes"/>.</exception>
     /// <exception cref="EndOfStreamException">The stream ended before the frame did.</exception>
     /// <exception cref="DecoderFallbackException">The payload is not valid UTF-8.</exception>
-    public static async Task<string> ReadAsync(Stream stream, CancellationToken cancellationToken)
+    public static Task<string> ReadAsync(Stream stream, CancellationToken cancellationToken) => ReadAsync(stream, MaxPayloadBytes, cancellationToken);
+
+    /// <summary>Reads one frame of at most <paramref name="maxPayloadBytes"/> from <paramref name="stream"/>.</summary>
+    /// <exception cref="InvalidDataException">The length is negative or over <paramref name="maxPayloadBytes"/>.</exception>
+    /// <exception cref="EndOfStreamException">The stream ended before the frame did.</exception>
+    /// <exception cref="DecoderFallbackException">The payload is not valid UTF-8.</exception>
+    public static async Task<string> ReadAsync(Stream stream, int maxPayloadBytes, CancellationToken cancellationToken)
     {
         byte[] header = new byte[HeaderBytes];
         await stream.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
         int length = BinaryPrimitives.ReadInt32LittleEndian(header);
-        if (length is < 0 or > MaxPayloadBytes)
+        if (length < 0 || length > maxPayloadBytes)
         {
-            throw new InvalidDataException($"An instance message frame declared {length} bytes; the limit is 0 to {MaxPayloadBytes}.");
+            throw new InvalidDataException($"An instance message frame declared {length} bytes; the limit is 0 to {maxPayloadBytes}.");
         }
 
         byte[] payload = new byte[length];
