@@ -5,6 +5,7 @@
 - **Appearance**: Match system, Light or Dark — which half of the current theme family is shown.
 - **Asset cache**: the versioned folder under the local app-data dir (`YAMV/web/{assembly version id}/`) that the document page's template, CSS, JS, fonts and vendored libraries are extracted to, so the page loads over `file://`.
 - **Chrome**: the app's own UI around the document (title bar, sidebar tree, dialogs), drawn with Avalonia from the theme's chrome tokens, as opposed to the document page.
+- **Disk-change bar**: the bar under the theme settings window's title bar that says the selected theme's file changed on disk while unsaved edits are open, with Reload and Keep mine; it takes the warning colours when the file no longer parses ([look.md](design/look.md)).
 - **Document surface**: what the window logic sees of the document page (`IDocumentSurface`, implemented by `DocumentView`); tests substitute a fake.
 - **Edit as text**: opening a user theme's `.json` file in the app the system associates with it (`IFileActions.OpenWithDefaultApp`, built by `OpenFileCommand`).
 - **Grace period**: the 300 ms after framework initialization on macOS during which launch-time file opens may arrive, before the main window is created.
@@ -19,6 +20,7 @@
 - **Main instance**: the one YAMV process started with no file arguments. It remembers its open documents between runs; a second no-arg launch brings it to the front and exits.
 - **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted when the main instance stops answering, as its main window closes, before the final session save.
 - **Missing document**: an open document whose file no longer exists, or a path a viewer launch named that does not exist; it stays in the tree, greyed, until removed or until the file comes back.
+- **Missing row**: the greyed "Missing on disk" row the theme settings window keeps for the theme in use whose file was deleted or renamed outside the app, in its last loaded version; only Save (which writes the file again) and Revert are on ([look.md](design/look.md)).
 - **Open with registration**: what `yamv --register` writes on Windows so YAMV appears in Explorer's Open with for `.md` and `.markdown`: the `YAMV.Markdown` ProgID, an `OpenWithProgids` entry per extension and the `Applications\yamv.exe` key, all under the current user. It never sets the default handler.
 - **Persist**: a window's flag saying its documents, selection and layout are saved to the session file; true only for the main instance's window.
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.

@@ -50,14 +50,33 @@ public sealed partial class ThemeRowViewModel : ViewModelBase
 
     public bool IsBuiltIn => Entry.Source == ThemeSource.BuiltIn;
 
+    /// <summary>
+    /// Whether the row stands for the theme in use whose file was deleted or renamed outside the app: it holds the last loaded
+    /// version, greyed, with Rename and Delete off.
+    /// </summary>
+    public bool IsMissing { get; init; }
+
+    /// <summary>
+    /// The error of the row's file when it changed on disk and no longer loads while the row keeps its last valid version, or null.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsWarning), nameof(WarningTip))]
+    public partial string? DiskError { get; internal set; }
+
+    /// <summary>Whether the row shows the warning glyph: its theme did not load, or its file no longer loads.</summary>
+    public bool ShowsWarning => !IsValid || DiskError is not null;
+
+    /// <summary>The warning glyph's tooltip.</summary>
+    public string WarningTip => DiskError is not null ? "This theme changed on disk and no longer loads" : "This theme didn't load";
+
     /// <summary>Whether the row's context menu offers Rename: a valid user theme whose id the catalog can take.</summary>
     public bool CanRename => CanDelete && IsValid;
 
     /// <summary>
-    /// Whether the row's context menu offers Delete: any user theme, valid or not, whose id the catalog can take (a file named
-    /// after a Windows device, such as <c>con</c>, is listed but cannot be deleted from here).
+    /// Whether the row's context menu offers Delete: any user theme on disk, valid or not, whose id the catalog can take (a file
+    /// named after a Windows device, such as <c>con</c>, is listed but cannot be deleted from here).
     /// </summary>
-    public bool CanDelete => !IsBuiltIn && ThemeIds.IsValid(Id);
+    public bool CanDelete => !IsBuiltIn && !IsMissing && ThemeIds.IsValid(Id);
 
     /// <summary>The light half's page background, for the chip; transparent for a theme that did not load.</summary>
     public Color LightBackground { get; }

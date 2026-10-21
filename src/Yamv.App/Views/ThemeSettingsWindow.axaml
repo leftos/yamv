@@ -75,6 +75,21 @@
     <Style Selector="Button.btn:disabled">
       <Setter Property="Opacity" Value="0.45" />
     </Style>
+    <Style Selector="Button.btn.sm">
+      <Setter Property="Height" Value="26" />
+      <Setter Property="Padding" Value="10,0" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <!-- The changed-on-disk bar: the accent tint over the page background, or the warning colours when the file no longer loads. -->
+    <Style Selector="Border#DiskBar">
+      <Setter Property="Background" Value="{DynamicResource YamvPageBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvAccentSoft}" />
+    </Style>
+    <Style Selector="Border#DiskBar.warn">
+      <Setter Property="Background" Value="{DynamicResource YamvWarningBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvWarningLine}" />
+    </Style>
 
     <Style Selector="TextBlock.section">
       <Setter Property="FontSize" Value="10.5" />
@@ -110,6 +125,13 @@
       <!-- The mock's 550; the bundled Inter has static faces only (Medium 500, SemiBold 600, no 550), so the heavier one. -->
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
+    <!-- A theme in use whose file is gone: greyed, selected or not. -->
+    <Style Selector="Panel.row.gone TextBlock.name">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+    <Style Selector="Panel.row.gone Border.chip">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
     <Style Selector="TextBox.rename">
       <Setter Property="MinHeight" Value="0" />
       <Setter Property="Height" Value="22" />
@@ -136,6 +158,13 @@
     </Style>
     <Style Selector="Border.badge.mute > TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+    <Style Selector="Border.badge.warn">
+      <Setter Property="Background" Value="{DynamicResource YamvWarningBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvWarningLine}" />
+    </Style>
+    <Style Selector="Border.badge.warn > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource YamvWarning}" />
     </Style>
 
     <!-- The token editor's Shared / Light / Dark segments. -->
@@ -193,6 +222,7 @@
         Classes="row"
         Classes.selected="{Binding IsSelected}"
         Classes.bad="{Binding !IsValid}"
+        Classes.gone="{Binding IsMissing}"
         PointerPressed="OnRowPressed"
         AutomationProperties.Name="{Binding Name}"
       >
@@ -214,6 +244,7 @@
         <DockPanel Margin="8,0">
           <!-- The 22 x 14 chip with a 1 px ring outside it, as the mock's box-shadow; negative margins keep the ring out of the layout. -->
           <Border
+            Classes="chip"
             DockPanel.Dock="Left"
             Margin="-1,-1,7,-1"
             VerticalAlignment="Center"
@@ -254,7 +285,27 @@
               </Panel>
             </Border>
           </Border>
-          <Panel DockPanel.Dock="Right" Background="Transparent" IsVisible="{Binding !IsValid}" ToolTip.Tip="This theme didn't load">
+          <Panel DockPanel.Dock="Right" Background="Transparent" IsVisible="{Binding IsMissing}" ToolTip.Tip="Missing on disk">
+            <Viewbox Width="14" Height="14">
+              <Canvas Width="16" Height="16">
+                <!-- A dashed file; Avalonia's dashes are in stroke widths, so the mock's 2.2 / 1.6 px over 1.3 px. -->
+                <Path
+                  Data="M3.5,1.8 L9.5,1.8 L12.5,4.8 L12.5,14.2 L3.5,14.2 Z"
+                  Stroke="{DynamicResource YamvTextMuted}"
+                  StrokeThickness="1.3"
+                  StrokeDashArray="1.7,1.2"
+                  StrokeJoin="Round"
+                />
+              </Canvas>
+            </Viewbox>
+          </Panel>
+          <Panel
+            x:Name="RowWarning"
+            DockPanel.Dock="Right"
+            Background="Transparent"
+            IsVisible="{Binding ShowsWarning}"
+            ToolTip.Tip="{Binding WarningTip}"
+          >
             <Viewbox Width="14" Height="14">
               <Canvas Width="16" Height="16">
                 <Path Data="M8,1.6 L15,14 L1,14 Z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
@@ -308,6 +359,69 @@
             IsVisible="{Binding IsDirty}"
           />
         </StackPanel>
+      </Border>
+
+      <Border
+        x:Name="DiskBar"
+        DockPanel.Dock="Top"
+        Height="42"
+        BorderThickness="0,0,0,1"
+        Classes.warn="{Binding DiskBroken}"
+        IsVisible="{Binding ChangedOnDisk}"
+        ToolTip.Tip="{Binding DiskBarText}"
+        AutomationProperties.Name="{Binding DiskBarText}"
+      >
+        <Panel>
+          <!-- The mock's 9% accent over the page background. -->
+          <Border Background="{DynamicResource YamvAccent}" Opacity="0.09" IsVisible="{Binding !DiskBroken}" />
+          <DockPanel Margin="14,0,12,0" VerticalAlignment="Center">
+            <Panel DockPanel.Dock="Left" Width="16" Height="16" Margin="0,0,10,0" VerticalAlignment="Center">
+              <Canvas Width="16" Height="16" IsVisible="{Binding !DiskBroken}">
+                <Path
+                  Data="M2.7,6.6 A5.4,5.4 0 0 1 12.6,4.8 M13.3,9.4 A5.4,5.4 0 0 1 3.4,11.2"
+                  Stroke="{DynamicResource YamvAccent}"
+                  StrokeThickness="1.45"
+                  StrokeLineCap="Round"
+                />
+                <Path
+                  Data="M12.9,1.9 L12.9,5 L9.8,5 M3.1,14.1 L3.1,11 L6.2,11"
+                  Stroke="{DynamicResource YamvAccent}"
+                  StrokeThickness="1.45"
+                  StrokeLineCap="Round"
+                  StrokeJoin="Round"
+                />
+              </Canvas>
+              <Canvas Width="16" Height="16" IsVisible="{Binding DiskBroken}">
+                <Path Data="M8,1.6 L15,14 L1,14 Z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
+                <Path Data="M8,6 L8,10" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
+              </Canvas>
+            </Panel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" Margin="10,0,0,0" VerticalAlignment="Center">
+              <Button x:Name="ReloadButton" Classes="btn sm" Content="Reload" Command="{Binding ReloadFromDiskCommand}" />
+              <Button x:Name="KeepMineButton" Classes="btn sm" Content="Keep mine" Command="{Binding KeepMineCommand}" />
+            </StackPanel>
+            <DockPanel VerticalAlignment="Center">
+              <TextBlock
+                x:Name="DiskBarTitle"
+                DockPanel.Dock="Left"
+                Text="{Binding DiskBarTitle}"
+                FontSize="12.5"
+                FontWeight="SemiBold"
+                Foreground="{DynamicResource YamvText}"
+              />
+              <TextBlock
+                x:Name="DiskBarError"
+                Text="{Binding DiskError}"
+                IsVisible="{Binding DiskBroken}"
+                Margin="4,0,0,0"
+                FontSize="12.5"
+                Foreground="{DynamicResource YamvTextSecondary}"
+                TextTrimming="CharacterEllipsis"
+              />
+            </DockPanel>
+          </DockPanel>
+        </Panel>
       </Border>
 
       <Border
@@ -396,7 +510,7 @@
                     FontWeight="SemiBold"
                     Foreground="{DynamicResource YamvHeading}"
                   />
-                  <Border Classes="badge" Classes.mute="{Binding IsBuiltIn}">
+                  <Border Classes="badge" Classes.mute="{Binding IsBuiltIn}" Classes.warn="{Binding IsMissing}">
                     <TextBlock Text="{Binding Badge}" />
                   </Border>
                 </StackPanel>
@@ -473,6 +587,33 @@
                     TextWrapping="Wrap"
                     Foreground="{DynamicResource YamvTextSecondary}"
                   />
+                </DockPanel>
+                <DockPanel x:Name="MissingNote" Margin="0,8,0,0" IsVisible="{Binding IsMissing}">
+                  <Viewbox DockPanel.Dock="Left" Width="13" Height="13" Margin="0,1,7,0" VerticalAlignment="Top">
+                    <Canvas Width="16" Height="16">
+                      <Ellipse
+                        Canvas.Left="1.7"
+                        Canvas.Top="1.7"
+                        Width="12.6"
+                        Height="12.6"
+                        Stroke="{DynamicResource YamvAccent}"
+                        StrokeThickness="1.4"
+                      />
+                      <Path Data="M8,7.2 L8,11.2" Stroke="{DynamicResource YamvAccent}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                      <Ellipse Canvas.Left="7.05" Canvas.Top="3.95" Width="1.9" Height="1.9" Fill="{DynamicResource YamvAccent}" />
+                    </Canvas>
+                  </Viewbox>
+                  <TextBlock
+                    x:Name="MissingNoteText"
+                    FontSize="11.5"
+                    LineHeight="16"
+                    TextWrapping="Wrap"
+                    Foreground="{DynamicResource YamvTextSecondary}"
+                  >
+                    <Run Text="Missing on disk." FontWeight="SemiBold" Foreground="{DynamicResource YamvText}" /><Run
+                      Text=" Using the last loaded version."
+                    />
+                  </TextBlock>
                 </DockPanel>
                 <TextBlock
                   x:Name="ErrorLineText"

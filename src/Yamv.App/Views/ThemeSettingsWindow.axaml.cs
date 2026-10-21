@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -15,16 +16,19 @@ namespace Yamv.App.Views;
 /// <summary>
 /// The theme settings window: the theme list with its Rename and Delete context menu and the Appearance choice, the selected
 /// theme's header with the <c>EditorHost</c> for the token editor or the pane of a theme that did not load, the
-/// <c>PreviewHost</c> on the right, and the footer. Its chrome takes the app's theme resources, so it keeps the saved theme
-/// until Save. It asks its confirms inside itself (<see cref="ConfirmUnsavedAsync"/>, <see cref="ConfirmDeleteAsync"/>), shows the
-/// Import notice inside itself (<see cref="ConfirmImportAsync"/>), and holds a close while the theme has unsaved edits until the
-/// unsaved confirm is answered, and while the Import notice is open.
+/// <c>PreviewHost</c> on the right, and the footer, under the bar that says the theme changed on disk. Its chrome takes the app's
+/// theme resources, so it keeps the saved theme until Save. It asks its confirms inside itself (<see cref="ConfirmUnsavedAsync"/>,
+/// <see cref="ConfirmDeleteAsync"/>), shows the Import notice inside itself (<see cref="ConfirmImportAsync"/>), cancels either
+/// when it closes, and holds a close while the theme has unsaved edits until the unsaved confirm is answered
+/// (<see cref="ConfirmCloseAsync"/>).
 /// </summary>
 public partial class ThemeSettingsWindow : Window
 {
     private readonly ThemeSettingsViewModel? _viewModel;
     private readonly IAppLog? _log;
     private bool _closeAllowed;
+    private Task<bool>? _closeCheck;
+    private int _openModals;
 
     /// <summary>Creates an empty window; the XAML loader needs it. A real window is made with the other constructor.</summary>
     public ThemeSettingsWindow()
@@ -49,6 +53,7 @@ public partial class ThemeSettingsWindow : Window
         DataContext = viewModel;
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
         ActualThemeVariantChanged += (_, _) => UpdateShownAppearance();
+        viewModel.PropertyChanged += OnViewModelPropertyChanged;
         UpdateShownAppearance();
     }
 
@@ -73,8 +78,9 @@ public partial class ThemeSettingsWindow : Window
     }
 
     /// <summary>
-    /// Holds a close while the Import notice is open, and while the theme has unsaved edits asks the unsaved confirm; closes after
-    /// Save or Discard.
+    /// Whatever the close's reason, cancels an open Import notice or confirm (its action is dropped); then, while the theme has
+    /// unsaved edits, holds the close and asks the unsaved confirm, closing again after Save or Discard. A close while that confirm
+    /// is open is held too.
     /// </summary>
     protected override void OnClosing(WindowClosingEventArgs e)
     {
@@ -82,33 +88,63 @@ public partial class ThemeSettingsWindow : Window
         base.OnClosing(e);
         if (_closeAllowed)
         {
+            _closeAllowed = false;
             return;
         }
 
-        if (ImportNotice.IsOpen)
+        if (_closeCheck is not null)
         {
             e.Cancel = true;
             return;
         }
 
-        if (_viewModel is not { IsDirty: true, WorkingTheme: { } working })
+        CancelDialogs();
+        if (_viewModel is not { IsDirty: true, WorkingTheme: not null })
         {
             return;
         }
 
         e.Cancel = true;
-        if (!Confirm.IsOpen)
+        RunInBackground(CloseAfterCheckAsync, "the close confirm");
+    }
+
+    /// <summary>
+    /// The check the owner window's close and the app's shutdown wait on: cancels an open Import notice or confirm, then, while
+    /// the theme has unsaved edits, asks Save, Discard or Cancel. True when the owner may go on closing, after which this window
+    /// closes without asking again; false on Cancel or a failed save. A call while the check is running returns the same check.
+    /// </summary>
+    internal Task<bool> ConfirmCloseAsync()
+    {
+        if (_closeCheck is { } running)
         {
-            RunInBackground(() => ConfirmCloseAsync(working.Name), "the close confirm");
+            return running;
         }
+
+        Task<bool> check = CheckCloseAsync();
+        if (!check.IsCompleted)
+        {
+            _closeCheck = check;
+        }
+
+        return check;
     }
 
     /// <summary>Completes a confirm or an Import notice still open when the window closes as Cancel, so what awaits it carries on.</summary>
     protected override void OnClosed(EventArgs e)
     {
-        Confirm.Cancel();
-        ImportNotice.Cancel();
+        CancelDialogs();
+        _viewModel?.PropertyChanged -= OnViewModelPropertyChanged;
+
         base.OnClosed(e);
+    }
+
+    /// <summary>A new unsaved edit takes back a close the close check allowed, so the next close asks again.</summary>
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ThemeSettingsViewModel.IsDirty) && _viewModel is { IsDirty: true })
+        {
+            _closeAllowed = false;
+        }
     }
 
     /// <summary>Runs <paramref name="work"/> without waiting for it, and logs it as an Error if it fails.</summary>
@@ -143,8 +179,13 @@ public partial class ThemeSettingsWindow : Window
         ShowModalAsync(() => Confirm.ShowAsync(title, body, primary, secondary));
 
     /// <summary>Runs <paramref name="show"/> with everything behind its scrim disabled, so Tab cannot reach the list or the footer.</summary>
+    /// <remarks>
+    /// Counts the open dialogs, so a dialog cancelled and replaced by another (the close confirm after a cancelled notice) does
+    /// not enable the window under the new one when its own wait ends.
+    /// </remarks>
     private async Task<T> ShowModalAsync<T>(Func<Task<T>> show)
     {
+        _openModals++;
         WindowContent.IsEnabled = false;
         try
         {
@@ -152,20 +193,52 @@ public partial class ThemeSettingsWindow : Window
         }
         finally
         {
-            WindowContent.IsEnabled = true;
+            _openModals--;
+            WindowContent.IsEnabled = _openModals == 0;
         }
     }
 
-    private async Task ConfirmCloseAsync(string name)
+    /// <summary>Completes an open confirm and an open Import notice as Cancel.</summary>
+    private void CancelDialogs()
     {
-        UnsavedChoice choice = await ConfirmUnsavedAsync(name);
-        if (choice == UnsavedChoice.Cancel || (choice == UnsavedChoice.Save && !_viewModel!.TrySave()))
-        {
-            return;
-        }
+        Confirm.Cancel();
+        ImportNotice.Cancel();
+    }
 
-        _closeAllowed = true;
-        Close();
+    private async Task<bool> CheckCloseAsync()
+    {
+        try
+        {
+            CancelDialogs();
+            if (_viewModel is { IsDirty: true, WorkingTheme: { } working })
+            {
+                UnsavedChoice choice = await ConfirmUnsavedAsync(working.Name);
+                if (choice == UnsavedChoice.Cancel || (choice == UnsavedChoice.Save && !_viewModel.TrySave()))
+                {
+                    return false;
+                }
+
+                if (choice == UnsavedChoice.Discard)
+                {
+                    _viewModel.RevertCommand.Execute(null);
+                }
+            }
+
+            _closeAllowed = true;
+            return true;
+        }
+        finally
+        {
+            _closeCheck = null;
+        }
+    }
+
+    private async Task CloseAfterCheckAsync()
+    {
+        if (await ConfirmCloseAsync())
+        {
+            Close();
+        }
     }
 
     private void UpdateShownAppearance() =>
@@ -175,8 +248,7 @@ public partial class ThemeSettingsWindow : Window
     {
         if (e.Key == Key.Escape && (Confirm.IsOpen || ImportNotice.IsOpen))
         {
-            Confirm.Cancel();
-            ImportNotice.Cancel();
+            CancelDialogs();
             e.Handled = true;
         }
     }

@@ -1052,7 +1052,7 @@ public sealed class ThemeSettingsWindowTests
         });
 
     [Fact]
-    public Task Closing_the_window_while_the_notice_is_open_is_ignored() =>
+    public Task Closing_the_window_while_the_notice_is_open_with_no_edits_cancels_the_notice_and_closes() =>
         Headless.Run(() =>
         {
             using var fixture = new Fixture();
@@ -1065,14 +1065,13 @@ public sealed class ThemeSettingsWindowTests
             fixture.Window.Close();
             fixture.Settle();
 
-            Assert.False(closed);
-            Assert.True(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
-
-            fixture.Press(Key.Escape);
+            Assert.True(closed);
+            Assert.False(fixture.Find<Control>("ImportNotice").IsVisible);
+            Assert.False(File.Exists(fixture.PathOf("solar")));
         });
 
     [Fact]
-    public Task Closing_with_unsaved_edits_while_the_notice_is_open_is_ignored_and_asks_nothing() =>
+    public Task Closing_with_unsaved_edits_while_the_notice_is_open_cancels_the_notice_and_asks_the_unsaved_confirm() =>
         Headless.Run(() =>
         {
             using var fixture = new Fixture();
@@ -1088,10 +1087,156 @@ public sealed class ThemeSettingsWindowTests
             fixture.Settle();
 
             Assert.False(closed);
-            Assert.True(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
-            Assert.False(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+            Assert.False(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+            Assert.True(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+            Assert.Contains("Unsaved changes", VisibleTexts(fixture.Find<Control>("Confirm")));
 
-            fixture.Press(Key.Escape);
+            fixture.Click(fixture.Find<Button>("CancelButton"));
+
+            Assert.False(closed);
+            Assert.True(fixture.Find<Control>("WindowContent").IsEnabled);
+            Assert.False(File.Exists(fixture.PathOf("solar")));
+        });
+
+    [Theory]
+    [InlineData("PrimaryButton", true)]
+    [InlineData("SecondaryButton", true)]
+    [InlineData("CancelButton", false)]
+    public Task The_close_check_asks_about_unsaved_edits_and_says_whether_the_owner_may_close(string button, bool mayClose) =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+            bool closed = false;
+            fixture.Window.Closed += (_, _) => closed = true;
+
+            Task<bool> check = fixture.Window.ConfirmCloseAsync();
+            fixture.Settle();
+            Assert.True(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+            fixture.Click(fixture.Find<Button>(button));
+
+            Assert.True(check.IsCompletedSuccessfully);
+            Assert.Equal(mayClose, check.Result);
+            Assert.False(closed);
+            Assert.Equal(button == "PrimaryButton", File.ReadAllText(fixture.PathOf("mine")).Contains("#3fb950", StringComparison.Ordinal));
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.Equal(mayClose, closed);
+            Assert.Equal(!mayClose, fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+            fixture.Find<ConfirmDialog>("Confirm").Cancel();
+        });
+
+    [Fact]
+    public Task The_close_confirm_replacing_a_cancelled_notice_keeps_the_window_disabled_while_it_is_open() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+            fixture.AddImport("solar.yamv-theme.json", """{ "name": "Solar", "light": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.True(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+            Assert.False(fixture.Find<Control>("WindowContent").IsEnabled);
+            Assert.False(fixture.Find<Button>("SaveButton").IsEffectivelyEnabled);
+
+            fixture.Click(fixture.Find<Button>("CancelButton"));
+        });
+
+    [Fact]
+    public Task The_close_check_Save_writes_the_missing_theme_in_use_again() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            File.Delete(fixture.PathOf("mine"));
+            fixture.ViewModel.OnThemesChangedOnDisk();
+            fixture.Settle();
+
+            Task<bool> check = fixture.Window.ConfirmCloseAsync();
+            fixture.Settle();
+            fixture.Click(fixture.Find<Button>("PrimaryButton"));
+
+            Assert.True(check.IsCompletedSuccessfully);
+            Assert.True(check.Result);
+            Assert.Contains("#3fb950", File.ReadAllText(fixture.PathOf("mine")), StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task After_a_close_check_that_allowed_a_cancelled_owner_close_a_new_edit_asks_again_on_close() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+            Task<bool> check = fixture.Window.ConfirmCloseAsync();
+            fixture.Settle();
+            fixture.Click(fixture.Find<Button>("SecondaryButton"));
+            Assert.True(check.Result);
+            Assert.False(fixture.ViewModel.IsDirty);
+            bool closed = false;
+            fixture.Window.Closed += (_, _) => closed = true;
+
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#445566"));
+            fixture.Settle();
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.False(closed);
+            Assert.True(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+            fixture.Click(fixture.Find<Button>("CancelButton"));
+        });
+
+    [Fact]
+    public Task The_disk_bar_shows_Reload_and_Keep_mine_and_turns_to_the_warning_when_the_file_no_longer_loads() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            Assert.False(fixture.Find<Control>("DiskBar").IsEffectivelyVisible);
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            File.WriteAllText(fixture.PathOf("mine"), """{ "name": "Mine", "light": { "tokens": { "accent": "#445566" } } }""");
+
+            fixture.ViewModel.OnThemesChangedOnDisk();
+            fixture.Settle();
+
+            Border bar = fixture.Find<Border>("DiskBar");
+            Assert.True(bar.IsEffectivelyVisible);
+            Assert.Equal(42, bar.Bounds.Height);
+            Assert.Equal(fixture.Window.Bounds.Width, bar.Bounds.Width);
+            Assert.DoesNotContain("warn", bar.Classes);
+            Assert.Contains("This theme changed on disk", VisibleTexts(bar));
+            Button reload = fixture.Find<Button>("ReloadButton");
+            Button keepMine = fixture.Find<Button>("KeepMineButton");
+            Assert.Equal("Reload", reload.Content);
+            Assert.Equal("Keep mine", keepMine.Content);
+            Assert.True(reload.IsEffectivelyEnabled);
+            Assert.True(keepMine.IsEffectivelyEnabled);
+
+            File.WriteAllText(fixture.PathOf("mine"), """{ "name": "Mine", """);
+            fixture.ViewModel.OnThemesChangedOnDisk();
+            fixture.Settle();
+
+            Assert.Contains("warn", bar.Classes);
+            List<string> texts = VisibleTexts(bar);
+            Assert.Contains("This theme changed on disk and no longer loads:", texts);
+            Assert.Contains(fixture.ViewModel.DiskError!, texts);
+            Assert.False(reload.IsEffectivelyEnabled);
+            Assert.True(keepMine.IsEffectivelyEnabled);
+            Assert.True(
+                fixture.Row("mine").GetVisualDescendants().OfType<Control>().Single(control => control.Name == "RowWarning").IsEffectivelyVisible
+            );
+
+            fixture.Click(keepMine);
+
+            Assert.False(bar.IsEffectivelyVisible);
+            Assert.True(fixture.ViewModel.IsDirty);
         });
 
     [Fact]

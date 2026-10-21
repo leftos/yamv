@@ -56,8 +56,10 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         nameof(IsBuiltIn),
         nameof(IsInvalid),
         nameof(IsEditable),
+        nameof(IsMissing),
         nameof(ShowsEditor),
         nameof(CanEditAsText),
+        nameof(CanExport),
         nameof(SelectedName),
         nameof(Badge),
         nameof(Description),
@@ -86,6 +88,15 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     private readonly IAppLog _log;
     private readonly IReadOnlyList<TokenRowViewModel> _tokenRows;
     private readonly bool _ready;
+
+    /// <summary>The selected theme's row kept with its last valid version while its file no longer loads, or null.</summary>
+    private ThemeRowViewModel? _brokenRow;
+
+    /// <summary>The row kept for the theme in use while its file is gone from the themes folder, or null.</summary>
+    private ThemeRowViewModel? _missingRow;
+
+    /// <summary>The selected theme as its changed file holds it while the bar is up over unsaved edits, or null.</summary>
+    private ThemeDefinition? _diskTheme;
 
     /// <summary>Lists the themes and selects the theme in use, without applying it again.</summary>
     /// <param name="catalog">The themes to list and edit.</param>
@@ -145,6 +156,29 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     /// <summary>The last failed write, as one line for the header, or null.</summary>
     [ObservableProperty]
     public partial string? ErrorLine { get; private set; }
+
+    /// <summary>
+    /// Whether the window shows the bar that says the selected theme's file changed on disk: while it holds unsaved edits, or
+    /// since the file no longer loads.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ReloadFromDiskCommand), nameof(KeepMineCommand))]
+    public partial bool ChangedOnDisk { get; private set; }
+
+    /// <summary>The error of the selected theme's changed file when it no longer loads, or null.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DiskBroken), nameof(DiskBarTitle), nameof(DiskBarText))]
+    [NotifyCanExecuteChangedFor(nameof(ReloadFromDiskCommand))]
+    public partial string? DiskError { get; private set; }
+
+    /// <summary>Whether the selected theme's changed file no longer loads, so the bar takes the warning colours.</summary>
+    public bool DiskBroken => DiskError is not null;
+
+    /// <summary>The bar's bold text, before the error of a file that no longer loads.</summary>
+    public string DiskBarTitle => DiskBroken ? "This theme changed on disk and no longer loads:" : "This theme changed on disk";
+
+    /// <summary>The bar's whole text: its title, then the error of a file that no longer loads.</summary>
+    public string DiskBarText => DiskError is { } error ? $"{DiskBarTitle} {error}" : DiskBarTitle;
 
     /// <summary>The Appearance in use; a change applies the theme in use with it.</summary>
     [ObservableProperty]
@@ -217,19 +251,31 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
 
     public bool IsInvalid => Selected is { IsValid: false };
 
-    /// <summary>Whether the selected theme is a valid user theme, which edits can change.</summary>
-    public bool IsEditable => Selected is { IsBuiltIn: false, IsValid: true };
+    /// <summary>Whether the selected theme is a valid user theme on disk, which edits can change.</summary>
+    public bool IsEditable => Selected is { IsBuiltIn: false, IsValid: true, IsMissing: false };
+
+    /// <summary>
+    /// Whether the selected row is the theme in use whose file is gone, shown in its last loaded version with any unsaved edits;
+    /// only Save, which writes its file again, and Revert are on.
+    /// </summary>
+    public bool IsMissing => Selected?.IsMissing == true;
 
     /// <summary>Whether the token editor shows: the selected theme loaded.</summary>
     public bool ShowsEditor => Selected is { IsValid: true };
 
-    /// <summary>Whether Edit as text is on: a user theme with a file, valid or not.</summary>
-    public bool CanEditAsText => Selected is { IsBuiltIn: false, FilePath: not null };
+    /// <summary>Whether Edit as text is on: a user theme with a file on disk, valid or not.</summary>
+    public bool CanEditAsText => Selected is { IsBuiltIn: false, FilePath: not null, IsMissing: false };
+
+    /// <summary>Whether Export is on: the selected theme loaded and is not missing on disk.</summary>
+    public bool CanExport => ShowsEditor && !IsMissing;
 
     public string SelectedName => Selected?.Name ?? "";
 
-    /// <summary>The header's badge, upper-cased as drawn: <c>BUILT-IN</c> or <c>YOURS</c>.</summary>
-    public string Badge => IsBuiltIn ? "BUILT-IN" : "YOURS";
+    /// <summary>The header's badge, upper-cased as drawn: <c>MISSING ON DISK</c>, <c>BUILT-IN</c> or <c>YOURS</c>.</summary>
+    public string Badge =>
+        IsMissing ? "MISSING ON DISK"
+        : IsBuiltIn ? "BUILT-IN"
+        : "YOURS";
 
     /// <summary>The header's line under the name: a built-in theme's description, else the file name and the halves it has.</summary>
     public string Description
@@ -300,6 +346,34 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Lists the themes again after the themes folder changed on disk, without applying any theme (the app applies the change
+    /// itself), and follows the selected theme's file. Content equal to the saved theme changes nothing; a change with no unsaved
+    /// edits is shown at once; a change under unsaved edits keeps them and raises the bar (<see cref="ChangedOnDisk"/>) with
+    /// Reload and Keep mine; a file that no longer loads keeps the last valid version, edits included, and raises the bar with
+    /// <see cref="DiskError"/>. The theme in use, deleted or renamed outside the app, stays listed as a missing row in its last
+    /// loaded version, keeping any unsaved edits, which Save writes to its file again and Revert drops; another selected theme that
+    /// is gone gives way to the theme in use.
+    /// </summary>
+    public void OnThemesChangedOnDisk()
+    {
+        ThemeRowViewModel? previous = Selected;
+        string? previousError = previous?.DiskError;
+        IReadOnlyList<ThemeEntry> entries = _catalog.LoadAll();
+        HoldMissingInUse(entries);
+        if (
+            previous is { IsValid: true, IsMissing: false }
+            && entries.Any(entry => SameKey(entry.Source, entry.Id, previous.Key) && !IsLoaded(entry))
+        )
+        {
+            _brokenRow = previous;
+        }
+
+        List(entries, previous?.Key);
+        FollowSelected(previousError);
+        NotifyDerived();
+    }
+
     /// <summary>Sets a token in the working copy.</summary>
     /// <exception cref="InvalidOperationException">The selected theme is built in or did not load.</exception>
     public void SetToken(ThemeTab tab, string name, ThemeValue value) => Edit(ThemeEditing.SetToken(RequireEditable(), tab, name, value));
@@ -318,7 +392,7 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     /// </summary>
     public bool TrySave()
     {
-        if (!IsEditable || WorkingTheme is not { } working)
+        if (!(IsEditable || IsMissing) || WorkingTheme is not { } working)
         {
             return false;
         }
@@ -336,6 +410,7 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
 
         SavedTheme = working;
         IsDirty = false;
+        ClearDiskBar();
         if (ThemeIds.Comparer.Equals(InUseId, working.Id))
         {
             _seams.Apply(working.Id, SelectedAppearance.Value);
@@ -419,7 +494,7 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
             return;
         }
 
-        bool wasSelected = Selected?.Key == row.Key;
+        bool wasSelected = Selected is { } selected && SameKey(selected.Entry.Source, selected.Id, row.Key);
         bool wasInUse = row.IsValid && ThemeIds.Comparer.Equals(InUseId, row.Id);
         ErrorLine = null;
         try
@@ -450,15 +525,52 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanSave))]
     private void Save() => TrySave();
 
-    private bool CanSave() => IsEditable && IsDirty;
+    /// <summary>Whether Save and Revert are on: unsaved edits on an editable theme, or on the theme in use whose file is gone.</summary>
+    private bool CanSave() => (IsEditable || IsMissing) && IsDirty;
 
-    /// <summary>Drops the unsaved edits.</summary>
+    /// <summary>Drops the unsaved edits; with the bar up over a changed file that loads, shows the file as it now holds the theme.</summary>
     [RelayCommand(CanExecute = nameof(CanSave))]
     private void Revert()
     {
+        if (ChangedOnDisk && !DiskBroken && Selected is { } row)
+        {
+            Show(row, apply: false);
+            return;
+        }
+
         WorkingTheme = SavedTheme;
         ErrorLine = null;
         IsDirty = false;
+        ClearDiskBar();
+        NotifyDerived();
+    }
+
+    /// <summary>Drops the unsaved edits and shows the selected theme as its changed file holds it.</summary>
+    [RelayCommand(CanExecute = nameof(CanReloadFromDisk))]
+    private void ReloadFromDisk()
+    {
+        if (Selected is { } row)
+        {
+            Show(row, apply: false);
+        }
+    }
+
+    private bool CanReloadFromDisk() => ChangedOnDisk && !DiskBroken;
+
+    /// <summary>
+    /// Clears the bar and keeps the unsaved edits, measured from now on against the changed file, so the next Save writes the
+    /// working copy over it. While the file no longer loads, the saved theme stays the last valid version.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(ChangedOnDisk))]
+    private void KeepMine()
+    {
+        if (_diskTheme is { } disk && WorkingTheme is { } working)
+        {
+            SavedTheme = disk;
+            IsDirty = !working.ContentEquals(disk);
+        }
+
+        ClearDiskBar();
         NotifyDerived();
     }
 
@@ -553,7 +665,7 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     /// edits, first asks what to do with them: Save saves and exports, unless the save fails; Discard reverts them and exports the
     /// saved theme; Cancel exports nothing.
     /// </summary>
-    [RelayCommand(CanExecute = nameof(ShowsEditor))]
+    [RelayCommand(CanExecute = nameof(CanExport))]
     private async Task ExportAsync()
     {
         if (IsDirty && WorkingTheme is { } working)
@@ -598,7 +710,7 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
 
     partial void OnSelectedAppearanceChanged(AppearanceChoice value)
     {
-        if (_ready && value is not null)
+        if (_ready && value is not null && FindValid(InUseId) is not ({ IsMissing: true } or { DiskError: not null }))
         {
             _seams.Apply(InUseId, value.Value);
         }
@@ -687,9 +799,10 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
 
     private void Renamed(ThemeRowViewModel row, ThemeDefinition renamed)
     {
-        bool wasSelected = Selected?.Key == row.Key;
+        bool wasSelected = Selected is { } selected && SameKey(selected.Entry.Source, selected.Id, row.Key);
         if (wasSelected)
         {
+            ClearDiskBar();
             SavedTheme = renamed;
             WorkingTheme = WorkingTheme is { } working ? working with { Id = renamed.Id, Name = renamed.Name, FilePath = renamed.FilePath } : renamed;
         }
@@ -712,9 +825,9 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         }
 
         throw new InvalidOperationException(
-            IsBuiltIn
-                ? $"The built-in theme '{Selected!.Id}' is read-only; duplicate it to edit it."
-                : "The selected theme did not load, so it cannot be edited."
+            IsBuiltIn ? $"The built-in theme '{Selected!.Id}' is read-only; duplicate it to edit it."
+            : IsMissing ? $"The theme '{Selected!.Id}' is missing on disk, so it cannot be edited."
+            : "The selected theme did not load, so it cannot be edited."
         );
     }
 
@@ -733,10 +846,11 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
 
     private void Show(ThemeRowViewModel row, bool apply)
     {
-        if (apply && row.IsValid)
+        if (apply && row is { IsValid: true, IsMissing: false, DiskError: null })
         {
             _seams.Apply(row.Id, SelectedAppearance.Value);
             InUseId = row.Id;
+            DropStaleMissing();
         }
 
         Select(row);
@@ -744,8 +858,145 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         WorkingTheme = row.Theme;
         IsDirty = false;
         ErrorLine = null;
+        ClearDiskBar();
+        if (row.DiskError is { } error)
+        {
+            RaiseDiskBar(theme: null, error);
+        }
+
         NotifyDerived();
     }
+
+    /// <summary>
+    /// Shows what the list holds for the theme selected before a change on disk, whose row had <paramref name="previousError"/>:
+    /// the theme in use when it is gone, the bar when its file newly fails to load, its missing row with the working copy and its
+    /// unsaved edits kept, or else its file.
+    /// </summary>
+    private void FollowSelected(string? previousError)
+    {
+        if (Selected is not { } current)
+        {
+            Show(FindValid(InUseId) ?? DefaultRow(), apply: false);
+        }
+        else if (current.DiskError is { } error)
+        {
+            if (error != previousError)
+            {
+                RaiseDiskBar(theme: null, error);
+            }
+        }
+        else if (current.IsMissing)
+        {
+            ClearDiskBar();
+        }
+        else
+        {
+            FollowDisk(current);
+        }
+    }
+
+    /// <summary>Follows the selected theme's file after a change on disk, when it loads or did not load before either.</summary>
+    private void FollowDisk(ThemeRowViewModel row)
+    {
+        if (row.Theme is not { } theme || SavedTheme is not { } saved)
+        {
+            Show(row, apply: false);
+        }
+        else if (theme.ContentEquals(saved))
+        {
+            ClearDiskBar();
+        }
+        else if (!IsDirty)
+        {
+            Show(row, apply: false);
+        }
+        else
+        {
+            RaiseDiskBar(theme, error: null);
+        }
+    }
+
+    private void RaiseDiskBar(ThemeDefinition? theme, string? error)
+    {
+        _diskTheme = theme;
+        DiskError = error;
+        ChangedOnDisk = true;
+    }
+
+    private void ClearDiskBar()
+    {
+        _diskTheme = null;
+        DiskError = null;
+        ChangedOnDisk = false;
+    }
+
+    /// <summary>Keeps a row for the theme in use, a user theme, when <paramref name="entries"/> no longer hold its file.</summary>
+    private void HoldMissingInUse(IReadOnlyList<ThemeEntry> entries)
+    {
+        if (
+            _missingRow is null
+            && FindValid(InUseId) is { IsBuiltIn: false } inUse
+            && !entries.Any(entry => SameKey(entry.Source, entry.Id, inUse.Key))
+        )
+        {
+            _missingRow = new ThemeRowViewModel(inUse.Entry) { IsMissing = true };
+        }
+    }
+
+    /// <summary>Takes the missing row out of the list once another theme is in use.</summary>
+    private void DropStaleMissing()
+    {
+        if (_missingRow is { } missing && !ThemeIds.Comparer.Equals(missing.Id, InUseId))
+        {
+            _missingRow = null;
+            UserRows = [.. UserRows.Where(row => !ReferenceEquals(row, missing))];
+        }
+    }
+
+    /// <summary>
+    /// Puts the broken row in place of its file's invalid row while the file does not load, with the file's errors; ends the hold
+    /// once it loads again or is gone.
+    /// </summary>
+    private void HoldBroken(List<ThemeRowViewModel> user)
+    {
+        if (_brokenRow is not { } broken)
+        {
+            return;
+        }
+
+        int index = user.FindIndex(row => SameKey(row.Entry.Source, row.Id, broken.Key));
+        if (index >= 0 && !user[index].IsValid)
+        {
+            broken.DiskError = string.Join(" ", user[index].Errors);
+            user[index] = broken;
+            return;
+        }
+
+        broken.DiskError = null;
+        _brokenRow = null;
+    }
+
+    /// <summary>Adds the missing row to the list while its theme is in use and no file of its id is back.</summary>
+    private void HoldMissing(List<ThemeRowViewModel> user)
+    {
+        if (_missingRow is not { } missing)
+        {
+            return;
+        }
+
+        if (ThemeIds.Comparer.Equals(missing.Id, InUseId) && !user.Exists(row => SameKey(row.Entry.Source, row.Id, missing.Key)))
+        {
+            user.Add(missing);
+            return;
+        }
+
+        _missingRow = null;
+    }
+
+    private static bool IsLoaded(ThemeEntry entry) => entry.Result.Theme is not null;
+
+    private static bool SameKey(ThemeSource source, string id, (ThemeSource Source, string Id) key) =>
+        source == key.Source && ThemeIds.Comparer.Equals(id, key.Id);
 
     private void Select(ThemeRowViewModel? row)
     {
@@ -759,23 +1010,23 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     }
 
     /// <summary>Lists the catalog's themes again and selects the row with <paramref name="key"/>, if any.</summary>
-    private void Reload((ThemeSource Source, string Id)? key)
+    private void Reload((ThemeSource Source, string Id)? key) => List(_catalog.LoadAll(), key);
+
+    /// <summary>
+    /// Lists <paramref name="entries"/>, with the broken and missing rows held in their places, and selects the row with
+    /// <paramref name="key"/>, if any.
+    /// </summary>
+    private void List(IReadOnlyList<ThemeEntry> entries, (ThemeSource Source, string Id)? key)
     {
-        IReadOnlyList<ThemeEntry> entries = _catalog.LoadAll();
         BuiltInRows = [.. entries.Where(entry => entry.Source == ThemeSource.BuiltIn).Select(entry => new ThemeRowViewModel(entry))];
-        UserRows =
-        [
-            .. entries
-                .Where(entry => entry.Source == ThemeSource.User)
-                .Select(entry => new ThemeRowViewModel(entry))
-                .OrderBy(row => row.Name, StringComparer.CurrentCultureIgnoreCase)
-                .ThenBy(row => row.Id, StringComparer.Ordinal),
-        ];
+        List<ThemeRowViewModel> user = [.. entries.Where(entry => entry.Source == ThemeSource.User).Select(entry => new ThemeRowViewModel(entry))];
+        HoldBroken(user);
+        HoldMissing(user);
+        UserRows = [.. user.OrderBy(row => row.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(row => row.Id, StringComparer.Ordinal)];
         Select(key is { } wanted ? Find(wanted) : null);
     }
 
-    private ThemeRowViewModel? Find((ThemeSource Source, string Id) key) =>
-        Rows.FirstOrDefault(row => row.Entry.Source == key.Source && ThemeIds.Comparer.Equals(row.Id, key.Id));
+    private ThemeRowViewModel? Find((ThemeSource Source, string Id) key) => Rows.FirstOrDefault(row => SameKey(row.Entry.Source, row.Id, key));
 
     private ThemeRowViewModel? FindValid(string id) => Rows.FirstOrDefault(row => row.IsValid && ThemeIds.Comparer.Equals(row.Id, id));
 

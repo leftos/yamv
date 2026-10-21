@@ -1058,6 +1058,395 @@ public sealed class ThemeSettingsViewModelTests
         Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error");
     }
 
+    /// <summary><see cref="MineText"/> as another editor saved it: the dark quote changed.</summary>
+    private const string MineOnDiskText = """
+        {
+          // My own theme
+          "name": "Mine",
+          "light": { "tokens": { "accent": "#112233" } },
+          "dark": { "tokens": { "quote": "#ffffff" } }
+        }
+        """;
+
+    [Fact]
+    public void A_rewrite_with_the_same_content_changes_nothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        ThemeDefinition? saved = viewModel.SavedTheme;
+        ThemeDefinition? working = viewModel.WorkingTheme;
+        File.WriteAllText(fixture.PathOf("mine"), MineText);
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.Same(saved, viewModel.SavedTheme);
+        Assert.Same(working, viewModel.WorkingTheme);
+        Assert.True(viewModel.IsDirty);
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void A_change_on_disk_with_no_edits_shows_the_file_without_applying_it()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        File.WriteAllText(fixture.PathOf("mine"), MineOnDiskText);
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.Equal(new ColorValue("#ffffff"), viewModel.WorkingTheme?.Dark?.Tokens["quote"]);
+        Assert.Same(viewModel.SavedTheme, viewModel.WorkingTheme);
+        Assert.False(viewModel.IsDirty);
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void A_change_on_disk_with_edits_keeps_the_working_copy_and_shows_the_bar()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.WriteAllText(fixture.PathOf("mine"), MineOnDiskText);
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.True(viewModel.ChangedOnDisk);
+        Assert.False(viewModel.DiskBroken);
+        Assert.Equal("This theme changed on disk", viewModel.DiskBarText);
+        Assert.True(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#3fb950"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+        Assert.Equal(new ColorValue("#4493f8"), viewModel.WorkingTheme?.Dark?.Tokens["quote"]);
+        Assert.True(viewModel.ReloadFromDiskCommand.CanExecute(null));
+        Assert.True(viewModel.KeepMineCommand.CanExecute(null));
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void Reload_from_disk_drops_the_edits_and_shows_the_file()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.WriteAllText(fixture.PathOf("mine"), MineOnDiskText);
+        viewModel.OnThemesChangedOnDisk();
+
+        viewModel.ReloadFromDiskCommand.Execute(null);
+
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.False(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#112233"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+        Assert.Equal(new ColorValue("#ffffff"), viewModel.WorkingTheme?.Dark?.Tokens["quote"]);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void Keep_mine_keeps_the_edits_and_the_next_Save_writes_them_over_the_changed_file()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.WriteAllText(fixture.PathOf("mine"), MineOnDiskText);
+        viewModel.OnThemesChangedOnDisk();
+
+        viewModel.KeepMineCommand.Execute(null);
+
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.True(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#3fb950"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+
+        viewModel.SaveCommand.Execute(null);
+
+        Assert.Equal(MineText.Replace("#112233", "#3fb950", StringComparison.Ordinal), File.ReadAllText(fixture.PathOf("mine")));
+        Assert.False(viewModel.IsDirty);
+    }
+
+    [Fact]
+    public void An_unparseable_change_shows_the_broken_bar_with_Reload_off_and_Save_refused()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        const string broken = """{ "name": "Mine", """;
+        File.WriteAllText(fixture.PathOf("mine"), broken);
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.True(viewModel.ChangedOnDisk);
+        Assert.True(viewModel.DiskBroken);
+        Assert.NotNull(viewModel.DiskError);
+        Assert.Equal("This theme changed on disk and no longer loads: " + viewModel.DiskError, viewModel.DiskBarText);
+        Assert.False(viewModel.ReloadFromDiskCommand.CanExecute(null));
+        Assert.True(viewModel.KeepMineCommand.CanExecute(null));
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.True(viewModel.Selected?.ShowsWarning);
+        Assert.True(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#3fb950"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+
+        viewModel.SaveCommand.Execute(null);
+
+        Assert.StartsWith("Couldn't save: ", viewModel.ErrorLine, StringComparison.Ordinal);
+        Assert.Equal(broken, File.ReadAllText(fixture.PathOf("mine")));
+        Assert.True(viewModel.IsDirty);
+
+        viewModel.KeepMineCommand.Execute(null);
+
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.True(viewModel.IsDirty);
+        Assert.True(viewModel.Selected?.ShowsWarning);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Theory]
+    [InlineData("save")]
+    [InlineData("revert")]
+    [InlineData("select")]
+    public async Task The_bar_clears_on_Save_Revert_and_selecting_another_theme(string action)
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.WriteAllText(fixture.PathOf("mine"), MineOnDiskText);
+        viewModel.OnThemesChangedOnDisk();
+        Assert.True(viewModel.ChangedOnDisk);
+        fixture.UnsavedAnswer = UnsavedChoice.Discard;
+
+        switch (action)
+        {
+            case "save":
+                viewModel.SaveCommand.Execute(null);
+                break;
+            case "revert":
+                viewModel.RevertCommand.Execute(null);
+                break;
+            default:
+                await viewModel.SelectAsync(Row(viewModel, "alpha"));
+                break;
+        }
+
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.False(viewModel.ReloadFromDiskCommand.CanExecute(null));
+        Assert.False(viewModel.KeepMineCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void The_theme_in_use_deleted_on_disk_stays_as_a_greyed_missing_row_with_its_note()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        File.Delete(fixture.PathOf("mine"));
+
+        viewModel.OnThemesChangedOnDisk();
+
+        ThemeRowViewModel mine = Row(viewModel, "mine");
+        Assert.True(mine.IsMissing);
+        Assert.False(mine.CanRename);
+        Assert.False(mine.CanDelete);
+        Assert.Same(mine, viewModel.Selected);
+        Assert.True(viewModel.IsMissing);
+        Assert.Equal("MISSING ON DISK", viewModel.Badge);
+        Assert.Equal("Mine", viewModel.WorkingTheme?.Name);
+        Assert.Equal("mine", viewModel.InUseId);
+        Assert.False(viewModel.IsEditable);
+        Assert.False(viewModel.CanEditAsText);
+        Assert.False(viewModel.SaveCommand.CanExecute(null));
+        Assert.False(viewModel.ExportCommand.CanExecute(null));
+        Assert.False(viewModel.EditAsTextCommand.CanExecute(null));
+        Assert.Throws<InvalidOperationException>(() => viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950")));
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void A_non_selected_theme_changing_on_disk_updates_the_list_without_touching_the_selection()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        ThemeDefinition? working = viewModel.WorkingTheme;
+        File.WriteAllText(fixture.PathOf("alpha"), """{ "name": "Alpha Two", "dark": { "tokens": { "accent": "#223344" } } }""");
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.Contains(viewModel.UserRows, row => row.Name == "Alpha Two");
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.True(viewModel.Selected?.IsSelected);
+        Assert.Same(working, viewModel.WorkingTheme);
+        Assert.True(viewModel.IsDirty);
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void Revert_with_the_bar_up_shows_the_changed_file()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.WriteAllText(fixture.PathOf("mine"), MineOnDiskText);
+        viewModel.OnThemesChangedOnDisk();
+
+        viewModel.RevertCommand.Execute(null);
+
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.False(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#112233"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+        Assert.Equal(new ColorValue("#ffffff"), viewModel.WorkingTheme?.Dark?.Tokens["quote"]);
+        Assert.Same(viewModel.SavedTheme, viewModel.WorkingTheme);
+    }
+
+    [Fact]
+    public void After_Keep_mine_the_dots_and_Revert_are_measured_against_the_changed_file()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.WriteAllText(fixture.PathOf("mine"), MineOnDiskText);
+        viewModel.OnThemesChangedOnDisk();
+
+        viewModel.KeepMineCommand.Execute(null);
+
+        Assert.Equal(["accent"], viewModel.ChangedIn(ThemeTab.Light));
+        Assert.Equal(["quote"], viewModel.ChangedIn(ThemeTab.Dark));
+
+        viewModel.RevertCommand.Execute(null);
+
+        Assert.False(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#112233"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+        Assert.Equal(new ColorValue("#ffffff"), viewModel.WorkingTheme?.Dark?.Tokens["quote"]);
+    }
+
+    [Fact]
+    public void An_unparseable_change_with_no_edits_keeps_the_last_valid_version_under_the_broken_bar()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        File.WriteAllText(fixture.PathOf("mine"), """{ "name": "Mine", """);
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.True(viewModel.ChangedOnDisk);
+        Assert.True(viewModel.DiskBroken);
+        Assert.False(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#112233"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+        Assert.True(viewModel.Selected?.ShowsWarning);
+        Assert.Equal("This theme changed on disk and no longer loads", viewModel.Selected?.WarningTip);
+        Assert.False(viewModel.ReloadFromDiskCommand.CanExecute(null));
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void A_broken_file_fixed_on_disk_clears_the_bar_and_loads_the_row()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        File.WriteAllText(fixture.PathOf("mine"), """{ "name": "Mine", """);
+        viewModel.OnThemesChangedOnDisk();
+        File.WriteAllText(fixture.PathOf("mine"), MineOnDiskText);
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.False(viewModel.ChangedOnDisk);
+        Assert.Null(viewModel.Selected?.DiskError);
+        Assert.False(viewModel.Selected?.ShowsWarning);
+        Assert.Equal(new ColorValue("#ffffff"), viewModel.WorkingTheme?.Dark?.Tokens["quote"]);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public async Task The_broken_row_selected_again_applies_nothing_and_shows_the_broken_bar()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        File.WriteAllText(fixture.PathOf("mine"), """{ "name": "Mine", """);
+        viewModel.OnThemesChangedOnDisk();
+        await viewModel.SelectAsync(Row(viewModel, "alpha"));
+        fixture.Applied.Clear();
+        Assert.False(viewModel.ChangedOnDisk);
+
+        await viewModel.SelectAsync(Row(viewModel, "mine"));
+
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.Empty(fixture.Applied);
+        Assert.Equal("alpha", viewModel.InUseId);
+        Assert.True(viewModel.ChangedOnDisk);
+        Assert.True(viewModel.DiskBroken);
+    }
+
+    [Fact]
+    public void Edits_on_the_theme_in_use_survive_its_delete_on_disk_and_Save_writes_the_file_again()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.Delete(fixture.PathOf("mine"));
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.True(viewModel.IsMissing);
+        Assert.True(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#3fb950"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+        Assert.True(viewModel.SaveCommand.CanExecute(null));
+        Assert.True(viewModel.RevertCommand.CanExecute(null));
+        Assert.False(viewModel.ExportCommand.CanExecute(null));
+        Assert.False(viewModel.EditAsTextCommand.CanExecute(null));
+
+        viewModel.SaveCommand.Execute(null);
+
+        Assert.True(File.Exists(fixture.PathOf("mine")));
+        Assert.Contains("#3fb950", File.ReadAllText(fixture.PathOf("mine")), StringComparison.Ordinal);
+        Assert.False(viewModel.IsDirty);
+        Assert.False(viewModel.IsMissing);
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.Null(viewModel.ErrorLine);
+    }
+
+    [Fact]
+    public void Revert_on_the_missing_theme_in_use_drops_the_edits()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.Delete(fixture.PathOf("mine"));
+        viewModel.OnThemesChangedOnDisk();
+
+        viewModel.RevertCommand.Execute(null);
+
+        Assert.False(viewModel.IsDirty);
+        Assert.True(viewModel.IsMissing);
+        Assert.Equal(new ColorValue("#112233"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+        Assert.False(File.Exists(fixture.PathOf("mine")));
+    }
+
+    [Fact]
+    public void An_appearance_change_while_the_theme_in_use_is_missing_applies_nothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        File.Delete(fixture.PathOf("mine"));
+        viewModel.OnThemesChangedOnDisk();
+
+        viewModel.SelectedAppearance = ThemeSettingsViewModel.Appearances.Single(choice => choice.Value == "dark");
+
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void An_appearance_change_while_the_theme_in_use_is_held_broken_applies_nothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        File.WriteAllText(fixture.PathOf("mine"), """{ "name": "Mine", """);
+        viewModel.OnThemesChangedOnDisk();
+        Assert.True(viewModel.DiskBroken);
+
+        viewModel.SelectedAppearance = ThemeSettingsViewModel.Appearances.Single(choice => choice.Value == "dark");
+
+        Assert.Empty(fixture.Applied);
+    }
+
     private const string SunsetText = """
         {
           // Warm evenings.
