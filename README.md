@@ -4,6 +4,9 @@ A quiet markdown viewer for Windows and macOS.
 
 - `yamv` opens the main window with the documents you had open last time, grouped on the right by git repo or folder.
 - `yamv a.md b.md` opens a separate viewer window with just those files. It remembers nothing.
+- Ctrl+O (Cmd+O on macOS), or the empty window's **Open files…** button, picks one or more markdown or text files and opens them; a file that is already open is selected instead of added twice.
+- Right-click a document, folder or group in the tree for Reveal in Explorer (Finder on macOS), Copy path, and for documents and groups, Close and Close group.
+- A missing document's **Locate…** picks the file that replaces it, in the same place in the tree.
 
 ## Command line
 

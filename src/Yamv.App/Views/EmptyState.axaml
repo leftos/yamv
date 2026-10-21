@@ -48,7 +48,7 @@
     <Button
       x:Name="OpenFilesButton"
       Content="Open files…"
-      IsEnabled="False"
+      Click="OnOpenFilesClick"
       HorizontalAlignment="Center"
       Height="30"
       Padding="12,0"

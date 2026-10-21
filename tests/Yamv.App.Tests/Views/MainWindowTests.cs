@@ -4,6 +4,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Microsoft.Extensions.Time.Testing;
@@ -13,6 +14,7 @@ using Yamv.App.ViewModels;
 using Yamv.App.Views;
 using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
+using Yamv.Core.Platform;
 using Yamv.Core.Session;
 
 namespace Yamv.App.Tests.Views;
@@ -332,6 +334,291 @@ public sealed class MainWindowTests
             Assert.Equal(480, fixture.Window.SidebarWidth);
         });
 
+    [Fact]
+    public Task Context_menus_list_the_actions_of_their_row_kind() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            string reveal = OperatingSystem.IsMacOS() ? "Reveal in Finder" : "Reveal in Explorer";
+
+            Assert.Equal([reveal, "Copy path", "Close", "Close group"], Headers(fixture.Row(fixture.DocA).ContextMenu));
+            Assert.Equal([reveal, "Copy path"], Headers(fixture.FolderRow("docs").ContextMenu));
+            Assert.Equal([reveal, "Copy path", "Close group"], Headers(fixture.GroupHeader("repo").ContextMenu));
+        });
+
+    [Fact]
+    public Task Right_click_on_an_unselected_document_selects_and_shows_it_then_opens_its_menu() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+
+            ContextMenu menu = fixture.RightClick(fixture.Row(fixture.DocB));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+            Assert.Equal(fixture.DocB, fixture.Surface.Shown[^1].DocumentPath);
+            Assert.True(menu.IsOpen);
+            menu.Close();
+        });
+
+    [Fact]
+    public Task Right_click_on_a_folder_row_or_group_header_keeps_the_selection() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+
+            ContextMenu folderMenu = fixture.RightClick(fixture.FolderRow("docs"));
+            Assert.True(folderMenu.IsOpen);
+            folderMenu.Close();
+            ContextMenu groupMenu = fixture.RightClick(fixture.GroupHeader("repo"));
+            Assert.True(groupMenu.IsOpen);
+            groupMenu.Close();
+            fixture.Settle();
+
+            Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+            Assert.Equal(fixture.DocA, Assert.IsType<DocumentItemViewModel>(fixture.ViewModel.SelectedItem).Path);
+        });
+
+    [Fact]
+    public Task Menu_close_selects_the_next_document_and_focuses_its_row_then_the_empty_state() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB, fixture.Gone);
+
+            fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocA)), "Close");
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.DoesNotContain(fixture.DocA, fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+            fixture.AssertFocusOnSelectedRow();
+
+            fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocB)), "Close");
+            fixture.Choose(fixture.RightClick(fixture.Row(fixture.Gone)), "Close");
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.IsEmpty);
+            Assert.True(fixture.Window.EmptyState.IsVisible);
+        });
+
+    [Fact]
+    public Task Menu_close_on_the_last_document_in_tree_order_selects_the_previous() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+
+            fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocB)), "Close");
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal([fixture.DocA], fixture.State.Documents);
+            Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Menu_close_group_on_a_document_row_or_group_header_removes_that_group() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.Other, fixture.DocA, fixture.DocB);
+
+            fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocB)), "Close group");
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.Equal([fixture.Other], fixture.State.Documents);
+            Assert.DoesNotContain(AllRows(fixture.ViewModel.Items), row => row is GroupItemViewModel { Name: "repo" });
+            fixture.AssertFocusOnSelectedRow();
+
+            fixture.Choose(fixture.RightClick(fixture.GroupHeader(Path.GetDirectoryName(fixture.Other)!)), "Close group");
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.IsEmpty);
+        });
+
+    [Fact]
+    public Task Copy_path_and_reveal_send_each_row_kind_its_path() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB, fixture.Gone);
+            string docs = Path.Combine(fixture.Repo, "docs");
+
+            foreach (
+                (Control row, string path) in new (Control, string)[]
+                {
+                    (fixture.Row(fixture.DocB), fixture.DocB),
+                    (fixture.FolderRow("docs"), docs),
+                    (fixture.GroupHeader("repo"), fixture.Repo),
+                }
+            )
+            {
+                fixture.Choose(fixture.RightClick(row), "Copy path");
+                Assert.Equal(path, fixture.Files.Copied[^1]);
+            }
+
+            fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocB)), MainWindow.RevealMenuHeader);
+            fixture.Choose(fixture.RightClick(fixture.FolderRow("docs")), MainWindow.RevealMenuHeader);
+            fixture.Choose(fixture.RightClick(fixture.GroupHeader("repo")), MainWindow.RevealMenuHeader);
+            fixture.Choose(fixture.RightClick(fixture.Row(fixture.Gone)), MainWindow.RevealMenuHeader);
+
+            Assert.Equal(
+                [(fixture.DocB, RevealKind.File), (docs, RevealKind.Folder), (fixture.Repo, RevealKind.Folder), (fixture.Gone, RevealKind.File)],
+                fixture.Files.Reveals
+            );
+        });
+
+    [Fact]
+    public Task Command_O_opens_the_picked_files_and_selects_the_first() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            fixture.Click(fixture.Row(fixture.DocA));
+            fixture.Files.DocumentsToPick = [fixture.Plans, fixture.Design];
+
+            fixture.Press(Key.O, CommandModifier);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(1, fixture.Files.DocumentPicks);
+            Assert.Equal([fixture.DocA, fixture.DocB, fixture.Plans, fixture.Design], fixture.State.Documents);
+            Assert.Equal(fixture.Plans, fixture.ViewModel.SelectedPath);
+            Assert.Equal(fixture.Plans, fixture.Surface.Shown[^1].DocumentPath);
+        });
+
+    [Fact]
+    public Task Forwarded_command_o_from_the_page_opens_the_picked_files() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Files.DocumentsToPick = [fixture.DocB];
+            bool mac = OperatingSystem.IsMacOS();
+
+            fixture.Surface.RaiseKey(new KeyForwardedEventArgs("o", ctrl: !mac, meta: mac, shift: false, alt: false));
+            fixture.Settle();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal([fixture.DocA, fixture.DocB], fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Command_O_in_a_viewer_adds_the_picked_file_and_shows_the_tree() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture(persist: false);
+            await fixture.OpenAsync(fixture.DocA);
+            Assert.False(fixture.Window.Sidebar.IsVisible);
+            fixture.Files.DocumentsToPick = [fixture.DocB];
+
+            fixture.Press(Key.O, CommandModifier);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.Equal([fixture.DocA, fixture.DocB], fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+            Assert.True(fixture.Window.Sidebar.IsVisible);
+        });
+
+    [Fact]
+    public Task Command_O_with_a_cancelled_pick_changes_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+
+            fixture.Press(Key.O, CommandModifier);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(1, fixture.Files.DocumentPicks);
+            Assert.Equal([fixture.DocA, fixture.DocB], fixture.State.Documents);
+            Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Command_O_picking_an_open_file_selects_it_without_adding_it_twice() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            fixture.Files.DocumentsToPick = [fixture.DocB];
+
+            fixture.Press(Key.O, CommandModifier);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal([fixture.DocA, fixture.DocB], fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Empty_state_open_files_button_opens_the_picked_files() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync();
+            fixture.Files.DocumentsToPick = [fixture.DocA];
+            Button button = fixture.Window.EmptyState.OpenFilesButton;
+            Assert.True(button.IsEffectivelyEnabled);
+
+            fixture.Click(button);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal([fixture.DocA], fixture.State.Documents);
+            Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Locate_replaces_the_missing_document_in_place_and_keeps_its_scroll_position() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            fixture.Surface.RaiseScroll(0.4);
+            File.Delete(fixture.DocA);
+            fixture.ViewModel.Reload();
+            fixture.Settle();
+            Assert.True(fixture.Window.MissingPane.IsVisible);
+            string moved = Path.Combine(fixture.Repo, "docs", "moved.md");
+            File.WriteAllText(moved, "# Moved");
+            fixture.Files.ReplacementToPick = moved;
+            Button locate = fixture.Window.MissingPane.LocateButton;
+            Assert.True(locate.IsEffectivelyEnabled);
+
+            fixture.ClickEvent(locate);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.Equal([fixture.DocA], fixture.Files.ReplacementRequests);
+            Assert.Equal([moved, fixture.DocB], fixture.State.Documents);
+            Assert.Equal(moved, fixture.ViewModel.SelectedPath);
+            Assert.Equal((moved, 0.4), (fixture.Surface.Shown[^1].DocumentPath, fixture.Surface.Shown[^1].Scroll));
+            Assert.False(fixture.Window.MissingPane.IsVisible);
+        });
+
+    [Fact]
+    public Task Locate_with_a_cancelled_pick_changes_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.Gone, fixture.DocA);
+
+            fixture.ClickEvent(fixture.Window.MissingPane.LocateButton);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal([fixture.Gone], fixture.Files.ReplacementRequests);
+            Assert.Equal([fixture.Gone, fixture.DocA], fixture.State.Documents);
+            Assert.Equal(fixture.Gone, fixture.ViewModel.SelectedPath);
+            Assert.True(fixture.Window.MissingPane.IsVisible);
+        });
+
+    private static List<string?> Headers(ContextMenu? menu) =>
+        [.. Assert.IsType<ContextMenu>(menu).Items.OfType<MenuItem>().Select(item => item.Header as string)];
+
     /// <summary>The platform's command key: Cmd on macOS, Ctrl elsewhere.</summary>
     private static RawInputModifiers CommandModifier => OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
 
@@ -364,7 +651,11 @@ public sealed class MainWindowTests
         public Fixture(bool persist = true)
         {
             string repo = Path.Combine(_root, "repo");
+            Repo = repo;
             Directory.CreateDirectory(Path.Combine(repo, "docs"));
+            Other = Path.Combine(_root, "other", "x.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(Other)!);
+            File.WriteAllText(Other, "# X");
             DocA = Path.Combine(repo, "docs", "a.md");
             DocB = Path.Combine(repo, "docs", "b.md");
             Gone = Path.Combine(repo, "docs", "gone.md");
@@ -383,11 +674,18 @@ public sealed class MainWindowTests
                 new GroupingOptions(null, StringComparison.OrdinalIgnoreCase)
             );
             ViewModel = new DocumentWindowViewModel(State, Surface, File.ReadAllText, new FakeTimeProvider(), Log);
-            Window = new MainWindow(ViewModel, new Border(), Surface, Log);
+            Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             Window.Closed += (_, _) => IsClosed = true;
         }
 
         public bool IsClosed { get; private set; }
+
+        public string Repo { get; }
+
+        /// <summary>A document outside the repo, grouped by its folder <c>other</c>.</summary>
+        public string Other { get; }
+
+        public FakeFileActions Files { get; } = new();
 
         public string DocA { get; }
 
@@ -428,6 +726,40 @@ public sealed class MainWindowTests
                 .OfType<Panel>()
                 .Single(panel => panel.Classes.Contains("document") && panel.DataContext is DocumentItemViewModel row && row.Path == path);
 
+        public Panel FolderRow(string name) =>
+            Window
+                .Tree.GetVisualDescendants()
+                .OfType<Panel>()
+                .Single(panel => panel.Classes.Contains("folder") && panel.DataContext is FolderItemViewModel row && row.Name == name);
+
+        public Border GroupHeader(string name) =>
+            Window
+                .Tree.GetVisualDescendants()
+                .OfType<Border>()
+                .Single(border => border.Classes.Contains("group") && border.DataContext is GroupItemViewModel row && row.Name == name);
+
+        /// <summary>Presses and releases the right button over <paramref name="row"/> and returns the row's context menu.</summary>
+        public ContextMenu RightClick(Control row)
+        {
+            Point point = Center(row);
+            Window.MouseMove(point);
+            Settle();
+            Window.MouseDown(point, MouseButton.Right);
+            Settle();
+            Window.MouseUp(point, MouseButton.Right);
+            Settle();
+            return Assert.IsType<ContextMenu>(row.ContextMenu);
+        }
+
+        /// <summary>Clicks the item of <paramref name="menu"/> with this header, then closes the menu as a click does.</summary>
+        public void Choose(ContextMenu menu, string header)
+        {
+            MenuItem item = menu.Items.OfType<MenuItem>().Single(item => Equals(item.Header, header));
+            item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Close();
+            Settle();
+        }
+
         public Point Center(Visual visual) =>
             visual.TranslatePoint(new Point(visual.Bounds.Width / 2, visual.Bounds.Height / 2), Window)
             ?? throw new InvalidOperationException("The control is not in the window.");
@@ -440,6 +772,16 @@ public sealed class MainWindowTests
             Window.MouseDown(point, MouseButton.Left);
             Settle();
             Window.MouseUp(point, MouseButton.Left);
+            Settle();
+        }
+
+        /// <summary>
+        /// Raises <paramref name="button"/>'s click as a click would. A pointer over the missing pane's buttons hit-tests to the
+        /// window instead: their fill is the theme resource <c>YamvPageBackground</c>, which the test app never sets.
+        /// </summary>
+        public void ClickEvent(Button button)
+        {
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Settle();
         }
 

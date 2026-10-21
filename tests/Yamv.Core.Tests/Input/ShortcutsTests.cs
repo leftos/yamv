@@ -11,6 +11,8 @@ public sealed class ShortcutsTests
     [InlineData("B", ShortcutCommand.ToggleSidebar)]
     [InlineData("r", ShortcutCommand.Reload)]
     [InlineData("R", ShortcutCommand.Reload)]
+    [InlineData("o", ShortcutCommand.OpenFiles)]
+    [InlineData("O", ShortcutCommand.OpenFiles)]
     public void Match_CtrlLetterOnWindows_GivesItsCommand(string key, ShortcutCommand expected) =>
         Assert.Equal(expected, Shortcuts.Match(key, ctrl: true, meta: false, shift: false, alt: false, isMac: false));
 
@@ -18,6 +20,7 @@ public sealed class ShortcutsTests
     [InlineData("w", ShortcutCommand.CloseDocument)]
     [InlineData("b", ShortcutCommand.ToggleSidebar)]
     [InlineData("r", ShortcutCommand.Reload)]
+    [InlineData("o", ShortcutCommand.OpenFiles)]
     public void Match_CmdLetterOnMac_GivesItsCommand(string key, ShortcutCommand expected) =>
         Assert.Equal(expected, Shortcuts.Match(key, ctrl: false, meta: true, shift: false, alt: false, isMac: true));
 
@@ -37,18 +40,28 @@ public sealed class ShortcutsTests
     public void Match_ShiftedCapitalW_ClosesTheDocument() =>
         Assert.Equal(ShortcutCommand.CloseDocument, Shortcuts.Match("W", ctrl: true, meta: false, shift: true, alt: false, isMac: false));
 
-    [Fact]
-    public void Match_CmdWOnWindows_IsNothing() => Assert.Null(Shortcuts.Match("w", ctrl: false, meta: true, shift: false, alt: false, isMac: false));
+    [Theory]
+    [InlineData("w")]
+    [InlineData("o")]
+    public void Match_CmdLetterOnWindows_IsNothing(string key) =>
+        Assert.Null(Shortcuts.Match(key, ctrl: false, meta: true, shift: false, alt: false, isMac: false));
 
-    [Fact]
-    public void Match_CtrlWOnMac_IsNothing() => Assert.Null(Shortcuts.Match("w", ctrl: true, meta: false, shift: false, alt: false, isMac: true));
+    [Theory]
+    [InlineData("w")]
+    [InlineData("o")]
+    public void Match_CtrlLetterOnMac_IsNothing(string key) =>
+        Assert.Null(Shortcuts.Match(key, ctrl: true, meta: false, shift: false, alt: false, isMac: true));
 
     [Fact]
     public void Match_CtrlAndCmdTogether_IsNothing() =>
         Assert.Null(Shortcuts.Match("w", ctrl: true, meta: true, shift: false, alt: false, isMac: true));
 
-    [Fact]
-    public void Match_CtrlAltW_IsNothing() => Assert.Null(Shortcuts.Match("w", ctrl: true, meta: false, shift: false, alt: true, isMac: false));
+    [Theory]
+    [InlineData("w", false)]
+    [InlineData("o", false)]
+    [InlineData("o", true)]
+    public void Match_AltWithTheCommandKey_IsNothing(string key, bool isMac) =>
+        Assert.Null(Shortcuts.Match(key, ctrl: !isMac, meta: isMac, shift: false, alt: true, isMac));
 
     [Theory]
     [InlineData(false)]
@@ -65,7 +78,7 @@ public sealed class ShortcutsTests
         Assert.Null(Shortcuts.Match(key, ctrl: false, meta: false, shift: false, alt: false, isMac: false));
 
     [Theory]
-    [InlineData("o")]
+    [InlineData("p")]
     [InlineData("1")]
     [InlineData("[")]
     [InlineData("F5")]

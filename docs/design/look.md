@@ -20,7 +20,7 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
 - **Group header**: the name in semibold (the repo folder name, or the folder path with `~` for home), with a `GIT` or `DIR` badge on the right. Hovering shows the full path in a tooltip. Headers collapse with a chevron.
 - Folder rows are muted and have a chevron. Compacted chains are joined with `/` (`docs/plans`).
 - Document rows have a file icon. The selected row gets the selection fill and a 3 px accent bar on its left edge. A hovered or selected row shows a `×` close button on its right. Selecting a document expands its group and folders, and Up/Down move between documents, skipping headers.
-- Context menu: Reveal in Explorer/Finder, Copy path, Close, Close group.
+- Context menu, by row: a document has Reveal in Explorer (Finder on macOS), Copy path, Close, Close group; a folder has Reveal and Copy path; a group header has Reveal, Copy path and Close group. Right-clicking an unselected document selects and opens it first; right-clicking a folder or group leaves the selection alone.
 
 ## Edge states
 

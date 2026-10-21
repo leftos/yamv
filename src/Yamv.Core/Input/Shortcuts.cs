@@ -17,6 +17,9 @@ public enum ShortcutCommand
 
     /// <summary>Read and render the selected document again (Ctrl/Cmd+R).</summary>
     Reload,
+
+    /// <summary>Pick files and add them to the window (Ctrl/Cmd+O).</summary>
+    OpenFiles,
 }
 
 /// <summary>Maps a key press to the window command it runs, the same way for a native key and one the page forwarded.</summary>
@@ -56,6 +59,7 @@ public static class Shortcuts
             "W" => ShortcutCommand.CloseDocument,
             "B" => ShortcutCommand.ToggleSidebar,
             "R" => ShortcutCommand.Reload,
+            "O" => ShortcutCommand.OpenFiles,
             _ => null,
         };
 }

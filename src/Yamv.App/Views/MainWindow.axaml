@@ -202,6 +202,13 @@
           <TreeView.DataTemplates>
             <TreeDataTemplate DataType="vm:GroupItemViewModel" ItemsSource="{Binding Children}">
               <Border Classes="group" Margin="0,12,0,0" Padding="8,5" Background="Transparent" ToolTip.Tip="{Binding Path}">
+                <Border.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="{x:Static views:MainWindow.RevealMenuHeader}" Click="OnRevealClick" />
+                    <MenuItem Header="Copy path" Click="OnCopyPathClick" />
+                    <MenuItem Header="Close group" Click="OnCloseGroupClick" />
+                  </ContextMenu>
+                </Border.ContextMenu>
                 <DockPanel>
                   <ToggleButton Classes="chevron" IsChecked="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,5,0" />
                   <Border Classes="badge git" DockPanel.Dock="Right" IsVisible="{Binding IsRepo}">
@@ -223,6 +230,12 @@
             </TreeDataTemplate>
             <TreeDataTemplate DataType="vm:FolderItemViewModel" ItemsSource="{Binding Children}">
               <Panel Classes="row folder" ToolTip.Tip="{Binding Path}">
+                <Panel.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="{x:Static views:MainWindow.RevealMenuHeader}" Click="OnRevealClick" />
+                    <MenuItem Header="Copy path" Click="OnCopyPathClick" />
+                  </ContextMenu>
+                </Panel.ContextMenu>
                 <Border Classes="fill" />
                 <DockPanel Margin="{Binding $parent[TreeViewItem].Level, Converter={x:Static views:TreeIndent.Margin}}">
                   <ToggleButton Classes="chevron" IsChecked="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,5,0" />
@@ -237,6 +250,14 @@
                 Classes.missing="{Binding IsMissing}"
                 ToolTip.Tip="{Binding Path}"
               >
+                <Panel.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="{x:Static views:MainWindow.RevealMenuHeader}" Click="OnRevealClick" />
+                    <MenuItem Header="Copy path" Click="OnCopyPathClick" />
+                    <MenuItem Header="Close" Click="OnCloseClick" />
+                    <MenuItem Header="Close group" Click="OnCloseGroupClick" />
+                  </ContextMenu>
+                </Panel.ContextMenu>
                 <Border Classes="fill" />
                 <Border
                   Width="3"

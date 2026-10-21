@@ -47,7 +47,7 @@
       />
     </Border>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,16">
-      <Button x:Name="LocateButton" Classes="pane" Content="Locate…" IsEnabled="False" />
+      <Button x:Name="LocateButton" Classes="pane" Content="Locate…" Click="OnLocateClick" />
       <Button
         x:Name="RemoveButton"
         Classes="pane"

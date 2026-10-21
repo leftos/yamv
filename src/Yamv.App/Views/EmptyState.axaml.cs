@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 
 namespace Yamv.App.Views;
 
@@ -16,4 +17,9 @@ public partial class EmptyState : UserControl
             ModifierKey.Text = "⌘";
         }
     }
+
+    /// <summary>Raised when <b>Open files…</b> is clicked; the window shows the picker.</summary>
+    public event EventHandler? OpenFilesRequested;
+
+    private void OnOpenFilesClick(object? sender, RoutedEventArgs e) => OpenFilesRequested?.Invoke(this, EventArgs.Empty);
 }

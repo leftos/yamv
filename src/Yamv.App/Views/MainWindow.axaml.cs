@@ -4,10 +4,13 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.Input;
 using Yamv.App.Controls;
+using Yamv.App.Services;
 using Yamv.App.ViewModels;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Input;
+using Yamv.Core.Platform;
 using Yamv.Core.Session;
 
 namespace Yamv.App.Views;
@@ -16,7 +19,8 @@ namespace Yamv.App.Views;
 /// A document window: the custom title bar, the document column (the document view, the empty state or the missing pane)
 /// and the tree sidebar on the right behind a splitter. The sidebar and splitter show only when the view model shows its tree
 /// and the user has not hidden the sidebar; hidden, their columns take no width. The window runs the keyboard shortcuts, both
-/// its own key presses and those the page forwards, and keeps its normal (restored) rectangle for the session.
+/// its own key presses and those the page forwards, the tree rows' context menus, Open files… and Locate…, and keeps its
+/// normal (restored) rectangle for the session.
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -60,11 +64,14 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _surface = surface;
         _log = log;
+        FileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess);
         DocumentHost.Content = documentView;
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.CloseRequested += OnCloseRequested;
         surface.KeyForwarded += OnKeyForwarded;
+        EmptyState.OpenFilesRequested += OnOpenFilesRequested;
+        MissingPane.LocateRequested += OnLocateRequested;
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
         Tree.AddHandler(KeyDownEvent, OnTreeKeyDown, RoutingStrategies.Tunnel);
         UpdateSidebar();
@@ -73,6 +80,12 @@ public partial class MainWindow : Window
         Opened += OnOpened;
         Closed += OnClosed;
     }
+
+    /// <summary>The tree menus' reveal item: Reveal in Finder on macOS, Reveal in Explorer elsewhere.</summary>
+    public static string RevealMenuHeader { get; } = OperatingSystem.IsMacOS() ? "Reveal in Finder" : "Reveal in Explorer";
+
+    /// <summary>The pickers, reveal and clipboard the window's menus, buttons and Ctrl/Cmd+O use; tests replace it.</summary>
+    internal IFileActions? FileActions { get; set; }
 
     /// <summary>Raised when <see cref="SavedBounds"/> may have changed: the window moved, was resized, maximized or restored.</summary>
     public event EventHandler? SavedBoundsChanged;
@@ -216,7 +229,7 @@ public partial class MainWindow : Window
 
         bool treeHadFocus = Tree.IsKeyboardFocusWithin;
         RunCommand(command.Value);
-        if (treeHadFocus && command is not ShortcutCommand.Reload)
+        if (treeHadFocus && command is not (ShortcutCommand.Reload or ShortcutCommand.OpenFiles))
         {
             FocusSelectedRow();
         }
@@ -243,8 +256,107 @@ public partial class MainWindow : Window
             case ShortcutCommand.Reload:
                 _viewModel!.Reload();
                 break;
+            case ShortcutCommand.OpenFiles:
+                RunLogged(OpenFilesAsync, "Open files");
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown shortcut command.");
+        }
+    }
+
+    private void OnOpenFilesRequested(object? sender, EventArgs e) => RunLogged(OpenFilesAsync, "Open files");
+
+    private void OnLocateRequested(object? sender, EventArgs e) => RunLogged(LocateAsync, "Locate");
+
+    /// <summary>Opens the files the user picks, selecting the first; a cancelled pick changes nothing.</summary>
+    private async Task OpenFilesAsync()
+    {
+        IReadOnlyList<string> paths = await FileActions!.PickDocumentsAsync(this);
+        if (paths.Count > 0)
+        {
+            _viewModel!.Open(paths);
+        }
+    }
+
+    /// <summary>Replaces the selected document with the file the user picks; a cancelled pick changes nothing.</summary>
+    private async Task LocateAsync()
+    {
+        if (_viewModel!.SelectedPath is not string oldPath)
+        {
+            return;
+        }
+
+        if (await FileActions!.PickReplacementAsync(this, oldPath) is string newPath)
+        {
+            _viewModel.Replace(oldPath, newPath);
+        }
+    }
+
+    private void OnRevealClick(object? sender, RoutedEventArgs e)
+    {
+        if (RowOf(sender) is { } row)
+        {
+            FileActions!.Reveal(row.Path, row is DocumentItemViewModel ? RevealKind.File : RevealKind.Folder);
+        }
+    }
+
+    private void OnCopyPathClick(object? sender, RoutedEventArgs e)
+    {
+        if (RowOf(sender) is { } row)
+        {
+            RunLogged(() => FileActions!.CopyTextAsync(this, row.Path), "Copy path");
+        }
+    }
+
+    private void OnCloseClick(object? sender, RoutedEventArgs e)
+    {
+        if (RowOf(sender) is DocumentItemViewModel row)
+        {
+            row.CloseCommand.Execute(null);
+            RefocusTree();
+        }
+    }
+
+    private void OnCloseGroupClick(object? sender, RoutedEventArgs e)
+    {
+        IRelayCommand? closeGroup = RowOf(sender) switch
+        {
+            GroupItemViewModel group => group.CloseGroupCommand,
+            DocumentItemViewModel document => document.CloseGroupCommand,
+            _ => null,
+        };
+        if (closeGroup is not null)
+        {
+            closeGroup.Execute(null);
+            RefocusTree();
+        }
+    }
+
+    /// <summary>The tree row a menu item belongs to: the data of the row whose context menu holds it.</summary>
+    private static TreeItemViewModel? RowOf(object? sender) => (sender as Control)?.DataContext as TreeItemViewModel;
+
+    /// <summary>Puts focus back on the selected row after a menu changed the tree, while the tree is shown.</summary>
+    private void RefocusTree()
+    {
+        if (_viewModel!.ShowTree)
+        {
+            FocusSelectedRow();
+        }
+    }
+
+    /// <summary>Starts <paramref name="action"/> without waiting for it, logging a failure as an error rather than losing it.</summary>
+    private void RunLogged(Func<Task> action, string what) => _ = RunLoggedAsync(action, what);
+
+    private async Task RunLoggedAsync(Func<Task> action, string what)
+    {
+        try
+        {
+            await action();
+        }
+        // A handler's task is discarded, so its failure is logged here or nowhere.
+        catch (Exception exception)
+        {
+            _log!.LogError($"{what}: failed.", exception);
         }
     }
 
@@ -398,6 +510,8 @@ public partial class MainWindow : Window
         _viewModel!.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.CloseRequested -= OnCloseRequested;
         _surface!.KeyForwarded -= OnKeyForwarded;
+        EmptyState.OpenFilesRequested -= OnOpenFilesRequested;
+        MissingPane.LocateRequested -= OnLocateRequested;
         PositionChanged -= OnPositionChanged;
         Sidebar.PropertyChanged -= OnSidebarPropertyChanged;
     }

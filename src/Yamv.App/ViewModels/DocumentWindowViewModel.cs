@@ -402,7 +402,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             case FolderItem folder:
                 return new FolderItemViewModel(folder, Rows(folder.Children, selected), IsFolderExpanded(folder.Path), SetFolderExpanded);
             case DocumentItem document:
-                var row = new DocumentItemViewModel(document, SamePath(document.Path, selected), _state.Close);
+                var row = new DocumentItemViewModel(document, SamePath(document.Path, selected), _state.Close, _state.CloseGroup);
                 _documentRows.Add(row);
                 return row;
             default:

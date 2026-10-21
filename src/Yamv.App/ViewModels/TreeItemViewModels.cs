@@ -104,13 +104,19 @@ public sealed partial class DocumentItemViewModel : TreeItemViewModel
     /// <param name="item">The document as the window state's tree holds it.</param>
     /// <param name="isSelected">True when the document is the window's selection.</param>
     /// <param name="close">Closes a document, by path.</param>
-    public DocumentItemViewModel(DocumentItem item, bool isSelected, Action<string> close)
+    /// <param name="closeGroup">Closes every document of a group, by group path.</param>
+    public DocumentItemViewModel(DocumentItem item, bool isSelected, Action<string> close, Action<string> closeGroup)
         : base(item.Name, item.Path)
     {
         IsMissing = item.IsMissing;
         IsSelected = isSelected;
+        GroupPath = item.GroupPath;
         CloseCommand = new RelayCommand(() => close(Path));
+        CloseGroupCommand = new RelayCommand(() => closeGroup(GroupPath));
     }
+
+    /// <summary>The path of the group the document is in.</summary>
+    public string GroupPath { get; }
 
     /// <summary>True when the document is no longer on disk.</summary>
     [ObservableProperty]
@@ -125,4 +131,7 @@ public sealed partial class DocumentItemViewModel : TreeItemViewModel
 
     /// <summary>Closes the document.</summary>
     public IRelayCommand CloseCommand { get; }
+
+    /// <summary>Closes every document of the document's group.</summary>
+    public IRelayCommand CloseGroupCommand { get; }
 }

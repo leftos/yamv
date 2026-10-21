@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Microsoft.Extensions.Time.Testing;
 using Yamv.App.Services;
@@ -138,6 +139,28 @@ public sealed class MainWindowSessionTests
             Assert.Equal("nope", fixture.Saved().ThemeId);
         });
 
+    [Fact]
+    public Task Locate_writes_the_new_path_to_the_session() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            File.Delete(fixture.DocA);
+            fixture.ViewModel.Reload();
+            await fixture.SettleAsync();
+            string moved = Path.Combine(Path.GetDirectoryName(fixture.DocA)!, "moved.md");
+            File.WriteAllText(moved, "# Moved");
+            fixture.Files.ReplacementToPick = moved;
+
+            fixture.Window.MissingPane.LocateButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await fixture.SettleAsync();
+            fixture.Time.Advance(Delay);
+
+            SessionState saved = fixture.Saved();
+            Assert.Equal([moved, fixture.DocB], saved.OpenFiles);
+            Assert.Equal(moved, saved.SelectedFile);
+        });
+
     /// <summary>
     /// A shown main window over two temp documents, saving through a <see cref="MainWindowSession"/> to a temp session file on
     /// a fake clock. <see cref="OpenAsync"/> lets the saves that opening and showing schedule run, then deletes the file.
@@ -158,7 +181,7 @@ public sealed class MainWindowSessionTests
             SessionFile = Path.Combine(_root, "data", "session.json");
             var state = new DocumentWindowState(persist: true, _ => null, File.Exists, new GroupingOptions(null, StringComparison.OrdinalIgnoreCase));
             ViewModel = new DocumentWindowViewModel(state, Surface, File.ReadAllText, new FakeTimeProvider(), Log);
-            Window = new MainWindow(ViewModel, new Border(), Surface, Log);
+            Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             Bridge = new ThemeBridge(new ThemeCatalog(Path.Combine(_root, "themes"), Log), Application.Current!, Log);
             _session = new MainWindowSession(Window, ViewModel, Bridge, new SessionStore(SessionFile, Log), Time, Log);
         }
@@ -170,6 +193,8 @@ public sealed class MainWindowSessionTests
         public string SessionFile { get; }
 
         public FakeTimeProvider Time { get; } = new();
+
+        public FakeFileActions Files { get; } = new();
 
         public FakeDocumentSurface Surface { get; } = new();
 
