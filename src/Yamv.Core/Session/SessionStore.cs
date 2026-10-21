@@ -94,6 +94,8 @@ public sealed class SessionStore(string filePath, IAppLog log)
             OpenFiles = openFiles,
             CollapsedGroups = FilterPaths(state.CollapsedGroups ?? []),
             ScrollPositions = NormalizeScrollPositions(state.ScrollPositions ?? new Dictionary<string, double>(), open),
+            // A session written before anchors existed has no member, which source generation leaves null.
+            ScrollAnchors = NormalizeScrollAnchors(state.ScrollAnchors ?? new Dictionary<string, ScrollAnchor>(), open),
             SelectedFile = state.SelectedFile is not null && open.Contains(state.SelectedFile) ? state.SelectedFile : null,
             Window = NormalizeWindow(state.Window),
             SidebarWidth = NormalizeSidebarWidth(state.SidebarWidth),
@@ -127,6 +129,24 @@ public sealed class SessionStore(string filePath, IAppLog log)
         }
 
         return scrollPositions;
+    }
+
+    /// <summary>Keeps the anchors of open files whose line is zero or more and whose offset is from 0 to 1.</summary>
+    private static Dictionary<string, ScrollAnchor> NormalizeScrollAnchors(
+        IReadOnlyDictionary<string, ScrollAnchor> anchors,
+        HashSet<string> openFiles
+    )
+    {
+        var scrollAnchors = new Dictionary<string, ScrollAnchor>(AppPaths.PathComparer);
+        foreach ((string path, ScrollAnchor? anchor) in anchors)
+        {
+            if (openFiles.Contains(path) && anchor is { Line: >= 0, Offset: >= 0 and <= 1 })
+            {
+                scrollAnchors[path] = anchor;
+            }
+        }
+
+        return scrollAnchors;
     }
 
     private static WindowBounds? NormalizeWindow(WindowBounds? window)

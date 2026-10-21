@@ -648,7 +648,7 @@ public sealed class DocumentWindowViewModelTests
             List<bool> dirty = [];
             fixture.ViewModel.SessionDirty += (_, args) => dirty.Add(args.ScrollOnly);
 
-            fixture.Surface.RaiseScroll(0.4);
+            fixture.Surface.RaiseScroll(0.4, null);
 
             Assert.Equal([true], dirty);
             SessionState session = fixture.ViewModel.BuildSession(null, 280);
@@ -670,7 +670,7 @@ public sealed class DocumentWindowViewModelTests
             };
 
             fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
-            fixture.Surface.RaiseScroll(0.7);
+            fixture.Surface.RaiseScroll(0.7, null);
             SessionState session = fixture.ViewModel.BuildSession(null, 280);
             gate.Set();
             await fixture.ViewModel.WhenRendersSettled();
@@ -693,7 +693,7 @@ public sealed class DocumentWindowViewModelTests
             await fixture.ViewModel.WhenRendersSettled();
             GroupRow(fixture.ViewModel, Repo).IsExpanded = false;
             fixture.ViewModel.ToggleSidebarCommand.Execute(null);
-            fixture.Surface.RaiseScroll(0.2);
+            fixture.Surface.RaiseScroll(0.2, null);
             fixture.Absent.Add(RepoDocA);
             fixture.Time.Advance(TimeSpan.FromSeconds(2));
 
@@ -708,7 +708,7 @@ public sealed class DocumentWindowViewModelTests
             fixture.Files[RepoDocC] = "# C";
             fixture.ViewModel.Open([RepoDocA]);
             await fixture.ViewModel.WhenRendersSettled();
-            fixture.Surface.RaiseScroll(0.5);
+            fixture.Surface.RaiseScroll(0.5, null);
 
             fixture.ViewModel.Replace(RepoDocA, RepoDocC);
             await fixture.ViewModel.WhenRendersSettled();
@@ -726,7 +726,7 @@ public sealed class DocumentWindowViewModelTests
             await using var fixture = new Fixture();
             fixture.ViewModel.Open([RepoDocA]);
             await fixture.ViewModel.WhenRendersSettled();
-            fixture.Surface.RaiseScroll(0.3);
+            fixture.Surface.RaiseScroll(0.3, null);
             fixture.Files[RepoDocA] = "# Changed heading";
 
             fixture.ViewModel.ReloadCommand.Execute(null);
@@ -737,6 +737,123 @@ public sealed class DocumentWindowViewModelTests
             Assert.Equal(RepoDocA, reloaded.DocumentPath);
             Assert.Equal(0.3, reloaded.Scroll);
             Assert.Contains("Changed heading", reloaded.Html, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task A_reload_sends_the_anchor_not_the_stale_fraction() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.RaiseScroll(0.3, new ScrollAnchor(14, 0.35));
+            fixture.Files[RepoDocA] = "# Twenty lines longer";
+
+            fixture.ViewModel.ReloadCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            ShownDocument reloaded = fixture.Surface.Shown[^1];
+            Assert.Equal((RepoDocA, new ScrollAnchor(14, 0.35)), (reloaded.DocumentPath, reloaded.Anchor));
+        });
+
+    [Fact]
+    public Task Switching_back_to_a_document_sends_its_stored_anchor() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.RaiseScroll(0.4, new ScrollAnchor(9, 0.5));
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.RaiseScroll(0.1, new ScrollAnchor(2, 0));
+            fixture.Files[RepoDocA] = "# A changed while B was shown";
+
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocA);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            ShownDocument shown = fixture.Surface.Shown[^1];
+            Assert.Equal((RepoDocA, new ScrollAnchor(9, 0.5), 0.4), (shown.DocumentPath, shown.Anchor, shown.Scroll));
+        });
+
+    [Fact]
+    public Task A_scroll_without_an_anchor_forgets_the_documents_anchor() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.RaiseScroll(0.3, new ScrollAnchor(14, 0.2));
+
+            fixture.Surface.RaiseScroll(0.6, null);
+            fixture.ViewModel.ReloadCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((0.6, null), (fixture.Surface.Shown[^1].Scroll, fixture.Surface.Shown[^1].Anchor));
+            Assert.False(fixture.ViewModel.BuildSession(null, 280).ScrollAnchors.ContainsKey(RepoDocA));
+        });
+
+    [Fact]
+    public Task Replace_moves_the_scroll_anchor_to_the_new_path() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Files[RepoDocC] = "# C";
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.RaiseScroll(0.5, new ScrollAnchor(6, 0.25));
+
+            fixture.ViewModel.Replace(RepoDocA, RepoDocC);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            SessionState session = fixture.ViewModel.BuildSession(null, 280);
+            Assert.Equal(new ScrollAnchor(6, 0.25), session.ScrollAnchors[RepoDocC]);
+            Assert.False(session.ScrollAnchors.ContainsKey(RepoDocA));
+            Assert.Equal((RepoDocC, new ScrollAnchor(6, 0.25)), (fixture.Surface.Shown[^1].DocumentPath, fixture.Surface.Shown[^1].Anchor));
+        });
+
+    [Fact]
+    public Task Restoring_a_session_sends_each_documents_anchor() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            var session = new SessionState
+            {
+                OpenFiles = [RepoDocA, RepoDocB],
+                SelectedFile = RepoDocA,
+                ScrollPositions = new Dictionary<string, double> { [RepoDocA] = 0.2, [RepoDocB] = 0.6 },
+                ScrollAnchors = new Dictionary<string, ScrollAnchor> { [RepoDocA] = new(7, 0.1), [RepoDocB] = new(11, 0.9) },
+            };
+
+            fixture.ViewModel.Restore(session);
+            await fixture.ViewModel.WhenRendersSettled();
+            ShownDocument first = fixture.Surface.Shown[^1];
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            await fixture.ViewModel.WhenRendersSettled();
+            ShownDocument second = fixture.Surface.Shown[^1];
+
+            Assert.Equal((RepoDocA, new ScrollAnchor(7, 0.1)), (first.DocumentPath, first.Anchor));
+            Assert.Equal((RepoDocB, new ScrollAnchor(11, 0.9)), (second.DocumentPath, second.Anchor));
+            SessionState saved = fixture.ViewModel.BuildSession(null, 280);
+            Assert.Equal(new ScrollAnchor(7, 0.1), saved.ScrollAnchors[RepoDocA]);
+            Assert.Equal(new ScrollAnchor(11, 0.9), saved.ScrollAnchors[RepoDocB]);
+        });
+
+    [Fact]
+    public Task An_in_use_reload_probes_only_its_own_path() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = path => SamePath(path, RepoDocA) ? throw InUse(path) : fixture.Files[path];
+            fixture.Absent.Add(RepoDocB);
+
+            await fixture.ReportAsync(RepoDocA);
+
+            Assert.False(DocumentRow(fixture.ViewModel, RepoDocB).IsMissing);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Single(fixture.Surface.Shown);
         });
 
     [Fact]
@@ -800,7 +917,7 @@ public sealed class DocumentWindowViewModelTests
             await using var fixture = new Fixture();
             fixture.ViewModel.Open([RepoDocA]);
             await fixture.ViewModel.WhenRendersSettled();
-            fixture.Surface.RaiseScroll(0.3);
+            fixture.Surface.RaiseScroll(0.3, null);
             fixture.Files[RepoDocA] = "# Saved in an editor";
 
             await fixture.ReportAsync(RepoDocA);
@@ -1043,6 +1160,42 @@ public sealed class DocumentWindowViewModelTests
 
             Assert.True(fixture.ViewModel.SelectedIsMissing);
             Assert.Single(fixture.Surface.Shown);
+        });
+
+    [Fact]
+    public Task A_gone_reload_left_behind_by_a_selection_change_greys_its_row_at_once() =>
+        Headless.RunAsync(async () =>
+        {
+            using var gate = new ManualResetEventSlim();
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = path =>
+            {
+                if (SamePath(path, RepoDocA))
+                {
+                    WaitFor(gate);
+                    if (fixture.Absent.Contains(path))
+                    {
+                        throw new FileNotFoundException("No such fake file.", path);
+                    }
+                }
+
+                return fixture.Files[path];
+            };
+            fixture.RaiseFromPool(RepoDocA);
+            Dispatcher.UIThread.RunJobs();
+
+            fixture.Absent.Add(RepoDocA);
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            gate.Set();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocA).IsMissing);
+            Assert.Equal(RepoDocB, fixture.ViewModel.SelectedPath);
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            Assert.Equal(RepoDocB, fixture.Surface.Shown[^1].DocumentPath);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level is "warning" or "error");
         });
 
     [Fact]

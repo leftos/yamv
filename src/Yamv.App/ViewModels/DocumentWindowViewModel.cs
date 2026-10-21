@@ -38,6 +38,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private readonly IAppLog _log;
     private readonly MarkdownRenderer _renderer = new();
     private readonly Dictionary<string, double> _scrollPositions;
+
+    /// <summary>Per document, the block the page last reported at the top of its view and the offset within it.</summary>
+    private readonly Dictionary<string, ScrollAnchor> _scrollAnchors;
     private readonly HashSet<string> _unreadable;
     private readonly Dictionary<string, DateTimeOffset> _inUseSince;
     private readonly HashSet<Task> _renders = [];
@@ -86,6 +89,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _readText = services.ReadText;
         _log = services.Log;
         _scrollPositions = new Dictionary<string, double>(state.PathComparer);
+        _scrollAnchors = new Dictionary<string, ScrollAnchor>(state.PathComparer);
         _unreadable = new HashSet<string>(state.PathComparer);
         _inUseSince = new Dictionary<string, DateTimeOffset>(state.PathComparer);
         _folderExpansion = new Dictionary<string, bool>(state.PathComparer);
@@ -275,7 +279,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     public void Open(IEnumerable<string> paths) => _state.Add(paths);
 
-    /// <summary>Replaces a document's path with another (Locate…), keeping its place in the list and its scroll position.</summary>
+    /// <summary>
+    /// Replaces a document's path with another (Locate…), keeping its place in the list, its scroll position and its scroll anchor.
+    /// </summary>
     /// <param name="oldPath">The path the window holds.</param>
     /// <param name="newPath">The path that takes its place.</param>
     public void Replace(string oldPath, string newPath)
@@ -284,55 +290,73 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(newPath);
         string from = Path.GetFullPath(oldPath);
         string to = Path.GetFullPath(newPath);
-        if (_state.Documents.Contains(from, _state.PathComparer) && _scrollPositions.Remove(from, out double scroll))
+        if (_state.Documents.Contains(from, _state.PathComparer))
         {
-            _scrollPositions[to] = scroll;
+            if (_scrollPositions.Remove(from, out double scroll))
+            {
+                _scrollPositions[to] = scroll;
+            }
+
+            if (_scrollAnchors.Remove(from, out ScrollAnchor? anchor))
+            {
+                _scrollAnchors[to] = anchor;
+            }
         }
 
         _state.Replace(oldPath, newPath);
     }
 
     /// <summary>
-    /// Remembers a saved session's scroll positions, opens its documents, selects its selected file when it is among them
+    /// Remembers a saved session's scroll positions and anchors, opens its documents, selects its selected file when it is among them
     /// (else the first document still on disk, else the first), then collapses its collapsed groups and applies its sidebar choice.
     /// </summary>
     /// <param name="session">The session the main window saved last.</param>
     public void Restore(SessionState session)
     {
         ArgumentNullException.ThrowIfNull(session);
-        foreach ((string path, double scroll) in session.ScrollPositions)
-        {
-            if (FullPathOrNull(path) is string fullPath)
-            {
-                _scrollPositions[fullPath] = scroll;
-            }
-        }
-
+        RememberByFullPath(session.ScrollPositions, _scrollPositions);
+        RememberByFullPath(session.ScrollAnchors, _scrollAnchors);
         _state.Add([.. session.OpenFiles.Select(FullPathOrNull).OfType<string>()]);
         if (RestoredSelection(session.SelectedFile) is string selection)
         {
             _state.Select(selection);
         }
 
-        foreach (string group in session.CollapsedGroups)
-        {
-            if (FullPathOrNull(group) is string groupPath && IsOpenGroup(Path.TrimEndingDirectorySeparator(groupPath)))
-            {
-                _state.SetGroupExpanded(groupPath, expanded: false);
-            }
-        }
-
+        CollapseRestoredGroups(session.CollapsedGroups);
         if (session.SidebarHidden != _state.SidebarHidden)
         {
             _state.ToggleSidebar();
         }
     }
 
-    /// <summary>The session state of this window, with the scroll positions it remembers.</summary>
+    /// <summary>Copies a saved session's per-document values into <paramref name="target"/>, keyed by full path.</summary>
+    private void RememberByFullPath<T>(IReadOnlyDictionary<string, T> saved, Dictionary<string, T> target)
+    {
+        foreach ((string path, T value) in saved)
+        {
+            if (FullPathOrNull(path) is string fullPath)
+            {
+                target[fullPath] = value;
+            }
+        }
+    }
+
+    private void CollapseRestoredGroups(IReadOnlyList<string> groups)
+    {
+        foreach (string group in groups)
+        {
+            if (FullPathOrNull(group) is string groupPath && IsOpenGroup(Path.TrimEndingDirectorySeparator(groupPath)))
+            {
+                _state.SetGroupExpanded(groupPath, expanded: false);
+            }
+        }
+    }
+
+    /// <summary>The session state of this window, with the scroll positions and anchors of the documents it holds.</summary>
     /// <param name="bounds">The window's restored rectangle, or null when none is known.</param>
     /// <param name="sidebarWidth">The sidebar width in device-independent pixels.</param>
     public SessionState BuildSession(WindowBounds? bounds, double sidebarWidth) =>
-        SessionSnapshot.Build(_state, _scrollPositions, bounds, sidebarWidth);
+        SessionSnapshot.Build(_state, _scrollPositions, _scrollAnchors, bounds, sidebarWidth);
 
     /// <summary>Stops the missing-file re-check and the watching of the documents, and stops following the state and the surface.</summary>
     public void Dispose()
@@ -458,14 +482,23 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void OnScrollChanged(object? sender, double fraction)
+    private void OnScrollChanged(object? sender, ScrollPosition position)
     {
         if (_shownPath is not string path || !SamePath(path, _state.SelectedPath))
         {
             return;
         }
 
-        _scrollPositions[path] = fraction;
+        _scrollPositions[path] = position.Fraction;
+        if (position.Anchor is { } anchor)
+        {
+            _scrollAnchors[path] = anchor;
+        }
+        else
+        {
+            _scrollAnchors.Remove(path);
+        }
+
         SessionDirty?.Invoke(this, new SessionDirtyEventArgs(scrollOnly: true));
     }
 
@@ -896,13 +929,14 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
         ClearUnreadable(path);
         double scroll = _scrollPositions.GetValueOrDefault(path);
+        ScrollAnchor? anchor = _scrollAnchors.GetValueOrDefault(path);
         if (!MarkShown(path, document.Html, width.Px, origin))
         {
             return;
         }
 
         // Nothing may be awaited between the check above and this call: a document that is no longer the selection is never shown.
-        await _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, Fragment: null, width.Px));
+        await _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, anchor, Fragment: null, width.Px));
     }
 
     /// <summary>
@@ -1082,7 +1116,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             EndGrace();
         }
 
-        ProbeMissingExcept(null);
+        _state.RefreshMissing([path]);
         if (current)
         {
             ShowReadFailure(path, exception, origin);

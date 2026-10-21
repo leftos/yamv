@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Yamv.Core.Session;
 
 namespace Yamv.App.Controls;
 
@@ -12,6 +13,13 @@ public enum FindDirection
 
 /// <summary>The outcome of a find: the one-based index of the current match (0 when none) and the match count.</summary>
 public sealed record FindResult(int Current, int Total);
+
+/// <summary>Where the page is scrolled to.</summary>
+/// <param name="Fraction">The position as a fraction, 0 to 1, of the scrollable height.</param>
+/// <param name="Anchor">
+/// The top-level block at the top of the view and the offset within it, or null when the page shows no such block.
+/// </param>
+public sealed record ScrollPosition(double Fraction, ScrollAnchor? Anchor);
 
 /// <summary>A link the user activated in the page, which the page never follows itself.</summary>
 public sealed class LinkActivatedEventArgs(string href, Uri? resolvedUri, int button) : EventArgs
@@ -48,6 +56,15 @@ internal sealed class PageMessage
 
     public double? Value { get; init; }
 
+    /// <summary>
+    /// A <c>scroll</c> message's anchor: the source line of the block at the top of the view. A double, so a line that is
+    /// not a whole number drops the anchor rather than the message.
+    /// </summary>
+    public double? Line { get; init; }
+
+    /// <summary>A <c>scroll</c> message's fraction, 0 to 1, of the anchor block's height above the top of the view.</summary>
+    public double? Offset { get; init; }
+
     public string? Href { get; init; }
 
     public int? Button { get; init; }
@@ -80,11 +97,17 @@ internal sealed class PageMessage
 
 /// <summary>
 /// The options object passed to the page's <c>yamv.render</c>. <c>ContentWidth</c> is the CSS value (<c>"760px"</c> or
-/// <c>"none"</c>) the page sets once the outgoing document is hidden.
+/// <c>"none"</c>) the page sets once the outgoing document is hidden. <c>DocumentPath</c> tells the page whether it is
+/// asked to show again the document it shows, in which case it keeps its own top block and find match and ignores
+/// <c>AnchorLine</c>; otherwise it scrolls <c>AnchorOffset</c> of the way down the block at <c>AnchorLine</c>, else to
+/// <c>Scroll</c>.
 /// </summary>
 internal sealed record RenderOptions(
     int Generation,
+    string DocumentPath,
     double Scroll,
+    int? AnchorLine,
+    double AnchorOffset,
     string? Fragment,
     bool HasMermaid,
     bool HasMath,

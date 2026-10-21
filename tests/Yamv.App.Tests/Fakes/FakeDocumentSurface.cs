@@ -1,11 +1,12 @@
 using Yamv.App.Controls;
+using Yamv.Core.Session;
 
 namespace Yamv.App.Tests.Fakes;
 
 /// <summary>An <see cref="IDocumentSurface"/> that records what it was asked to show, and raises scroll changes on demand.</summary>
 public sealed class FakeDocumentSurface : IDocumentSurface
 {
-    public event EventHandler<double>? ScrollChanged;
+    public event EventHandler<ScrollPosition>? ScrollChanged;
 
     public event EventHandler<LinkActivatedEventArgs>? LinkActivated
     {
@@ -47,7 +48,15 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     public Task ShowAsync(DocumentShow show)
     {
-        var shown = new ShownDocument(show.Document.Html, show.DocumentPath, show.GroupRoot, show.Scroll, show.Fragment, show.ContentWidth);
+        var shown = new ShownDocument(
+            show.Document.Html,
+            show.DocumentPath,
+            show.GroupRoot,
+            show.Scroll,
+            show.Anchor,
+            show.Fragment,
+            show.ContentWidth
+        );
         Shown.Add(shown);
         Calls.Add(shown);
         OnShown?.Invoke(shown);
@@ -86,15 +95,23 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     public Task ClearFindAsync() => Task.CompletedTask;
 
-    /// <summary>Raises <see cref="ScrollChanged"/> as the page would.</summary>
-    public void RaiseScroll(double fraction) => ScrollChanged?.Invoke(this, fraction);
+    /// <summary>Raises <see cref="ScrollChanged"/> as the page would: the fraction and the anchor, if any.</summary>
+    public void RaiseScroll(double fraction, ScrollAnchor? anchor) => ScrollChanged?.Invoke(this, new ScrollPosition(fraction, anchor));
 
     /// <summary>Raises <see cref="KeyForwarded"/> as the page would for a shortcut pressed while it had focus.</summary>
     public void RaiseKey(KeyForwardedEventArgs key) => KeyForwarded?.Invoke(this, key);
 }
 
 /// <summary>One <see cref="FakeDocumentSurface.ShowAsync"/> call.</summary>
-public sealed record ShownDocument(string Html, string DocumentPath, string GroupRoot, double Scroll, string? Fragment, double? ContentWidth);
+public sealed record ShownDocument(
+    string Html,
+    string DocumentPath,
+    string GroupRoot,
+    double Scroll,
+    ScrollAnchor? Anchor,
+    string? Fragment,
+    double? ContentWidth
+);
 
 /// <summary>One <see cref="FakeDocumentSurface.SetContentWidthAsync"/> call; a null width is Full.</summary>
 public sealed record ContentWidthSet(double? Px);

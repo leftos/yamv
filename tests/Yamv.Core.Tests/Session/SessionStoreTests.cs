@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Yamv.Core.Session;
 
 namespace Yamv.Core.Tests.Session;
@@ -41,6 +42,85 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal(340, loaded.SidebarWidth);
         Assert.Equal(state.CollapsedGroups, loaded.CollapsedGroups);
         Assert.Empty(_log.Entries);
+    }
+
+    [Fact]
+    public void Session_round_trips_the_scroll_anchors()
+    {
+        var state = new SessionState
+        {
+            OpenFiles = ["C:/notes/a.md", "C:/notes/b.md"],
+            ScrollAnchors = new Dictionary<string, ScrollAnchor>
+            {
+                ["C:/notes/a.md"] = new(12, 0.35),
+                ["C:/notes/b.md"] = new(0, 0),
+                ["C:/notes/closed.md"] = new(3, 0.5),
+            },
+        };
+
+        CreateStore().Save(state);
+        SessionState loaded = CreateStore().Load();
+
+        Assert.Equal(2, loaded.ScrollAnchors.Count);
+        Assert.Equal(new ScrollAnchor(12, 0.35), loaded.ScrollAnchors["C:/notes/a.md"]);
+        Assert.Equal(new ScrollAnchor(0, 0), loaded.ScrollAnchors["C:/notes/b.md"]);
+        Assert.Empty(_log.Entries);
+    }
+
+    [Fact]
+    public void The_session_file_stores_each_anchor_as_its_line_and_offset()
+    {
+        var state = new SessionState
+        {
+            OpenFiles = ["C:/notes/a.md"],
+            ScrollAnchors = new Dictionary<string, ScrollAnchor> { ["C:/notes/a.md"] = new(42, 0.35) },
+        };
+
+        CreateStore().Save(state);
+
+        using var file = JsonDocument.Parse(File.ReadAllText(SessionFile));
+        JsonElement anchor = file.RootElement.GetProperty("scrollAnchors").GetProperty("C:/notes/a.md");
+        Assert.Equal(42, anchor.GetProperty("line").GetInt32());
+        Assert.Equal(0.35, anchor.GetProperty("offset").GetDouble());
+    }
+
+    [Fact]
+    public void Loading_drops_anchors_with_a_negative_line_or_an_offset_outside_0_to_1()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(
+            SessionFile,
+            """
+            {
+              "openFiles": ["C:/notes/a.md", "C:/notes/b.md", "C:/notes/c.md", "C:/notes/d.md", "C:/notes/e.md"],
+              "scrollAnchors": {
+                "C:/notes/a.md": { "line": 4, "offset": 1 },
+                "C:/notes/b.md": { "line": -1, "offset": 0.5 },
+                "C:/notes/c.md": { "line": 4, "offset": 1.5 },
+                "C:/notes/d.md": { "line": 4, "offset": -0.1 },
+                "C:/notes/e.md": { "line": 0, "offset": 0 }
+              }
+            }
+            """
+        );
+
+        SessionState loaded = CreateStore().Load();
+
+        Assert.Equal(["C:/notes/a.md", "C:/notes/e.md"], loaded.ScrollAnchors.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(new ScrollAnchor(4, 1), loaded.ScrollAnchors["C:/notes/a.md"]);
+    }
+
+    [Fact]
+    public void A_session_without_anchors_loads_with_an_empty_map()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SessionFile, """{ "openFiles": ["C:/notes/a.md"], "scrollPositions": { "C:/notes/a.md": 0.5 } }""");
+
+        SessionState loaded = CreateStore().Load();
+
+        Assert.NotNull(loaded.ScrollAnchors);
+        Assert.Empty(loaded.ScrollAnchors);
+        Assert.Equal(0.5, loaded.ScrollPositions["C:/notes/a.md"]);
     }
 
     [Fact]

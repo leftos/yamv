@@ -30,14 +30,17 @@
 - **Missing row**: the greyed "Missing on disk" row the theme settings window keeps for the theme in use whose file was deleted or renamed outside the app, in its last loaded version; only Save (which writes the file again) and Revert are on ([look.md](design/look.md)).
 - **Open with registration**: what `yamv --register` writes on Windows so YAMV appears in Explorer's Open with for `.md` and `.markdown`: the `YAMV.Markdown` ProgID, an `OpenWithProgids` entry per extension and the `Applications\yamv.exe` key, all under the current user. It never sets the default handler.
 - **Persist**: a window's flag saying its documents, selection and layout are saved to the session file; true only for the main instance's window.
+- **Pin**: a view at the very top (or very bottom) of a document when it reloads stays at the top (or follows text appended at the bottom), instead of keeping a block in place.
 - **Popover**: the content-width control the title bar's ⟷ button opens: a native Avalonia Popup, which is a window of its own so it can sit over the web view ([content-width.md](design/content-width.md)).
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.
 - **Reveal**: showing a path in the platform's file manager from a tree menu: a file is shown selected in Explorer or Finder, a folder or group root is opened, and a missing document opens its nearest folder that still exists (`RevealCommand`).
 - **Saved for**: the content-width popover's segmented control: the folders a width can be saved for, deepest first, then All documents (`WidthScopes`, [content-width.md](design/content-width.md)).
+- **Scroll anchor**: where a document's view stands as a top-level block and a place in it: the block's `data-line` source line and the fraction of its height above the top of the view (`ScrollAnchor`); it restores the view on a tab switch back and a session restore, and is saved in `session.json`.
 - **Second launch**: a no-argument `yamv` start while another process holds the main-instance lock; it asks the main instance to come forward and exits 0, brings that window forward itself and exits 1 when the signal fails, or, with no pid file, waits up to 5 s for the lock and starts as the main instance (`SecondLaunch`).
 - **Settings file**: `settings.json`, the app-wide settings shared by every window and process (`SettingsStore`, saved off the UI thread by `SettingsWriter`); widths stay in `widths.json`, and the main window's documents and layout in `session.json`.
 - **Sidebar**: the pane on the window's right holding the tree of open documents.
 - **Source** (of a width): the folder a document's width is inherited from, or the app default; the popover opens with it selected and the Ctrl+[ and Ctrl+] steps edit it ([content-width.md](design/content-width.md)).
+- **Staging**: the hidden element the page builds a reloaded document in while the old page stays on screen; it is swapped in in one step once built (`yamv.js`).
 - **Text measure**: the width in px of the document's text lines, which is what a stored content width means; the column adds 44 px of side padding on each side.
 - **Text space**: the room a pane leaves for the document's text: the pane width less the page's 88 px of side padding (`ContentWidth.TextSpace`); a content width is compared against it ([content-width.md](design/content-width.md)).
 - **Theme family**: one `.yamv-theme.json` file, holding a light half, a dark half or both ([themes.md](design/themes.md)).

@@ -728,7 +728,7 @@ public sealed class MainWindowTests
         {
             await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
-            fixture.Surface.RaiseScroll(0.4);
+            fixture.Surface.RaiseScroll(0.4, null);
             File.Delete(fixture.DocA);
             fixture.ViewModel.Reload();
             fixture.Settle();

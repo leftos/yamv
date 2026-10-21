@@ -41,7 +41,7 @@ public sealed class MainWindowSessionTests
             await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
-            fixture.Surface.RaiseScroll(0.5);
+            fixture.Surface.RaiseScroll(0.5, null);
             fixture.Time.Advance(TimeSpan.FromSeconds(5));
             Assert.False(File.Exists(fixture.SessionFile));
 
@@ -58,7 +58,7 @@ public sealed class MainWindowSessionTests
             fixture.ViewModel.SelectNext();
             await fixture.SettleAsync();
 
-            fixture.Surface.RaiseScroll(0.5);
+            fixture.Surface.RaiseScroll(0.5, null);
             fixture.Time.Advance(Delay);
             fixture.Window.Close();
 

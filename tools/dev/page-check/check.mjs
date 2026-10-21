@@ -326,6 +326,313 @@ try {
   );
   width = await widthOf();
   check("the 1000px document shows at its width", width.content === 1000, width);
+
+  // The scroll anchor: Core tags each top-level block with the zero-based source line it starts on, one blank line
+  // between blocks, so a block's data-line moves by the number of source lines inserted above it.
+  await page.setViewportSize({ width: 900, height: 400 });
+  const blocksHtml = (count, firstLine, label) =>
+    Array.from({ length: count }, (_, index) => `<p data-line="${firstLine + 2 * index}">${label} ${index} text.</p>`).join("\n");
+  const longDocument = blocksHtml(80, 0, "Block");
+  const anchorOptions = { ...baseOptions, contentWidth: "760px", documentPath: "C:\\docs\\anchor.md" };
+  const show = (html, options) => page.evaluate(([h, o]) => window.yamv.render(h, o), [html, options]);
+  const topBlockOf = () => page.evaluate(() => {
+    const block = Array.from(document.querySelectorAll("#yamv-content [data-line]")).find((element) => element.getBoundingClientRect().bottom > 0);
+    return block ? { text: block.textContent, top: Math.round(block.getBoundingClientRect().top), scrollY: window.scrollY } : null;
+  });
+  const scrollToBlock = (text) => page.evaluate((t) => {
+    const block = Array.from(document.querySelectorAll("#yamv-content [data-line]")).find((element) => element.textContent === t);
+    window.scrollTo(0, block.getBoundingClientRect().top + window.scrollY);
+  }, text);
+
+  await show(longDocument, { ...anchorOptions, generation: 30 });
+  await page.waitForTimeout(100);
+  await clearMessages();
+  await scrollToBlock("Block 30 text.");
+  await page.waitForTimeout(400);
+  const anchorScrolls = (await messages()).filter((m) => m.type === "scroll");
+  check("a scroll message carries the top block's source line", anchorScrolls.length > 0 && anchorScrolls.at(-1).line === 60, anchorScrolls);
+
+  const lastScroll = async () => (await messages()).filter((m) => m.type === "scroll").at(-1) ?? null;
+  const inserted = `${blocksHtml(10, 0, "Inserted")}\n${blocksHtml(80, 20, "Block")}`;
+  await clearMessages();
+  await show(inserted, { ...anchorOptions, generation: 31, scroll: 0.1, anchorLine: 0 });
+  let top = await topBlockOf();
+  check("a reload after 20 lines inserted above the top block stays on that block", top?.text === "Block 30 text." && Math.abs(top.top) <= 1, top);
+  await page.waitForTimeout(100);
+  let reported = await lastScroll();
+  check("once a reload has landed the page reports its new top line", reported?.line === 80 && reported.generation === 31, reported);
+
+  const shorter = blocksHtml(25, 0, "Short");
+  await show(shorter, { ...anchorOptions, generation: 32, scroll: 0.5, anchorLine: 80 });
+  const fractionLanding = await page.evaluate(() => ({
+    scrollY: window.scrollY,
+    expected: 0.5 * Math.max(0, document.documentElement.scrollHeight - window.innerHeight),
+  }));
+  check(
+    "a reload of a shorter document with the anchor past its end falls back to the fraction",
+    fractionLanding.expected > 0 && Math.abs(fractionLanding.scrollY - fractionLanding.expected) <= 2,
+    fractionLanding,
+  );
+
+  await show(longDocument, { ...anchorOptions, documentPath: "C:\\docs\\other.md", generation: 33, scroll: 0, anchorLine: 62 });
+  top = await topBlockOf();
+  check("a first show with a stored anchor scrolls to that block", top?.text === "Block 31 text." && Math.abs(top.top) <= 1, top);
+
+  // Find keeps its query and the reader's match across a reload.
+  const needles = [
+    "needle one.", "needle two.", "needle three-a and needle three-b.", "needle four.", "needle five.", "needle six.",
+    "needle seven.", "needle eight.",
+  ];
+  const findDocument = (sentences) => sentences.map((sentence, index) => `<p data-line="${2 * index}">${sentence}</p>`).join("\n");
+  const findOptions = { ...anchorOptions, documentPath: "C:\\docs\\find.md" };
+  const currentMatch = () => page.evaluate(() => {
+    const mark = document.querySelector("#yamv-content mark.yamv-find-current");
+    return {
+      count: document.getElementById("yamv-find-count").textContent,
+      after: mark && mark.nextSibling ? mark.nextSibling.textContent : null,
+    };
+  });
+  await show(findDocument(needles), { ...findOptions, generation: 34 });
+  await page.evaluate(() => {
+    window.yamv.openFind();
+    window.yamv.find("needle", "first");
+    for (let step = 0; step < 3; step++) {
+      window.yamv.find("needle", "next");
+    }
+  });
+  let match = await currentMatch();
+  check("find selects the 4th of 9 matches before the reload", match.count === "4 of 9" && match.after === " three-b.", match);
+  const withInsert = ["needle zero.", ...needles];
+  await show(findDocument(withInsert), { ...findOptions, generation: 35 });
+  match = await currentMatch();
+  check(
+    "a reload with one match inserted above keeps the query and the same sentence",
+    match.count === "5 of 10" && match.after === " three-b.",
+    match,
+  );
+  await show(findDocument(withInsert.filter((sentence) => !sentence.startsWith("needle three-a"))), { ...findOptions, generation: 36 });
+  match = await currentMatch();
+  check("a reload that deletes the selected match's block selects the next match below", match.count === "4 of 8" && match.after === " four.", match);
+  await page.evaluate(() => document.getElementById("yamv-find-close").click());
+
+  // Mutation records keep the order the changes were made in: replaying them gives the content's class and child count
+  // after each change, which a frame sample can miss. The observer's first callback runs right after the swap, before
+  // anything the render awaits, so it sees what the swap brought in. The page shows find.md at 760px, from generation 36.
+  const laneB = await page.evaluate(async ([html, options]) => {
+    const root = document.documentElement;
+    const content = document.getElementById("yamv-content");
+    const frames = [];
+    let sampling = true;
+    const sample = () => {
+      frames.push({ children: content.childElementCount, pending: content.classList.contains("yamv-pending") });
+      if (sampling) {
+        window.requestAnimationFrame(sample);
+      }
+    };
+    const records = [];
+    let atSwap = null;
+    const seeSwap = (list) => {
+      if (!atSwap && list.some((record) => record.type === "childList")) {
+        atSwap = { math: content.querySelector(".katex") !== null, code: content.querySelector(".hljs-keyword") !== null };
+      }
+      records.push(...list);
+    };
+    const observer = new MutationObserver(seeSwap);
+    observer.observe(content, { childList: true, attributes: true, attributeFilter: ["class"], attributeOldValue: true });
+    observer.observe(root, { attributes: true, attributeFilter: ["style"] });
+    window.requestAnimationFrame(sample);
+    await window.yamv.render(html, options);
+    sampling = false;
+    seeSwap(observer.takeRecords());
+    observer.disconnect();
+    const classRecords = records.filter((record) => record.attributeName === "class");
+    const classValues = classRecords.map((record, index) =>
+      (index + 1 < classRecords.length ? classRecords[index + 1].oldValue : content.className) || "");
+    const swap = records.findIndex((record) => record.type === "childList");
+    const widthChanges = records.map((record, index) => (record.attributeName === "style" ? index : -1)).filter((index) => index >= 0);
+    return {
+      frames: frames.length,
+      emptied: records.filter((record) => record.type === "childList" && record.addedNodes.length === 0).length,
+      hiddenChanges: classValues.filter((value) => value.split(/\s+/).includes("yamv-pending")).length,
+      hiddenFrames: frames.filter((frame) => frame.pending).length,
+      emptyFrames: frames.filter((frame) => frame.children === 0).length,
+      replaced: swap >= 0,
+      atSwap,
+      widthChangesBeforeSwap: widthChanges.filter((index) => index < swap).length,
+      widthChangesAfterSwap: widthChanges.filter((index) => index > swap).length,
+      width: root.style.getPropertyValue("--yamv-content-width"),
+    };
+  }, [
+    `${longDocument}\n<p data-line="200"><span class="math">\\(x^2\\)</span></p>\n` +
+      `<pre><code class="language-csharp" data-line="202">public class Widget { }</code></pre>`,
+    { ...findOptions, generation: 37, hasMath: true, contentWidth: "700px" },
+  ]);
+  check(
+    "a same-document render never shows an empty or hidden content element",
+    laneB.replaced && laneB.emptied === 0 && laneB.hiddenChanges === 0 && laneB.hiddenFrames === 0 && laneB.emptyFrames === 0,
+    laneB,
+  );
+  check("a same-document render swaps in its math and code already rendered", laneB.atSwap?.math === true && laneB.atSwap.code === true, laneB);
+  check(
+    "a same-document render changes the width only once its new content is in",
+    laneB.widthChangesBeforeSwap === 0 && laneB.widthChangesAfterSwap > 0 && laneB.width === "700px",
+    laneB,
+  );
+
+  // A width the host sends while a reload is staged is the width the reload lands at, not the one its render carried.
+  const lateWidth = await page.evaluate(async ([html, options]) => {
+    const rendering = window.yamv.render(html, options);
+    window.yamv.setContentWidth("650px");
+    await rendering;
+    const element = document.getElementById("yamv-content");
+    const style = getComputedStyle(element);
+    return {
+      variable: document.documentElement.style.getPropertyValue("--yamv-content-width"),
+      content: element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+    };
+  }, [longDocument, { ...findOptions, generation: 38, contentWidth: "700px" }]);
+  check("a width change during a staged reload is the width it lands at", lateWidth.variable === "650px" && lateWidth.content === 650, lateWidth);
+
+  // A show of the first block from its top lands at the very top, with the page's top padding above it.
+  await show(longDocument, { ...anchorOptions, documentPath: "C:\\docs\\first.md", generation: 39, scroll: 0.5, anchorLine: 0, anchorOffset: 0 });
+  const firstScroll = await page.evaluate(() => window.scrollY);
+  check("a show anchored on the first block from its top lands at scrollY 0", firstScroll === 0, firstScroll);
+
+  // The offset within a tall block: a reader halfway down a 300-item list (one top-level block) comes back to the same item
+  // after a reload, and after switching away and back with the anchor the page reported.
+  const items = Array.from({ length: 300 }, (_, index) => `<li>Item ${index}</li>`).join("");
+  const listDocument = (above) =>
+    `${above ? '<p data-line="0">Added above.</p>\n' : ""}<ul data-line="${above ? 2 : 0}">${items}</ul>\n` +
+    `<p data-line="${above ? 303 : 301}">After.</p>`;
+  const listOptions = { ...anchorOptions, documentPath: "C:\\docs\\list.md" };
+  const topItem = () => page.evaluate(() => {
+    const item = Array.from(document.querySelectorAll("#yamv-content li")).find((element) => element.getBoundingClientRect().bottom > 0);
+    return item ? { text: item.textContent, top: Math.round(item.getBoundingClientRect().top) } : null;
+  });
+  await show(listDocument(false), { ...listOptions, generation: 40 });
+  await page.evaluate(() => {
+    const item = Array.from(document.querySelectorAll("#yamv-content li")).find((element) => element.textContent === "Item 150");
+    window.scrollTo(0, item.getBoundingClientRect().top + window.scrollY);
+  });
+  await page.waitForTimeout(400);
+  await clearMessages();
+  await show(listDocument(true), { ...listOptions, generation: 41 });
+  let item = await topItem();
+  check("a reload keeps the reader on the same item halfway down a long list", item?.text === "Item 150" && Math.abs(item.top) <= 1, item);
+  await page.waitForTimeout(100);
+  reported = await lastScroll();
+  check(
+    "the scroll report carries the list's line and the offset within it",
+    reported?.line === 2 && reported.offset > 0.4 && reported.offset < 0.6,
+    reported,
+  );
+  await show(shorter, { ...anchorOptions, documentPath: "C:\\docs\\elsewhere.md", generation: 42 });
+  await show(listDocument(true), { ...listOptions, generation: 43, scroll: 0, anchorLine: reported?.line, anchorOffset: reported?.offset });
+  item = await topItem();
+  check("switching back with the reported anchor lands on the same item", item?.text === "Item 150" && Math.abs(item.top) <= 1, item);
+
+  // Pins: a view at the very bottom follows text appended to the document; a view at the very top stays there.
+  const pinOptions = { ...anchorOptions, documentPath: "C:\\docs\\pins.md" };
+  const viewEdges = () => page.evaluate(() => ({
+    scrollY: window.scrollY,
+    gap: document.documentElement.scrollHeight - (window.scrollY + window.innerHeight),
+  }));
+  await show(longDocument, { ...pinOptions, generation: 44 });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(50);
+  await show(blocksHtml(90, 0, "Block"), { ...pinOptions, generation: 45 });
+  let edges = await viewEdges();
+  check("a view at the very bottom stays at the bottom when text is appended", edges.gap <= 2 && edges.scrollY > 0, edges);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(50);
+  await show(`<p data-line="0">New first block.</p>\n${blocksHtml(90, 2, "Block")}`, { ...pinOptions, generation: 46 });
+  edges = await viewEdges();
+  check("a view at the very top stays at the top when a block is inserted above", edges.scrollY === 0, edges);
+
+  // Raw HTML with a data-line of its own is no anchor, and its malformed line never reaches the scroll message.
+  await clearMessages();
+  const rawDocument = `<div data-line="1.5">Raw block.</div>\n${blocksHtml(40, 2, "Block")}`;
+  await show(rawDocument, { ...anchorOptions, documentPath: "C:\\docs\\raw.md", generation: 47 });
+  await page.waitForTimeout(100);
+  reported = await lastScroll();
+  check("a raw data-line is skipped: the scroll report names the first Core block", reported?.line === 2 && reported.generation === 47, reported);
+
+  // Reselecting the find match after a reload never scrolls: the reader scrolled past the selected match stays put.
+  const farDocument = longDocument.replace("Block 5 text.", "Block 5 needle text.");
+  const farOptions = { ...anchorOptions, documentPath: "C:\\docs\\far.md" };
+  await show(farDocument, { ...farOptions, generation: 48 });
+  await page.evaluate(() => {
+    window.yamv.openFind();
+    window.yamv.find("needle", "first");
+  });
+  await scrollToBlock("Block 40 text.");
+  await page.waitForTimeout(50);
+  await show(farDocument, { ...farOptions, generation: 49 });
+  top = await topBlockOf();
+  match = await currentMatch();
+  check(
+    "a reload with find open keeps the view on the anchor, not on the selected match",
+    top?.text === "Block 40 text." && Math.abs(top.top) <= 1 && match.count === "1 of 1",
+    { top, match },
+  );
+
+  // A selected match whose block changed text is found by its block's line: the same order, else the block's last match;
+  // with no match in that block, the first below, else the last match.
+  const typoOptions = { ...anchorOptions, documentPath: "C:\\docs\\typo.md" };
+  const typoDocument = (paragraph) => `<p data-line="0">Intro.</p>\n<p data-line="2">${paragraph}</p>\n<p data-line="4">Plain end.</p>`;
+  await show(typoDocument("needle a, needle b, needle c, needle d, teh end."), { ...typoOptions, generation: 50 });
+  await page.evaluate(() => {
+    window.yamv.find("needle", "first");
+    window.yamv.find("needle", "next");
+    window.yamv.find("needle", "next");
+  });
+  await show(typoDocument("needle a, needle b, needle c, needle d, the end."), { ...typoOptions, generation: 51 });
+  match = await currentMatch();
+  check("a typo fixed elsewhere in the paragraph keeps its 3rd match selected", match.count === "3 of 4" && match.after === " c, ", match);
+  await show(typoDocument("needle a, needle b, the end."), { ...typoOptions, generation: 52 });
+  match = await currentMatch();
+  check("a block left with fewer matches selects its last", match.count === "2 of 2" && match.after === " b, the end.", match);
+  await show(`<p data-line="0">needle one, needle two.</p>\n<p data-line="2">Plain.</p>`, { ...typoOptions, generation: 53 });
+  match = await currentMatch();
+  check("with no match in the block and none below the last match is selected", match.count === "2 of 2" && match.after === " two.", match);
+  await page.evaluate(() => document.getElementById("yamv-find-close").click());
+
+  // A diagram block is matched by its source, not the svg text it renders to.
+  const diagram = '<pre class="mermaid" data-line="40">graph TD; A --> B</pre>';
+  const diagramOptions = { ...anchorOptions, documentPath: "C:\\docs\\diagram.md", hasMermaid: true };
+  const diagramDocument = `${blocksHtml(20, 0, "Para")}\n${diagram}\n${blocksHtml(30, 42, "Tail")}`;
+  const diagramMoved =
+    `${blocksHtml(10, 0, "Inserted")}\n${blocksHtml(20, 20, "Para")}\n${diagram.replace("40", "60")}\n${blocksHtml(30, 62, "Tail")}`;
+  const diagramTop = () => page.evaluate(() => Math.round(document.querySelector("#yamv-content pre.mermaid").getBoundingClientRect().top));
+  await show(diagramDocument, { ...diagramOptions, generation: 54 });
+  await page.evaluate(() => {
+    const block = document.querySelector("#yamv-content pre.mermaid");
+    window.scrollTo(0, block.getBoundingClientRect().top + window.scrollY + 5);
+  });
+  await page.waitForTimeout(50);
+  await show(diagramMoved, { ...diagramOptions, generation: 55 });
+  const movedTop = await diagramTop();
+  check("a reload with 20 lines inserted above keeps a diagram block at the top", Math.abs(movedTop + 5) <= 1, movedTop);
+
+  // A theme change while a reload is staged reaches the staged diagrams: they land drawn in the new theme.
+  const themed = await page.evaluate(async ([html, options]) => {
+    const rendering = window.yamv.render(html, options);
+    const staged = document.querySelector(".yamv-content.yamv-pending[aria-hidden='true']");
+    let changedWhileStaged = false;
+    const observer = new MutationObserver(() => {
+      if (!changedWhileStaged && staged.querySelector("svg")) {
+        changedWhileStaged = staged.isConnected;
+        window.yamv.setTheme(":root { --yamv-code-background: #123456; }");
+      }
+    });
+    observer.observe(staged, { childList: true, subtree: true });
+    await rendering;
+    observer.disconnect();
+    const svg = document.querySelector("#yamv-content pre.mermaid svg");
+    return { changedWhileStaged, newTheme: svg !== null && svg.outerHTML.toLowerCase().includes("#123456") };
+  }, [diagramMoved, { ...diagramOptions, generation: 56 }]);
+  check("a theme change during a staged reload reaches its diagrams", themed.changedWhileStaged && themed.newTheme, themed);
+  await page.evaluate(() => window.yamv.setTheme(""));
 } finally {
   await browser.close();
 }

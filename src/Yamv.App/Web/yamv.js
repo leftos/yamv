@@ -15,6 +15,14 @@
   let scrollTimer = 0;
   let mermaidReady = false;
   let findState = { query: "", marks: [], index: -1 };
+  // The documentPath of the document the content shows once its render finished; null while none is fully shown.
+  let shownDocument = null;
+  // The hidden element a re-render of the shown document is built in, while the old page stays on screen.
+  let staging = null;
+  // The width the staged document lands at: its render's, or a later live change's.
+  let stagedWidth = null;
+  // Counts theme changes, so a render can tell its diagrams were drawn in an older theme.
+  let themeGeneration = 0;
 
   function post(message) {
     if (typeof window.invokeCSharpAction === "function") {
@@ -157,12 +165,12 @@
   // Fence languages whose names highlight.js does not know as written.
   const languageAliases = new Map([["language-c#", "language-csharp"], ["language-f#", "language-fsharp"]]);
 
-  function highlightCode() {
+  function highlightCode(root) {
     if (!window.hljs) {
       return;
     }
     window.hljs.configure({ ignoreUnescapedHTML: true });
-    for (const code of content.querySelectorAll("pre > code")) {
+    for (const code of root.querySelectorAll("pre > code")) {
       for (const [written, known] of languageAliases) {
         code.classList.replace(written, known);
       }
@@ -184,8 +192,8 @@
     return trimmed;
   }
 
-  async function renderMath() {
-    const nodes = content.querySelectorAll("span.math, div.math");
+  async function renderMath(root) {
+    const nodes = root.querySelectorAll("span.math, div.math");
     if (nodes.length === 0) {
       return;
     }
@@ -239,8 +247,8 @@
     };
   }
 
-  async function renderMermaid() {
-    const nodes = Array.from(content.querySelectorAll("pre.mermaid"));
+  async function renderMermaid(root) {
+    const nodes = Array.from(root.querySelectorAll("pre.mermaid"));
     if (nodes.length === 0) {
       return;
     }
@@ -274,80 +282,328 @@
     }
   }
 
-  function restoreScroll(scroll, fragment) {
-    if (fragment) {
-      const target = document.getElementById(decodeFragment(fragment));
-      if (target) {
-        target.scrollIntoView({ block: "start" });
-        return;
+  // ---------- scroll anchor ----------
+
+  // Core tags every top-level block with the zero-based source line it starts on (data-line): on the block itself, or on
+  // a fenced block's code element. Only those count, and only a line that is a non-negative 32-bit integer, so raw HTML
+  // in the document carrying a data-line of its own can neither become an anchor nor break the scroll message.
+  function lineBlocks(root) {
+    const candidates = root.querySelectorAll(":scope > [data-line], :scope > pre > code[data-line]");
+    return Array.from(candidates).filter((block) => lineOf(block) !== null);
+  }
+
+  function lineOf(block) {
+    const text = block.getAttribute("data-line");
+    const line = /^\d{1,10}$/.test(text) ? Number(text) : -1;
+    return line >= 0 && line <= 2147483647 ? line : null;
+  }
+
+  // The box a block takes on screen: a fenced block's line is on its code element, inside the pre that draws it.
+  function boxOf(block) {
+    return block.tagName === "CODE" ? block.parentElement : block;
+  }
+
+  // A block's text as a reload compares it: a diagram's is its source, since the svg it renders to differs every time.
+  function blockText(block) {
+    return block.getAttribute("data-yamv-source") ?? block.textContent;
+  }
+
+  // Each anchor block of the content with its source line and text, built once per landing.
+  function describeBlocks() {
+    return lineBlocks(content).map((block) => ({ block, line: lineOf(block), text: blockText(block) }));
+  }
+
+  // The block at the top of the view, the first whose box reaches below the view's top edge, with the fraction (0 to 1)
+  // of its height above that edge; null when no block does.
+  function topAnchor() {
+    for (const block of lineBlocks(content)) {
+      const box = boxOf(block).getBoundingClientRect();
+      if (box.bottom > 0) {
+        return { block, offset: box.height > 0 ? Math.min(1, Math.max(0, -box.top / box.height)) : 0 };
       }
     }
-    const fraction = Math.min(1, Math.max(0, Number(scroll) || 0));
+    return null;
+  }
+
+  // Where a block of the page about to be replaced stands: its source line and its text.
+  function blockMark(block) {
+    return { line: lineOf(block), text: blockText(block) };
+  }
+
+  // The block of the new content with the same text as the old one, the nearest by source line when several have it.
+  function sameTextBlock(blocks, mark) {
+    let best = null;
+    for (const entry of blocks) {
+      if (entry.text === mark.text && (!best || Math.abs(entry.line - mark.line) < Math.abs(best.line - mark.line))) {
+        best = entry;
+      }
+    }
+    return best;
+  }
+
+  function blockAtOrAfter(blocks, line) {
+    return blocks.find((entry) => entry.line >= line) || null;
+  }
+
+  // The block an old block maps to in the new content: the one with its text, else the first at or after its line.
+  function mappedBlock(blocks, mark) {
+    return sameTextBlock(blocks, mark) || blockAtOrAfter(blocks, mark.line);
+  }
+
+  // The anchor the host sent: options.anchorLine and options.anchorOffset; null without a line.
+  function hostAnchor(settings) {
+    if (!Number.isInteger(settings.anchorLine)) {
+      return null;
+    }
+    return { line: settings.anchorLine, text: null, offset: Math.min(1, Math.max(0, Number(settings.anchorOffset) || 0)) };
+  }
+
+  // Where to bring to the top of the view, { entry, offset }; null sends the caller to the scroll fraction. A reload maps
+  // the old page's top block, any other show the host's anchor. The offset within the block holds when the block found
+  // has the anchor's text or line.
+  function anchorTarget(settings, reloadAnchor, blocks) {
+    const mark = reloadAnchor || hostAnchor(settings);
+    const entry = mark ? mappedBlock(blocks, mark) : null;
+    if (!entry) {
+      return null;
+    }
+    return { entry, offset: entry.text === mark.text || entry.line === mark.line ? mark.offset : 0 };
+  }
+
+  function scrollToAnchor(target, blocks) {
+    const box = boxOf(target.entry.block).getBoundingClientRect();
+    // The first block, from its top, comes back with the page's top padding above it, as the page opens.
+    const opening = target.entry === blocks[0] && target.offset === 0;
+    window.scrollTo(0, opening ? 0 : box.top + window.scrollY + target.offset * box.height);
+  }
+
+  // Lands the view: on the fragment's element; else, on a reload of a page that was at its very top or bottom, there
+  // again; else on the anchor; else at options.scroll.
+  function restoreScroll(settings, marks, blocks) {
+    if (settings.fragment && scrollToFragment(settings.fragment)) {
+      return;
+    }
+    if (marks.pin) {
+      window.scrollTo(0, marks.pin === "top" ? 0 : scrollableHeight());
+      return;
+    }
+    const target = anchorTarget(settings, marks.anchor, blocks);
+    if (target) {
+      scrollToAnchor(target, blocks);
+      return;
+    }
+    const fraction = Math.min(1, Math.max(0, Number(settings.scroll) || 0));
     window.scrollTo(0, fraction * scrollableHeight());
   }
 
-  // Swaps in a document at options.contentWidth ("760px" or "none"), when given. The HTML is parsed into an inert
-  // template first, so nothing in it loads before it is sanitized and its images are checked. Posts
-  // { type: "rendered", generation } when math, diagrams and the scroll position are done (or the render failed),
-  // unless a newer render has started; the host's generation numbers it.
-  async function render(bodyHtml, options) {
-    const settings = options || {};
-    const generation = Number.isInteger(settings.generation) ? settings.generation : renderGeneration + 1;
-    renderGeneration = generation;
+  function reportScroll() {
+    const height = scrollableHeight();
+    const top = topAnchor();
+    post({
+      type: "scroll",
+      value: height > 0 ? window.scrollY / height : 0,
+      line: top ? lineOf(top.block) : null,
+      offset: top ? top.offset : null,
+      generation: renderGeneration,
+    });
+  }
+
+  // ---------- re-render of the shown document ----------
+
+  // A hidden element beside the content, laid out at the incoming width, that a re-render of the shown document is built
+  // in. Being fixed, it adds nothing to the page's scrollable height.
+  function createStaging(width) {
+    const element = document.createElement("div");
+    element.className = "yamv-content md yamv-pending";
+    element.setAttribute("aria-hidden", "true");
+    element.style.position = "fixed";
+    element.style.top = "0";
+    element.style.left = "0";
+    element.style.right = "0";
+    staging = element;
+    stagedWidth = typeof width === "string" ? width : null;
+    if (stagedWidth) {
+      element.style.setProperty("--yamv-content-width", stagedWidth);
+    }
+    content.after(element);
+    return element;
+  }
+
+  function discardStaging() {
+    if (staging) {
+      staging.remove();
+      staging = null;
+    }
+  }
+
+  // "top" when the view is at the very top, "bottom" when its bottom is within 2 px of the document's end, else null.
+  function pinOf() {
+    if (window.scrollY === 0) {
+      return "top";
+    }
+    return window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2 ? "bottom" : null;
+  }
+
+  // The selected find match's block and its order among the block's matches; null when no match is selected.
+  function findMarkOf() {
+    const current = findState.marks[findState.index];
+    const block = current ? lineBlocks(content).find((candidate) => candidate.contains(current)) : null;
+    if (!block) {
+      return null;
+    }
+    return { ...blockMark(block), order: findState.marks.filter((mark) => block.contains(mark)).indexOf(current) };
+  }
+
+  // What the old page tells a reload of it: a pin to its top or bottom, its top block and the offset within it, and the
+  // selected find match.
+  function takeReloadMarks() {
+    const top = topAnchor();
+    return {
+      reload: true,
+      pin: pinOf(),
+      anchor: top ? { ...blockMark(top.block), offset: top.offset } : null,
+      findMark: findMarkOf(),
+    };
+  }
+
+  const showMarks = { reload: false, pin: null, anchor: null, findMark: null };
+
+  // Moves the staged document into the content in one step, after taking the old page's marks, and sets the latest width
+  // the host sent for it; nothing paints between.
+  function swapIn(staged) {
+    const marks = takeReloadMarks();
+    const width = stagedWidth;
+    findState = { query: findState.query, marks: [], index: -1 };
+    const range = document.createRange();
+    range.selectNodeContents(staged);
+    content.replaceChildren(range.extractContents());
+    discardStaging();
+    if (width) {
+      setContentWidth(width);
+    }
+    return marks;
+  }
+
+  function beginRender(settings) {
+    renderGeneration = Number.isInteger(settings.generation) ? settings.generation : renderGeneration + 1;
     rendering = true;
     window.clearTimeout(scrollTimer);
+    discardStaging();
+    return renderGeneration;
+  }
+
+  // A render of another document hides the content, and only then sets the incoming document's width, so the outgoing
+  // one never reflows at it.
+  function hideForShow(settings) {
+    shownDocument = null;
     findState = { query: findState.query, marks: [], index: -1 };
     content.classList.add("yamv-pending");
-    // The incoming document's width is set only once the outgoing one is hidden, so the outgoing one never reflows at it.
     if (typeof settings.contentWidth === "string") {
       setContentWidth(settings.contentWidth);
     }
+    return content;
+  }
+
+  // Parses the HTML into an inert template, so nothing in it loads before it is sanitized and its images are checked,
+  // and runs the code, math and diagram renderers on it.
+  async function build(target, bodyHtml, settings, generation) {
+    const theme = themeGeneration;
+    const template = document.createElement("template");
+    template.innerHTML = bodyHtml;
+    sanitize(template.content);
+    rewriteImages(template.content, settings.docBase, settings.rootBase);
+    target.replaceChildren(template.content);
+    highlightCode(target);
+    const pending = [];
+    if (settings.hasMath) {
+      pending.push(renderMath(target).catch((error) => reportError("math", error)));
+    }
+    if (settings.hasMermaid) {
+      pending.push(renderMermaid(target).catch((error) => reportError("mermaid", error)));
+    }
+    await Promise.all(pending);
+    if (settings.hasMermaid) {
+      await catchUpTheme(target, theme, generation);
+    }
+  }
+
+  // Draws the diagrams again for as long as the theme changed while they were drawn, so they land in the current theme.
+  async function catchUpTheme(target, theme, generation) {
+    let drawn = theme;
+    while (drawn !== themeGeneration && generation === renderGeneration) {
+      drawn = themeGeneration;
+      await renderMermaid(target).catch((error) => reportError("mermaid", error));
+    }
+  }
+
+  function land(settings, marks) {
+    const blocks = describeBlocks();
+    restoreScroll(settings, marks, blocks);
+    shownDocument = typeof settings.documentPath === "string" ? settings.documentPath : null;
+    if (!findBar.hidden && findState.query) {
+      reselectFind(marks, blocks);
+    }
+  }
+
+  // Ends a render: drops its staging when it never swapped in and, unless a newer render has started, shows the content,
+  // posts { type: "rendered", generation } and, once the frame that scrolls it has passed, a scroll report, so the host
+  // keeps the anchor the new content landed on.
+  function finishRender(generation, target) {
+    if (target === staging) {
+      discardStaging();
+    }
+    if (generation !== renderGeneration) {
+      return;
+    }
+    content.classList.remove("yamv-pending");
+    post({ type: "rendered", generation });
+    window.requestAnimationFrame(() => {
+      if (generation === renderGeneration) {
+        rendering = false;
+        reportScroll();
+      }
+    });
+  }
+
+  // Swaps in a document at options.contentWidth ("760px" or "none"), when given. A render of the document the page
+  // already shows (the same options.documentPath) is built off screen while the old page stays, and lands pinned to the
+  // top or bottom when the old page was there, else on the old page's top block, and keeps its find match without
+  // scrolling. Any other render hides the content and lands on the block at options.anchorLine, options.anchorOffset of
+  // the way down it, else at options.scroll. Posts { type: "rendered", generation } when math, diagrams and the scroll
+  // position are done (or the render failed), unless a newer render has started; the host's generation numbers it.
+  async function render(bodyHtml, options) {
+    const settings = options || {};
+    const generation = beginRender(settings);
+    const reload = typeof settings.documentPath === "string" && settings.documentPath === shownDocument;
+    const target = reload ? createStaging(settings.contentWidth) : hideForShow(settings);
     try {
-      const template = document.createElement("template");
-      template.innerHTML = bodyHtml;
-      sanitize(template.content);
-      rewriteImages(template.content, settings.docBase, settings.rootBase);
-      content.replaceChildren(template.content);
-      highlightCode();
-      const pending = [];
-      if (settings.hasMath) {
-        pending.push(renderMath().catch((error) => reportError("math", error)));
-      }
-      if (settings.hasMermaid) {
-        pending.push(renderMermaid().catch((error) => reportError("mermaid", error)));
-      }
-      await Promise.all(pending);
-      if (generation !== renderGeneration) {
-        return;
-      }
-      restoreScroll(settings.scroll, settings.fragment);
-      if (!findBar.hidden && findState.query) {
-        find(findState.query, "first");
+      await build(target, bodyHtml, settings, generation);
+      if (generation === renderGeneration) {
+        land(settings, reload ? swapIn(target) : showMarks);
       }
     } catch (error) {
       reportError("render", error);
     } finally {
-      if (generation === renderGeneration) {
-        content.classList.remove("yamv-pending");
-        post({ type: "rendered", generation });
-        window.requestAnimationFrame(() => {
-          if (generation === renderGeneration) {
-            rendering = false;
-          }
-        });
-      }
+      finishRender(generation, target);
     }
   }
 
   function setTheme(cssText) {
     themeStyle.textContent = cssText;
-    if (mermaidReady && content.querySelector("pre.mermaid")) {
-      renderMermaid().catch((error) => reportError("mermaid", error));
+    themeGeneration++;
+    // A hidden content is mid-render, and its render draws its diagrams again in the new theme (catchUpTheme).
+    if (mermaidReady && !content.classList.contains("yamv-pending") && content.querySelector("pre.mermaid")) {
+      renderMermaid(content).catch((error) => reportError("mermaid", error));
     }
   }
 
+  // Sets the content width live. A staged re-render takes it too, and lands at it rather than at its render's width.
   function setContentWidth(value) {
     document.documentElement.style.setProperty("--yamv-content-width", value);
+    if (staging) {
+      stagedWidth = value;
+      staging.style.setProperty("--yamv-content-width", value);
+    }
   }
 
   // ---------- find ----------
@@ -425,25 +681,71 @@
     }
     const total = findState.marks.length;
     if (total > 0) {
-      const previous = findState.marks[findState.index];
-      if (previous) {
-        previous.classList.remove("yamv-find-current");
-      }
+      let index = 0;
       if (direction === "prev") {
-        findState.index = findState.index <= 0 ? total - 1 : findState.index - 1;
+        index = findState.index <= 0 ? total - 1 : findState.index - 1;
       } else if (direction === "next") {
-        findState.index = (findState.index + 1) % total;
-      } else {
-        findState.index = 0;
+        index = (findState.index + 1) % total;
       }
-      const currentMark = findState.marks[findState.index];
-      currentMark.classList.add("yamv-find-current");
-      currentMark.scrollIntoView({ block: "center" });
+      selectMatch(index, "center");
     }
+    return reportFind();
+  }
+
+  // Makes match <index> the current one and scrolls it into view at <block> ("center"), or not at all when <block> is null.
+  function selectMatch(index, block) {
+    const previous = findState.marks[findState.index];
+    if (previous) {
+      previous.classList.remove("yamv-find-current");
+    }
+    findState.index = index;
+    const currentMark = findState.marks[index];
+    currentMark.classList.add("yamv-find-current");
+    if (block) {
+      currentMark.scrollIntoView({ block });
+    }
+  }
+
+  function reportFind() {
+    const total = findState.marks.length;
     const result = { current: total > 0 ? findState.index + 1 : 0, total };
     showCount(result);
     post({ type: "find", current: result.current, total: result.total });
     return result;
+  }
+
+  // The match a reload selects for the one selected before it. The old block is mapped to the new content by its text,
+  // else by its line (the first block at or after it); in that block, the match of the same order, or its last match
+  // when it has fewer now. With no match in that block, the first match in a block at or after the old block's line,
+  // else the last match.
+  function reloadedMatchIndex(previous, blocks) {
+    const marks = findState.marks;
+    const entry = mappedBlock(blocks, previous);
+    const inBlock = entry ? marks.filter((mark) => entry.block.contains(mark)) : [];
+    if (inBlock.length > 0) {
+      return marks.indexOf(inBlock[Math.min(previous.order, inBlock.length - 1)]);
+    }
+    const below = marks.findIndex((mark) => {
+      const owner = blocks.find((candidate) => candidate.block.contains(mark));
+      return owner !== undefined && owner.line >= previous.line;
+    });
+    return below >= 0 ? below : marks.length - 1;
+  }
+
+  // Runs the open find's query again over a freshly rendered document. A reload selects the reader's match again (or
+  // the first, when none was selected) without scrolling, so the scroll anchor decides where the view is; any other
+  // render selects the first match and scrolls to it.
+  function reselectFind(marks, blocks) {
+    if (!marks.reload) {
+      find(findState.query, "first");
+      return;
+    }
+    unwrapMarks();
+    findState = { query: findState.query, marks: wrapMatches(findState.query), index: -1 };
+    if (findState.marks.length > 0) {
+      selectMatch(marks.findMark ? reloadedMatchIndex(marks.findMark, blocks) : 0, null);
+    }
+    reportFind();
   }
 
   function clearFind() {
@@ -559,11 +861,13 @@
 
   // ---------- links and scroll ----------
 
+  // Scrolls the fragment's element to the top of the view; false when the page has no such element.
   function scrollToFragment(fragment) {
     const target = document.getElementById(decodeFragment(fragment));
     if (target) {
       target.scrollIntoView({ block: "start" });
     }
+    return target !== null;
   }
 
   // A primary click (click) or a middle click (auxclick, button 1) on a document link; other buttons do nothing.
@@ -594,10 +898,7 @@
       return;
     }
     window.clearTimeout(scrollTimer);
-    scrollTimer = window.setTimeout(() => {
-      const height = scrollableHeight();
-      post({ type: "scroll", value: height > 0 ? window.scrollY / height : 0, generation: renderGeneration });
-    }, 150);
+    scrollTimer = window.setTimeout(reportScroll, 150);
   }, { passive: true });
 
   document.addEventListener("securitypolicyviolation", (event) => {

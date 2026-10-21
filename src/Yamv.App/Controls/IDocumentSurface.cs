@@ -1,4 +1,5 @@
 using Yamv.Core.Rendering;
+using Yamv.Core.Session;
 
 namespace Yamv.App.Controls;
 
@@ -8,8 +9,10 @@ namespace Yamv.App.Controls;
 /// </summary>
 public interface IDocumentSurface
 {
-    /// <summary>The page scrolled; the value is the position as a fraction, 0 to 1, of the scrollable height.</summary>
-    event EventHandler<double>? ScrollChanged;
+    /// <summary>
+    /// The page scrolled, or a render landed; the value is the position as a fraction of the scrollable height and the anchor.
+    /// </summary>
+    event EventHandler<ScrollPosition>? ScrollChanged;
 
     /// <summary>The user activated a link, which the page never follows itself.</summary>
     event EventHandler<LinkActivatedEventArgs>? LinkActivated;
@@ -46,14 +49,21 @@ public interface IDocumentSurface
 /// <param name="Document">The rendered markdown.</param>
 /// <param name="DocumentPath">The markdown file's path; relative links and images resolve against it.</param>
 /// <param name="GroupRoot">The folder <c>file:</c> images must stay inside.</param>
-/// <param name="Scroll">The scroll position as a fraction, 0 to 1, of the scrollable height.</param>
-/// <param name="Fragment">An element id to scroll to, which wins over <paramref name="Scroll"/>.</param>
+/// <param name="Scroll">
+/// The scroll position as a fraction, 0 to 1, of the scrollable height, used when <paramref name="Anchor"/> finds no block.
+/// </param>
+/// <param name="Anchor">
+/// The block (the first at or after the anchor's line) whose point the anchor's offset down goes to the top of the view, or
+/// null for none. A page already showing this document keeps its own top block, or its pin to the top or bottom, instead.
+/// </param>
+/// <param name="Fragment">An element id to scroll to, which wins over <paramref name="Scroll"/> and <paramref name="Anchor"/>.</param>
 /// <param name="ContentWidth">The text measure in px, or null for full width.</param>
 public sealed record DocumentShow(
     RenderedDocument Document,
     string DocumentPath,
     string GroupRoot,
     double Scroll,
+    ScrollAnchor? Anchor,
     string? Fragment,
     double? ContentWidth
 );

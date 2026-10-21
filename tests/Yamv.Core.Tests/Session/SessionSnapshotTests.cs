@@ -29,7 +29,7 @@ public sealed class SessionSnapshotTests : IDisposable
         DocumentWindowState state = CreateState();
         state.Add([first, second]);
 
-        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), null, 280);
+        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), new Dictionary<string, ScrollAnchor>(), null, 280);
 
         string[] expected = [first, second];
         Assert.Equal(expected, snapshot.OpenFiles);
@@ -45,7 +45,7 @@ public sealed class SessionSnapshotTests : IDisposable
         state.Add([open]);
         var scroll = new Dictionary<string, double> { [open] = 0.5, [closed] = 0.9 };
 
-        SessionState snapshot = SessionSnapshot.Build(state, scroll, null, 280);
+        SessionState snapshot = SessionSnapshot.Build(state, scroll, new Dictionary<string, ScrollAnchor>(), null, 280);
 
         Assert.Equal(0.5, snapshot.ScrollPositions[open]);
         Assert.False(snapshot.ScrollPositions.ContainsKey(closed));
@@ -59,9 +59,24 @@ public sealed class SessionSnapshotTests : IDisposable
         state.Add([open]);
         var scroll = new Dictionary<string, double> { [open.ToUpperInvariant()] = 0.5 };
 
-        SessionState snapshot = SessionSnapshot.Build(state, scroll, null, 280);
+        SessionState snapshot = SessionSnapshot.Build(state, scroll, new Dictionary<string, ScrollAnchor>(), null, 280);
 
         Assert.Empty(snapshot.ScrollPositions);
+    }
+
+    [Fact]
+    public void Build_KeepsTheScrollAnchorsOfTheDocumentsTheWindowHoldsOnly()
+    {
+        string open = Path.Combine(Repo, "a.md");
+        string closed = Path.Combine(Repo, "b.md");
+        DocumentWindowState state = CreateState();
+        state.Add([open]);
+        var anchors = new Dictionary<string, ScrollAnchor> { [open] = new(42, 0.35), [closed] = new(3, 0) };
+
+        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), anchors, null, 280);
+
+        Assert.Equal(new ScrollAnchor(42, 0.35), snapshot.ScrollAnchors[open]);
+        Assert.False(snapshot.ScrollAnchors.ContainsKey(closed));
     }
 
     [Fact]
@@ -73,7 +88,7 @@ public sealed class SessionSnapshotTests : IDisposable
         state.ToggleSidebar();
         WindowBounds bounds = new(10, 20, 1200, 800, IsMaximized: true);
 
-        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), bounds, 320);
+        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), new Dictionary<string, ScrollAnchor>(), bounds, 320);
 
         string[] groups = [Repo];
         Assert.Equal(groups, snapshot.CollapsedGroups);
@@ -95,7 +110,7 @@ public sealed class SessionSnapshotTests : IDisposable
         WindowBounds bounds = new(10, 20, 1200, 800, IsMaximized: true);
         var scroll = new Dictionary<string, double> { [first] = 0.25, [second] = 0.75 };
 
-        SessionState snapshot = SessionSnapshot.Build(state, scroll, bounds, 320);
+        SessionState snapshot = SessionSnapshot.Build(state, scroll, new Dictionary<string, ScrollAnchor>(), bounds, 320);
         new SessionStore(SessionFile, _log).Save(snapshot);
 
         SessionState loaded = new SessionStore(SessionFile, _log).Load();

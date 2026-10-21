@@ -18,6 +18,12 @@ public sealed record SessionState
     /// <summary>Scroll position per full file path, as a fraction of the document from 0 to 1.</summary>
     public IReadOnlyDictionary<string, double> ScrollPositions { get; init; } = new Dictionary<string, double>();
 
+    /// <summary>
+    /// Scroll anchor per full file path: the source line of the block at the top of the view and the offset within it, which
+    /// win over the fraction in <see cref="ScrollPositions"/> while the document still has a block at or after that line.
+    /// </summary>
+    public IReadOnlyDictionary<string, ScrollAnchor> ScrollAnchors { get; init; } = new Dictionary<string, ScrollAnchor>();
+
     /// <summary>The window geometry to restore, or null when nothing was saved.</summary>
     public WindowBounds? Window { get; init; }
 

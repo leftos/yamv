@@ -50,7 +50,7 @@ public partial class HarnessWindow : Window
         _view = new DocumentView(_log);
         _view.LinkActivated += (_, e) => _log.LogInfo($"Harness: LinkActivated href='{e.Href}' resolved='{e.ResolvedUri}' button={e.Button}");
         _view.KeyForwarded += OnKeyForwarded;
-        _view.ScrollChanged += (_, value) => _log.LogInfo($"Harness: ScrollChanged {value.ToString("F3", CultureInfo.InvariantCulture)}");
+        _view.ScrollChanged += (_, value) => _log.LogInfo($"Harness: ScrollChanged {DocumentView.Describe(value)}");
         Content = _view;
         KeyDown += OnKeyDown;
         _ = StartAsync(DocumentPath(args), args);
@@ -115,7 +115,9 @@ public partial class HarnessWindow : Window
             Title = $"YAMV harness: {document.Title ?? Path.GetFileName(documentPath)}";
             await _view.SetThemeCssAsync(_dark ? DarkTheme : LightTheme);
             double? width = args.Contains("--full-width") ? null : 800;
-            await _view.ShowAsync(new DocumentShow(document, documentPath, GroupRoot(documentPath), ScrollOption(args), null, width));
+            await _view.ShowAsync(
+                new DocumentShow(document, documentPath, GroupRoot(documentPath), ScrollOption(args), Anchor: null, Fragment: null, width)
+            );
             _log.LogInfo($"Harness: showing {documentPath} ({(_dark ? "dark" : "light")})");
             if (args.Contains("--find"))
             {

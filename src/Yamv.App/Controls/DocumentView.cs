@@ -5,6 +5,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Rendering;
+using Yamv.Core.Session;
 
 namespace Yamv.App.Controls;
 
@@ -27,7 +28,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private bool _templateNavigationAllowed = true;
     private Uri? _documentUri;
     private ShowState? _lastShow;
-    private double? _lastScroll;
+    private ScrollPosition? _lastScroll;
 
     /// <summary>The CSS value of the latest content width, from a show or a live change; null before either.</summary>
     private string? _latestContentWidth;
@@ -35,10 +36,15 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private TaskCompletionSource? _rendered;
 
     public DocumentView(IAppLog log)
+        : this(log, WebAssets.TemplateUri(log)) { }
+
+    /// <summary>A view whose page loads from <paramref name="templateUri"/>; tests pass one that needs no extracted assets.</summary>
+    internal DocumentView(IAppLog log, Uri templateUri)
     {
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(templateUri);
         _log = log;
-        _templateUri = WebAssets.TemplateUri(log);
+        _templateUri = templateUri;
         _webView = new NativeWebView();
         _webView.EnvironmentRequested += OnEnvironmentRequested;
         _webView.AdapterCreated += (_, _) => WebView2Accelerators.Disable(_webView.TryGetPlatformHandle(), _log);
@@ -50,15 +56,16 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         Content = _webView;
     }
 
-    public event EventHandler<double>? ScrollChanged;
+    public event EventHandler<ScrollPosition>? ScrollChanged;
 
     public event EventHandler<LinkActivatedEventArgs>? LinkActivated;
 
     public event EventHandler<KeyForwardedEventArgs>? KeyForwarded;
 
     /// <summary>
-    /// Shows <paramref name="show"/>'s document at its content width, restoring its fragment if given, else its scroll
-    /// position. The task completes once the page has rendered it, math, diagrams and scroll position included, or once a
+    /// Shows <paramref name="show"/>'s document at its content width, restoring its fragment if given, else its anchor,
+    /// else its scroll fraction; a page that already shows the document keeps its own top block, or its pin to the top or
+    /// bottom. The task completes once the page has rendered it, math, diagrams and scroll position included, or once a
     /// newer call replaces it. The width also becomes the latest content width, which a page that loads again gets back.
     /// </summary>
     public Task ShowAsync(DocumentShow show)
@@ -73,7 +80,10 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         int generation = ++_generation;
         var options = new RenderOptions(
             generation,
+            fullPath,
             show.Scroll,
+            show.Anchor?.Line,
+            show.Anchor?.Offset ?? 0,
             show.Fragment,
             show.Document.HasMermaid,
             show.Document.HasMath,
@@ -297,10 +307,16 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         }
 
         RenderOptions options = _lastShow.Options with { ContentWidth = _latestContentWidth ?? _lastShow.Options.ContentWidth };
-        if (_lastScroll is double scroll)
+        if (_lastScroll is { } scroll)
         {
-            _log.LogInfo($"Replaying the document at its last reported scroll position {scroll.ToString("F3", CultureInfo.InvariantCulture)}");
-            options = options with { Scroll = scroll, Fragment = null };
+            _log.LogInfo($"Replaying the document at its last reported scroll position {Describe(scroll)}");
+            options = options with
+            {
+                Scroll = scroll.Fraction,
+                AnchorLine = scroll.Anchor?.Line,
+                AnchorOffset = scroll.Anchor?.Offset ?? 0,
+                Fragment = null,
+            };
         }
 
         return RenderScript(_lastShow with { Options = options });
@@ -424,7 +440,16 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         Dispatcher.UIThread.Post(() => Handle(message));
     }
 
-    private void Handle(PageMessage message)
+    /// <summary>A scroll position for the log: <c>0.250, anchor line 42 at 0.350</c>, or <c>0.250, no anchor</c>.</summary>
+    internal static string Describe(ScrollPosition scroll)
+    {
+        string fraction = scroll.Fraction.ToString("F3", CultureInfo.InvariantCulture);
+        return scroll.Anchor is { } anchor
+            ? string.Create(CultureInfo.InvariantCulture, $"{fraction}, anchor line {anchor.Line} at {anchor.Offset:F3}")
+            : $"{fraction}, no anchor";
+    }
+
+    internal void Handle(PageMessage message)
     {
         switch (message.Type)
         {
@@ -436,9 +461,9 @@ public sealed class DocumentView : UserControl, IDocumentSurface
                 break;
             case "rendered":
                 break;
-            case "scroll" when message.Value is double value && message.Generation >= _generation:
-                _lastScroll = value;
-                ScrollChanged?.Invoke(this, value);
+            case "scroll" when ScrollPositionOf(message) is { } scroll && message.Generation >= _generation:
+                _lastScroll = scroll;
+                ScrollChanged?.Invoke(this, scroll);
                 break;
             case "scroll":
                 break;
@@ -460,6 +485,25 @@ public sealed class DocumentView : UserControl, IDocumentSurface
                 _log.LogWarning($"Ignored a page message of unknown type '{message.Type}'");
                 break;
         }
+    }
+
+    /// <summary>The position a <c>scroll</c> message reports: its fraction and anchor; null when it carries no fraction.</summary>
+    internal static ScrollPosition? ScrollPositionOf(PageMessage message) =>
+        message.Value is double fraction ? new ScrollPosition(fraction, AnchorOf(message.Line, message.Offset)) : null;
+
+    /// <summary>
+    /// The anchor a <c>scroll</c> message names: null unless its line is a whole number from 0 to <see cref="int.MaxValue"/>.
+    /// An offset outside 0 to 1 is clamped into it, and a missing one is 0.
+    /// </summary>
+    private static ScrollAnchor? AnchorOf(double? line, double? offset)
+    {
+        if (line is not double value || value < 0 || value > int.MaxValue || Math.Floor(value) != value)
+        {
+            return null;
+        }
+
+        double within = offset is double given && double.IsFinite(given) ? Math.Clamp(given, 0, 1) : 0;
+        return new ScrollAnchor((int)value, within);
     }
 
     /// <summary>Makes <paramref name="href"/> absolute against the document; a leading <c>//</c> means <c>https:</c>.</summary>
