@@ -30,7 +30,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
   Theming (`Theming/`) parses theme files, resolves a theme for light or dark, builds its CSS (`ThemeCss`), and keeps the catalog of built-in and user themes (`ThemeCatalog`: list, import, inspect, duplicate, rename, save, delete); the editing services are `ThemeEditing` (set or reset a token, add a variant, rename), `ThemeTokenView` (the rows of one tab with value, layer and whether set there) and `ThemeFilePatch` (a save that edits only the changed values in the file's text).
 
-  Deleting goes through `IFileTrash`, which the App implements with the Recycle Bin or Trash. Theming owns no watcher and no UI.
+  Deleting goes through `IFileTrash`, which the App implements with the Recycle Bin or Trash. `ThemeFolderWatcher` watches the user themes folder and raises `Changed` once per quiet 300 ms on a pool thread; a 2 s tick re-checks the folder, re-arms after an error and follows the folder being deleted or recreated. Theming owns no UI.
 
   Widths (`Widths/`) holds the content-width value (`ContentWidth`: px or Full, snapped to a 40 px grid) and `WidthStore`, the per-folder widths in `widths.json` shared by every instance: a lookup walks from the document's folder up to the file-system root, else the [app default](glossary.md); changes are replaced atomically and the store's lock is held through file IO, so callers keep changes off the UI thread.
 
@@ -49,6 +49,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
 - A theme token rename or a new token also changes the page's `yamv.css` variables (`src/Yamv.App/Web/`) and the schema `themes/yamv-theme.schema.json`.
 - A new `ThemeFileJson` field needs `ThemeFilePatch`'s `Apply` and `RootOrder` and `ThemeDefinition.ContentEquals` updated, or Save silently drops edits to it.
+- `ThemeFolderWatcher` ignores the catalog's write-in-progress files by its own copy of `ThemeCatalog`'s temp-name pattern (`.<32 hex digits>.tmp`): a change to how the catalog names its temporary files changes both.
 - Theme colours are CSS hex, `#rrggbbaa`; Avalonia's `Color.Parse` reads 8 digits as `#aarrggbb`, so brushes are built from `ColorValue`'s R, G, B and A, never by parsing the hex.
 - The page and the host speak by message name: `Web/yamv.js` posts `ready`, `rendered`, `scroll`, `link`, `key`, `find`, `blocked` and `error`, which `DocumentView`'s message handler switches on, and the host calls the `window.yamv` functions `render`, `setTheme`, `setContentWidth`, `find`, `clearFind` and `openFind`. A rename changes both sides, and the `RenderOptions` fields match the `settings.*` names the page reads.
 - Core's renderer marks diagrams as `<pre class="mermaid">` and puts `data-line` on the `code` element of a fenced block; the page's diagram loader and scroll restore read those.
