@@ -23,6 +23,7 @@
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.
 - **Reveal**: showing a path in the platform's file manager from a tree menu: a file is shown selected in Explorer or Finder, a folder or group root is opened, and a missing document opens its nearest folder that still exists (`RevealCommand`).
 - **Second launch**: a no-argument `yamv` start while another process holds the main-instance lock; it asks the main instance to come forward and exits 0, brings that window forward itself and exits 1 when the signal fails, or, with no pid file, waits up to 5 s for the lock and starts as the main instance (`SecondLaunch`).
+- **Settings file**: `settings.json`, the app-wide settings shared by every window and process (`SettingsStore`); widths stay in `widths.json`, and the main window's documents and layout in `session.json`.
 - **Sidebar**: the pane on the window's right holding the tree of open documents.
 - **Text space**: the room a pane leaves for the document's text: the pane width less the page's 88 px of side padding (`ContentWidth.TextSpace`); a content width is compared against it ([content-width.md](design/content-width.md)).
 - **Theme family**: one `.yamv-theme.json` file, holding a light half, a dark half or both ([themes.md](design/themes.md)).
