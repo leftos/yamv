@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV reload and drop decisions</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1600px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 12px; font-size: 15.5px; max-width: 1480px; line-height: 1.5; }
+p.page code, section > p code, .cap code, .fcap code { font: 12.5px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+.anno-key { display: inline-block; width: 22px; height: 12px; border: 2px dashed #ffb27a; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+section { margin: 44px 0 0; padding-top: 28px; border-top: 1px solid rgba(255,255,255,.28); }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > p { color: #eef0f2; margin: 0 0 18px; font-size: 15px; max-width: 1480px; line-height: 1.5; }
+
+/* ---------- lanes side by side; time runs down the left column ---------- */
+.grid { display: grid; column-gap: 24px; row-gap: 16px; align-items: start; }
+.lane-h { padding-bottom: 4px; }
+.lane-h h3 { font: 600 16.5px "Inter V"; color: #fff; margin: 0 0 3px; }
+.lane-h h3 .q { display: inline-block; min-width: 54px; padding: 1px 7px; margin-right: 8px; border-radius: 5px; background: rgba(0,0,0,.28); font-size: 14px; text-align: center; }
+.lane-h p.cap { color: #f1f3f5; font-size: 13px; margin: 0; line-height: 1.42; }
+.strip-h { grid-column: 1 / -1; font: 600 11.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin-top: 10px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,.3); }
+.t { border-left: 3px solid rgba(255,255,255,.4); padding: 2px 0 4px 10px; }
+.t b { display: block; font: 700 21px "Inter V"; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.t span { display: block; font-size: 12.5px; color: #eef0f2; line-height: 1.38; margin-top: 3px; }
+.cell { display: flex; gap: 14px; align-items: flex-start; }
+.cell.below { flex-direction: column; gap: 7px; }
+.fcap { color: #f1f3f5; font-size: 12.5px; margin: 0; line-height: 1.4; }
+.fcap b { color: #fff; }
+.zoom { width: max-content; flex: none; }
+
+/* ---------- the app window: every colour is a Studio token ---------- */
+.win { position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 10px; flex: none;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-family: "Inter V", sans-serif; font-size: 13px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; white-space: nowrap; position: relative; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--yamv-text-muted); margin-right: 6px; flex: none; position: relative; }
+.wbtn + .wbtn { margin-left: -2px; }
+.wbtn.hover { background: var(--yamv-hover-background); color: var(--yamv-text); }
+.wbtn.disabled { opacity: .45; }
+.body { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+.col { box-sizing: content-box; max-width: 800px; margin: 0 auto; padding: 40px 44px 64px; will-change: transform; }
+.side { flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 12px 8px; overflow: hidden; position: relative; }
+.sb { position: absolute; right: 3px; width: 6px; border-radius: 3px; background: var(--yamv-text-muted); opacity: .38; }
+
+/* document */
+.md { font-family: "Inter V", sans-serif; font-size: 15.5px; line-height: 1.62; color: var(--yamv-text); }
+.md h1 { font-weight: 700; font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .5em; color: var(--yamv-heading); }
+.md h2 { font-weight: 700; font-size: 1.32em; line-height: 1.25; margin: 1.6em 0 .55em; padding-bottom: .3em; border-bottom: 1px solid var(--yamv-line); color: var(--yamv-heading); }
+.md p { margin: 0 0 1em; }
+.md ul { margin: 0 0 1em; padding-left: 1.6em; }
+.md li + li { margin-top: .2em; }
+.md a { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; }
+.md code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md pre { background: var(--yamv-code-background); border: 1px solid var(--yamv-code-line); border-radius: 8px; padding: 14px 16px; font: 13px/1.6 "JetBrains Mono V"; margin: 0 0 1.2em; white-space: pre; overflow: hidden; }
+.md pre code { background: none; padding: 0; font-size: inherit; }
+.md .new { outline: 2px dashed var(--anno); outline-offset: 3px; border-radius: 2px; }
+.k { color: var(--yamv-syntax-keyword); } .s { color: var(--yamv-syntax-string); } .c { color: var(--yamv-syntax-comment); font-style: italic; } .n { color: var(--yamv-syntax-number); }
+mark.f { background: var(--yamv-find-match); color: inherit; border-radius: 2px; padding: 0 1px; }
+mark.f.cur { background: var(--yamv-find-current); box-shadow: 0 0 0 2px color-mix(in srgb, var(--yamv-find-current) 40%, transparent); }
+
+/* find bar (yamv.css .yamv-findbar) */
+.findbar { position: absolute; top: 10px; right: 16px; z-index: 4; display: flex; align-items: center; gap: 6px; background: var(--yamv-page-background);
+           border: 1px solid var(--yamv-line); border-radius: 8px; padding: 5px 6px 5px 10px; box-shadow: 0 8px 24px color-mix(in srgb, var(--yamv-text) 14%, transparent);
+           font: 13px/1.2 "Inter V"; }
+.findbar .field { width: 200px; height: 26px; border: 1px solid var(--yamv-accent); border-radius: 5px; box-shadow: 0 0 0 3px var(--yamv-accent-soft);
+                  padding: 0 8px; display: flex; align-items: center; color: var(--yamv-text); background: var(--yamv-page-background); }
+.findbar .field::after { content: ""; width: 1px; height: 15px; background: var(--yamv-text); margin-left: 1px; }
+.findbar .count { font-size: 12px; color: var(--yamv-text-muted); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+.findbar .fb { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px; color: var(--yamv-text-muted); }
+
+/* missing and can't-read panes */
+.state-pane { padding: 44px 30px; text-align: center; color: var(--yamv-text-muted); font-size: 13.5px; line-height: 1.5; }
+.state-pane h4 { color: var(--yamv-text); font: 600 17px "Inter V"; margin: 0 0 6px; }
+.state-pane p { margin: 0 0 10px; }
+.state-pane code { font: 12px "JetBrains Mono V"; background: var(--yamv-chrome-background); padding: 2px 6px; border-radius: 4px; color: var(--yamv-text-secondary); }
+.state-pane .reason { color: var(--yamv-text-secondary); }
+.state-pane .mark { width: 44px; height: 44px; border-radius: 12px; border: 1.5px solid var(--yamv-warning-line); background: var(--yamv-warning-background); color: var(--yamv-warning);
+                    display: grid; place-items: center; margin: 0 auto 14px; }
+.btn { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--yamv-line); border-radius: 6px; background: var(--yamv-page-background); color: var(--yamv-text); font: 550 12.5px "Inter V"; }
+.btn.primary { background: var(--yamv-accent); border-color: var(--yamv-accent); color: #fff; }
+
+/* empty main window (EmptyState.axaml) */
+.empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.empty .md-mark { width: 54px; height: 54px; border-radius: 14px; border: 1.5px dashed var(--yamv-text-muted); opacity: .7; display: grid; place-items: center;
+                  font: 600 18px "JetBrains Mono V"; color: var(--yamv-text-muted); margin-bottom: 16px; }
+.empty .md-mark.hot { border-color: var(--yamv-accent); color: var(--yamv-accent); opacity: 1; background: color-mix(in srgb, var(--yamv-accent) 9%, transparent); border-width: 2px; }
+.empty h4 { font: 600 17px "Inter V"; color: var(--yamv-text); margin: 0 0 6px; }
+.empty p { font-size: 13.5px; color: var(--yamv-text-muted); margin: 0 0 18px; line-height: 1.45; }
+.keys { display: flex; gap: 4px; margin-top: 14px; }
+.keys span { padding: 0 4px; border: 1px solid var(--yamv-line); border-bottom-width: 2px; border-radius: 4px; font: 500 11px "JetBrains Mono V"; color: var(--yamv-text-muted); line-height: 17px; }
+
+/* tree */
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--yamv-text); white-space: nowrap; }
+.grp-h .chev { width: 10px; color: var(--yamv-text-muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.badge.dir { color: var(--yamv-text-muted); border-color: var(--yamv-line); }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; font-size: 13px; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--yamv-text-muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+.row.missing .nm { text-decoration: line-through; color: var(--yamv-text-muted); }
+.row .glyph { margin-left: auto; color: var(--yamv-warning); display: grid; place-items: center; }
+.tag { margin-left: auto; font: 600 9.5px "Inter V"; text-transform: uppercase; letter-spacing: .05em; color: var(--yamv-warning); background: var(--yamv-warning-background); border: 1px solid var(--yamv-warning-line); border-radius: 4px; padding: 1px 5px; }
+
+/* O7: drag-over states */
+.dropov { position: absolute; left: 0; right: 0; top: 38px; bottom: 0; z-index: 6; display: grid; place-items: center;
+          background: color-mix(in srgb, var(--yamv-page-background) 82%, var(--yamv-accent) 9%); }
+.dropov::before { content: ""; position: absolute; inset: 10px; border: 2px dashed var(--yamv-accent); border-radius: 12px; }
+.dropov .say { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--yamv-text); font: 600 21px "Inter V"; }
+.dropov .say svg { color: var(--yamv-accent); }
+.dropov.no { background: color-mix(in srgb, var(--yamv-page-background) 78%, var(--yamv-text-muted) 8%); }
+.dropov.no::before { border-color: var(--yamv-text-muted); }
+.dropov.no .say { color: var(--yamv-text-muted); font: 550 16px "Inter V"; }
+.dropov.no .say svg { color: var(--yamv-text-muted); }
+.side.drop { background: color-mix(in srgb, var(--yamv-sidebar-background) 90%, var(--yamv-accent) 10%); }
+.side.drop::after { content: ""; position: absolute; inset: 5px; border: 2px dashed var(--yamv-accent); border-radius: 9px; pointer-events: none; }
+.side.drop.no { background: var(--yamv-sidebar-background); }
+.side.drop.no::after { border-color: var(--yamv-text-muted); }
+.slot { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; margin: 2px 2px 12px; padding: 4px 8px; border-radius: 7px;
+        background: var(--yamv-page-background); border: 1px solid var(--yamv-accent-soft); color: var(--yamv-accent); font: 600 12.5px "Inter V"; text-align: center; }
+.slot.no { border-color: var(--yamv-line); color: var(--yamv-text-muted); font-weight: 550; font-size: 12px; line-height: 1.3; }
+.cursor { position: absolute; z-index: 9; pointer-events: none; }
+.cursor .ghost { position: absolute; left: 10px; top: 16px; width: 46px; height: 56px; border-radius: 5px; background: rgba(255,255,255,.55); border: 1px solid rgba(0,0,0,.25); display: grid; place-items: center; }
+.cursor .ghost::after { content: attr(data-n); position: absolute; right: -7px; top: -7px; min-width: 18px; height: 18px; border-radius: 9px; background: #0067c0; color: #fff; font: 700 11px/18px "Inter V"; text-align: center; }
+.cursor .os { position: absolute; left: 22px; top: 76px; background: #fff; border: 1px solid #8a8a8a; color: #1a1a1a; font: 12px "Inter V"; padding: 2px 6px; white-space: nowrap; display: flex; gap: 5px; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,.2); }
+
+/* O8: open entry points */
+.sidetop { display: flex; justify-content: flex-end; align-items: center; height: 30px; margin: -4px 0 6px; border-bottom: 1px solid var(--yamv-line); padding: 0 0 4px; }
+.sidetop .wbtn { margin-right: 0; }
+.tip { position: absolute; z-index: 8; background: var(--yamv-text); color: var(--yamv-page-background); font: 500 12px "Inter V"; padding: 5px 8px; border-radius: 5px; white-space: nowrap; }
+.solo { border-radius: 10px; box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); }
+
+/* toasts */
+.toast { position: relative; overflow: hidden; display: flex; align-items: center; gap: 9px; background: var(--yamv-page-background); border: 1px solid var(--yamv-line); border-radius: 8px;
+         padding: 8px 10px 9px 12px; font: 13px "Inter V"; color: var(--yamv-text); white-space: nowrap; box-shadow: 0 10px 22px var(--toast-shadow), 0 1px 3px var(--toast-shadow); }
+.toast > svg { flex: none; color: var(--yamv-warning); }
+.toast code { font: 12px "JetBrains Mono V"; background: var(--yamv-code-background); padding: 1px 5px; border-radius: 4px; }
+.toast .x { color: var(--yamv-text-muted); font-size: 12px; margin-left: 8px; }
+.toast .timer { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--yamv-text-muted); opacity: .55; }
+.toast.bar { border: 0; border-top: 1px solid var(--yamv-line); border-radius: 0; box-shadow: none; background: var(--yamv-chrome-background); padding: 6px 12px 7px; }
+.toast.bar .x { margin-left: auto; }
+.tstack { position: absolute; z-index: 6; display: flex; flex-direction: column; gap: 8px; }
+.tstack.a { left: 0; right: 0; bottom: 16px; align-items: center; }
+.tstack.b { top: 48px; right: 12px; align-items: flex-end; }
+.tstack.c { left: 0; right: 0; bottom: 0; gap: 0; }
+
+/* ---------- annotations: not UI ---------- */
+.ov { position: absolute; inset: 0; pointer-events: none; z-index: 7; }
+.note { position: absolute; z-index: 7; color: var(--anno); background: var(--anno-band); border: 1.5px solid var(--anno); border-radius: 6px; font: 650 17px "Inter V"; padding: 3px 9px; white-space: nowrap; }
+.ring { position: absolute; z-index: 7; border: 2.5px dashed var(--anno); border-radius: 8px; pointer-events: none; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: live reload, drop, Open… and toasts, seven open questions</h1>
+<p class="page">Each frame is a Studio main window drawn at its real pixel size and scaled down; light theme, plus one dark row each for O7 and the toast. The document is on the left, the tree on the right. Options are lanes side by side. Where an option is about timing, time runs down the page: each row is one moment, named with its time stamp in the left column, and every lane shows what that option draws at that moment. <span class="anno-key"></span>Orange marks are annotations, not UI.</p>
+<p class="page">Code today: <code>.tmp/map-yamv-9.md</code> (I3, I5, I6, I11, O3 to O14). Look: <code>docs/design/look.md</code>. Find bar and marks: <code>yamv.css:188-235</code>.</p>
+
+<template id="ctl"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<section>
+  <h2>O3 · When a watched file's events are all deletes, does the missing pane show at once or after a re-check?</h2>
+  <p>Window 660 × 380, shown at 67%. Some editors save by deleting the file and writing it again; the debounce is 150 ms, so a re-create later than that leaves a delete-only burst.</p>
+  <div data-q="o3"></div>
+</section>
+
+<section>
+  <h2>O4 · When a reload's read fails with "in use by another program", what does the window show?</h2>
+  <p>Window 660 × 380, shown at 67%. The can't-read pane is the one in look.md (Edge states). The 2 s tick is the existing missing/unreadable re-probe.</p>
+  <div data-q="o4"></div>
+</section>
+
+<section>
+  <h2>O6 · Find is open on match 4 of 9 when the file reloads: which match is current afterwards?</h2>
+  <p>Window 760 × 440, shown at 86%. The find bar is the one in look.md and <code>yamv.css</code>. The save added one sentence containing "reload" near the top, so the count goes from 9 to 10.</p>
+  <div data-q="o6"></div>
+</section>
+
+<section>
+  <h2>O7 · What does the window show while files are dragged over it?</h2>
+  <p>Window 700 × 420, shown at 60%. The pointer, drag image and Copy label are drawn by the OS, not YAMV. Accepted files are .md, .markdown, .mdx and .txt.</p>
+  <div data-q="o7"></div>
+</section>
+
+<section>
+  <h2>O8 · Where does "Open…" live, given the window has no menu bar?</h2>
+  <p>Window 700 × 420, shown at 60%; details at 140%. Every option keeps Ctrl/Cmd+O and the empty state's <b>Open files…</b> button.</p>
+  <div data-q="o8"></div>
+</section>
+
+<section>
+  <h2>O14 · Where does a reloaded document land when 20 lines are inserted above the view?</h2>
+  <p>Window 660 × 380, shown at 67%. The reader is at the "Scroll position" section; the editor inserts 20 source lines (a new section) near the top of the file. The thin bar at the pane's right edge is the scroll position.</p>
+  <div data-q="o14"></div>
+</section>
+
+<section>
+  <h2>Toast · Where does a failed or refused operation show its message?</h2>
+  <p>Ruled: a failed or refused operation always shows a toast in the window, never only a log line. Window 700 × 420, shown at 60%; details at 125%. The page is a native web view that Avalonia cannot draw over, so a toast over it is its own small borderless window, as the ⟷ popover is.</p>
+  <div data-q="toasts"></div>
+</section>
+
+<script>
+const LIGHT = { pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  warning: "#9a6700", warningBackground: "#fff8c5", warningLine: "#e5d17b", codeBackground: "#f6f8fa", codeLine: "#e4e8ec", findMatch: "#fff1a8", findCurrent: "#ffb340",
+  syntaxKeyword: "#cf222e", syntaxString: "#0a3069", syntaxComment: "#6e7781", syntaxNumber: "#0550ae" };
+const DARK = { pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  warning: "#d29922", warningBackground: "#bb800926", warningLine: "#9e6a03", codeBackground: "#161b22", codeLine: "#262c34", findMatch: "#6b5a1a", findCurrent: "#b07a12",
+  syntaxKeyword: "#ff7b72", syntaxString: "#a5d6ff", syntaxComment: "#8b949e", syntaxNumber: "#79c0ff" };
+/* not tokens: the toast shadow and the annotation colours */
+const EXTRA = {
+  light: "--toast-shadow:rgba(31,35,40,.18);--anno:#d9480f;--anno-ink:#fff;--anno-soft:rgba(217,72,15,.22);--anno-band:rgba(255,255,255,.94)",
+  dark: "--toast-shadow:rgba(0,0,0,.6);--anno:#ff922b;--anno-ink:#1a0f00;--anno-soft:rgba(255,146,43,.24);--anno-band:rgba(15,19,24,.94)",
+};
+const T = { light: LIGHT, dark: DARK };
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (th) => Object.entries(T[th]).map(([k, v]) => `${kebab(k)}:${v}`).join(";") + ";" + EXTRA[th];
+
+const CTL = document.getElementById("ctl").innerHTML;
+const GLYPH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const OPEN = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 12.6V3.2h4.1l1.5 1.5h5.3v2.1M1.8 12.6 3.7 7h10.6l-1.9 5.6z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`;
+const PLUS = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2.8v10.4M2.8 8h10.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+const ICO = `<svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+const WARN = `<svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1.6 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12.1" r=".9" fill="currentColor"/></svg>`;
+const NO = (s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.7 12.3 12.3 3.7" stroke="currentColor" stroke-width="1.5"/></svg>`;
+const DROPICO = `<svg width="34" height="34" viewBox="0 0 34 34"><path d="M8 3.5h12l7 7v20H8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M17.5 13v11M13 19.5l4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ARROW = `<svg width="20" height="26" viewBox="0 0 20 26"><path d="M1.5 1.5v19l4.6-4.4 3.3 7.6 3.2-1.4-3.3-7.4h6.5z" fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+
+/* ---------- documents ---------- */
+const PLAN_LIST = `<li>Content width per folder, with the ⟷ popover</li><li>Theme settings: live preview and the colour picker</li>`;
+const DOCS = {
+  plan: (extra = "") => `<h1>YAMV plan</h1>
+<p>The viewer opens Markdown files from any folder and keeps them in a tree beside the page. This file is a snapshot of the <a>Linear issues</a>.</p>
+<h2>Now</h2>
+<ul>${extra}${PLAN_LIST}</ul>
+<h2>Next</h2>
+<p>Drag and drop, and links that open other documents.</p>`,
+  notes: `<h1>Reading notes</h1>
+<p>Notes from the week's papers. The second one argues that measure matters more than font size for long reading, and that most people settle between 60 and 75 characters a line.</p>
+<h2>To follow up</h2>
+<ul><li>Find the original study the second paper cites</li><li>Try a narrower column for a week and see if it sticks</li></ul>`,
+  /* the long document for O6 and O14; ins14 is 20 source lines, ins6 is one sentence */
+  live: (o = {}) => `<h1>Live reload</h1>
+<p>YAMV watches the folder of every open document. When a file changes on disk, the page reloads it in place and keeps the reader where they were.</p>
+${o.ins6 ? `<p class="${o.mark ? "new" : ""}">Saved today: the reload test passes on both platforms.</p>` : ""}
+<h2>What triggers it</h2>
+<ul><li>A save from any editor, including one that writes a temporary file and renames it over the original</li><li>A checkout or a pull that rewrites the file</li><li>A sync tool that replaces the file</li></ul>
+<p>Events come in bursts. They are debounced for 150 ms, so one save is one reload.</p>
+${o.ins14 ? `<div class="${o.mark ? "new" : ""}"><h2>Editors we tried</h2>
+<ul><li>VS Code: writes in place</li><li>Vim: writes a backup, then renames</li><li>Notepad: writes in place, with a lock</li><li>Obsidian: writes in place</li><li>Typora: deletes, then writes</li></ul>
+<pre><code><span class="c"># the burst a rename-save gives</span>
+Created  MAIN.md~
+Renamed  MAIN.md~ → MAIN.md</code></pre>
+<p>Each one ends with a single render.</p></div>` : ""}
+<h2>Missing and unreadable</h2>
+<p>A deleted file shows the missing pane. A file another program holds open shows the can't-read pane until it can be read again.</p>
+<div id="anchor"><h2>Scroll position</h2>
+<p>After a reload the page returns to the same place. The host sends the last scroll position with the new HTML, and the page restores it before it is shown.</p></div>
+<pre><code>render(html, { scroll: <span class="n">0.54</span>, generation: <span class="n">12</span> })</code></pre>
+<p>Find stays open across a reload, and its query runs again on the new text.</p>
+<h2>Find</h2>
+<p>Ctrl+F opens the find bar. Matches are counted, and Enter steps to the next one. A reload keeps the query.</p>
+<h2>Next</h2>
+<p>Drag and drop, an Open… entry outside the empty state, and links that open other documents, none of which may reload a page by surprise.</p>
+<ul><li>Drop onto the window</li><li>Reload on network shares</li><li>Links between documents</li></ul>
+<p>Printing and export stay in the backlog; neither has to reload anything.</p>`,
+};
+const MISSING = (path) => `<div class="state-pane"><h4>This file is no longer there</h4><p>It was moved or deleted:</p><p><code>${path}</code></p>
+<p style="margin-top:16px"><span class="btn">Locate…</span>&nbsp;&nbsp;<span class="btn">Remove from list</span></p><p style="font-size:12px">YAMV keeps watching, and reopens it if it comes back.</p></div>`;
+const UNREAD = (path) => `<div class="state-pane" style="padding-top:30px"><div class="mark">${WARN.replace('width="14" height="14"', 'width="22" height="22"')}</div><h4>This file can't be read</h4>
+<p><code>${path}</code></p><p class="reason">It is in use by another program.</p>
+<p style="margin-top:14px"><span class="btn">Retry</span>&nbsp;&nbsp;<span class="btn">Remove from list</span></p><p style="font-size:12px">YAMV tries again when the file changes.</p></div>`;
+const EMPTY = (hot) => `<div class="empty"><div class="md-mark ${hot ? "hot" : ""}">md</div><h4>No documents open</h4><p>Drop markdown files here, or open some.<br>They stay open next time.</p>
+<span class="btn primary">Open files…</span><div class="keys"><span>Ctrl</span><span>O</span></div></div>`;
+const PLAN_PATH = "X:\\dev\\yamv\\docs\\plans\\MAIN.md";
+
+/* ---------- tree ---------- */
+const row = (name, cls = "", extra = "") => `<div class="row ${cls}">${ICO}<span class="nm">${name}</span>${extra}</div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+const head = (name, badge) => `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge ${badge === "dir" ? "dir" : ""}">${badge}</span></div>`;
+function tree(o) {
+  const r = (name, indent) => {
+    const st = (o.state ?? {})[name];
+    let cls = indent ? "in" : "";
+    if (o.sel === name) cls += " sel";
+    if (st === "missing") cls += " missing";
+    const extra = st === "missing" ? '<span class="tag">missing</span>' : st === "unread" ? `<span class="glyph">${WARN}</span>` : "";
+    return row(name, cls, extra);
+  };
+  const yamv = head("yamv", "git") + r("README.md") + folder("docs/plans") + r("MAIN.md", 1) + r("live-reload.md", 1) + r("v1-build.md", 1);
+  const yaat = head("yaat", "git") + folder("docs") + r("ARCHITECTURE.md", 1) + r("glossary.md", 1);
+  const dl = head("~\\Downloads", "dir") + r("notes.md");
+  return `<div class="grp">${yamv}</div><div class="grp">${yaat}</div><div class="grp">${dl}</div>`;
+}
+
+/* ---------- window ---------- */
+function win(o) {
+  const side = o.tree === false ? "" : `<div class="side ${o.sideCls ?? ""}" style="width:${o.treeW ?? 210}px">${o.sideTop ?? ""}${tree(o.tree ?? {})}</div>`;
+  return `<div class="win" style="width:${o.w}px;height:${o.h}px;${vars(o.theme ?? "light")}" ${o.attrs ?? ""}>
+    <div class="titlebar"><span class="name">${o.title}</span><span>${o.loc ?? ""}</span><span class="spacer"></span>${o.tools ?? ""}<span class="wbtn ${o.btn ?? ""}">${GLYPH}</span>${CTL}</div>
+    <div class="body"><div class="pane">${o.pane}${o.paneOv ?? ""}</div>${side}</div>${o.over ?? ""}</div>`;
+}
+const col = (html, attrs = "") => `<div class="col md" ${attrs}>${html}</div>`;
+const note = (text, style) => `<div class="note" style="${style}">${text}</div>`;
+const ring = (style) => `<div class="ring" style="${style}"></div>`;
+
+/* ---------- lanes side by side, time down the left ---------- */
+function grid({ lanes, strips }) {
+  let h = `<div class="grid" style="grid-template-columns:150px repeat(${lanes.length}, minmax(0,1fr))"><div></div>`;
+  h += lanes.map((l) => `<div class="lane-h"><h3><span class="q">${l.q}</span>${l.title}</h3><p class="cap">${l.cap}</p></div>`).join("");
+  for (const s of strips) {
+    if (s.title) h += `<div class="strip-h">${s.title}</div>`;
+    for (const r of s.rows) {
+      h += `<div class="t"><b>${r.t}</b><span>${r.ev}</span></div>`;
+      h += r.cells.map((c) => c === null ? "<div></div>" : `<div class="cell ${s.capPos ?? "right"}"><div class="zoom" style="zoom:${c.z ?? s.z}">${c.html}</div>${c.cap ? `<p class="fcap">${c.cap}</p>` : ""}</div>`).join("");
+    }
+  }
+  return h + "</div>";
+}
+
+/* ---------- O3 ---------- */
+const SMALL = { w: 660, h: 380, treeW: 210, title: "MAIN.md", loc: "yamv / docs / plans" };
+const page = (o = {}) => win({ ...SMALL, pane: col(DOCS.plan()), tree: { sel: "MAIN.md" }, ...o });
+const missing = (o = {}) => win({ ...SMALL, btn: "disabled", pane: MISSING(PLAN_PATH), tree: { sel: "MAIN.md", state: { "MAIN.md": "missing" } }, ...o });
+function o3() {
+  const z = 0.67;
+  const recheck = note("re-check at 650 ms", "right:12px;bottom:12px");
+  return grid({
+    lanes: [
+      { q: "O3 · A", title: "Flip at once", cap: "After the 150 ms debounce a delete-only burst shows the missing pane at once; worst case: an editor that deletes and re-creates flashes the missing pane until it writes again." },
+      { q: "O3 · B", title: "Re-check after a 500 ms grace", cap: "A delete-only burst is probed once more 500 ms later and flips only if the file is still gone; worst case: a real delete leaves the old page up for 650 ms." },
+    ],
+    strips: [
+      { title: "Case 1 · An editor saves by deleting MAIN.md, then writes it again 400 ms later", z, rows: [
+        { t: "0 ms", ev: "The editor deletes MAIN.md.", cells: [{ html: page(), cap: "The page as it was." }, { html: page(), cap: "The page as it was." }] },
+        { t: "150 ms", ev: "Debounce fires: deletes only, and the file is absent.", cells: [
+          { html: missing(), cap: "<b>The missing pane flashes in</b>; the row is struck through with MISSING." },
+          { html: page({ paneOv: recheck }), cap: "Nothing changes. A re-check is booked for 650 ms." }] },
+        { t: "400 ms", ev: "The editor writes MAIN.md again.", cells: [
+          { html: missing(), cap: "Still the missing pane." },
+          { html: page(), cap: "Still the old page." }] },
+        { t: "550 ms", ev: "Debounce fires: the file is there; reload.", cells: [
+          { html: page(), cap: "The page comes back, after 400 ms of the missing pane." },
+          { html: page(), cap: "The new page; the 650 ms re-check finds the file and does nothing. <b>No flash.</b>" }] },
+      ] },
+      { title: "Case 2 · MAIN.md is really deleted", z, rows: [
+        { t: "0 ms", ev: "Deleted (Explorer, git, rm).", cells: [{ html: page(), cap: "The page as it was." }, { html: page(), cap: "The page as it was." }] },
+        { t: "150 ms", ev: "Debounce fires: deletes only, and the file is absent.", cells: [
+          { html: missing(), cap: "<b>The missing pane</b>, 150 ms after the delete." },
+          { html: page({ paneOv: recheck }), cap: "The old page stays, though the file is gone." }] },
+        { t: "650 ms", ev: "The grace ends: the file is still absent.", cells: [
+          { html: missing(), cap: "The missing pane." },
+          { html: missing(), cap: "<b>The missing pane</b>, 650 ms after the delete." }] },
+      ] },
+    ],
+  });
+}
+
+/* ---------- O4 ---------- */
+const NEW_LI = `<li class="new">Live reload keeps the page through a lock</li>`;
+const unread = (o = {}) => win({ ...SMALL, btn: "disabled", pane: UNREAD(PLAN_PATH), tree: { sel: "MAIN.md", state: { "MAIN.md": "unread" } }, ...o });
+const fresh = () => page({ pane: col(DOCS.plan(NEW_LI)), paneOv: note("dashed: the new item", "right:12px;top:10px") });
+function o4() {
+  const z = 0.67;
+  const quiet = (t) => page({ paneOv: note(t, "right:12px;bottom:12px") });
+  return grid({
+    lanes: [
+      { q: "O4 · A", title: "The can't-read pane at once (today)", cap: "The first failed read replaces the page with the can't-read pane; worst case: every save by an editor that locks the file flashes the pane for as long as it holds the lock." },
+      { q: "O4 · B", title: "Keep the page, retry quietly", cap: "The old page stays and the read is retried on the next event or the 2 s tick, with the pane only after 10 s of failures; worst case: for up to 10 s the page is out of date with no sign of it." },
+    ],
+    strips: [
+      { title: "Case 1 · An editor holds MAIN.md locked for 1.2 s while it saves", z, rows: [
+        { t: "0 ms", ev: "The editor opens MAIN.md exclusively and starts writing.", cells: [{ html: page(), cap: "The page as it was." }, { html: page(), cap: "The page as it was." }] },
+        { t: "150 ms", ev: "Debounce fires; the read fails: in use by another program.", cells: [
+          { html: unread(), cap: "<b>The can't-read pane</b> replaces the page; the row gets the warning glyph." },
+          { html: quiet("retry: next event or 2 s tick"), cap: "Nothing changes; the failure is only logged." }] },
+        { t: "1.35 s", ev: "The editor let go at 1.2 s; its last event's read succeeds.", cells: [
+          { html: fresh(), cap: "The new page, after 1.2 s of the pane." },
+          { html: fresh(), cap: "The new page. <b>Nothing flashed.</b>" }] },
+      ] },
+      { title: "Case 2 · Another program holds MAIN.md for 12 s (a backup or sync tool)", z, rows: [
+        { t: "2 s", ev: "The 2 s tick retries; the read fails again.", cells: [
+          { html: unread(), cap: "The can't-read pane, since 150 ms." },
+          { html: quiet("retry failed: 2 s tick"), cap: "The old page, unchanged." }] },
+        { t: "10 s", ev: "Still failing 10 s after the first failure.", cells: [
+          { html: unread(), cap: "The can't-read pane." },
+          { html: unread(), cap: "<b>Now the can't-read pane</b>; Retry and the 2 s tick go on as today." }] },
+        { t: "12.15 s", ev: "The lock is released; the next event's read succeeds.", cells: [
+          { html: fresh(), cap: "The new page." },
+          { html: fresh(), cap: "The new page." }] },
+      ] },
+    ],
+  });
+}
+
+/* ---------- O6 ---------- */
+const findbar = (cur) => `<div class="findbar"><span class="field">reload</span><span class="count" data-count="${cur}"></span><span class="fb">↑</span><span class="fb">↓</span><span class="fb">✕</span></div>`;
+function liveWin(o) {
+  return win({ w: 760, h: 440, treeW: 220, title: "live-reload.md", loc: "yamv / docs / plans", tree: { sel: "live-reload.md" },
+    pane: col(DOCS.live(o.doc ?? {}), `data-find="reload" data-cur="${o.cur}"`), paneOv: findbar(o.cur) + (o.ov ?? ""), attrs: `data-scroll="center"` });
+}
+function o6() {
+  const z = 0.86;
+  return grid({
+    lanes: [
+      { q: "O6 · A", title: "Keep the query, reset to match 1 (today)", cap: "The query runs again on the new text and match 1 becomes current, scrolled to the middle of the view; worst case: every save throws the reader back to the first match." },
+      { q: "O6 · B", title: "Keep the query and the place", cap: "The match nearest to where the current one was stays current and in view; worst case: if the text around it was deleted, the next match below becomes current." },
+    ],
+    strips: [{ z, capPos: "below", rows: [
+      { t: "Before", ev: "Find is open on \"reload\", match 4 of 9 current.", cells: [{ html: liveWin({ cur: 4 }), cap: "Match 4 of 9 is current (orange) and centred." }, { html: liveWin({ cur: 4 }), cap: "Match 4 of 9 is current (orange) and centred." }] },
+      { t: "150 ms", ev: "The file was saved with one more \"reload\" near the top; the page reloads.", cells: [
+        { html: liveWin({ cur: 1, doc: { ins6: true, mark: true } }), cap: "<b>1 of 10</b>: the view jumps to the first match, near the top; the reader's place is lost." },
+        { html: liveWin({ cur: 5, doc: { ins6: true } }), cap: "<b>5 of 10</b>: the same match stays current and in view; its number moved up one for the match added above." }] },
+    ] }],
+  });
+}
+
+/* ---------- O7 ---------- */
+const MID = { w: 700, h: 420, treeW: 230, title: "MAIN.md", loc: "yamv / docs / plans" };
+const cursor = (x, y, ok, n = 2) => `<div class="cursor" style="left:${x}px;top:${y}px">${ok ? `<div class="ghost" data-n="${n}">${ICO.replace('class="ico"', 'width="22" height="22" style="color:#555"')}</div>` : ""}<div style="position:absolute;left:0;top:0">${ok ? ARROW : `<span style="color:#c42b1c;background:#fff;border-radius:50%;display:grid">${NO(22)}</span>`}</div><div class="os">${ok ? '<b style="color:#0067c0">+</b> Copy' : `${NO(12)} None`}</div></div>`;
+const OVER_OK = `<div class="dropov"><div class="say">${DROPICO}Drop to open</div></div>`;
+const OVER_NO = `<div class="dropov no"><div class="say">${NO(30)}Drop .md, .markdown, .mdx or .txt files</div></div>`;
+const SLOT_OK = `<div class="slot">${PLUS}Add to this window</div>`;
+const SLOT_NO = `<div class="slot no">${NO(14)}<span>Drop .md, .markdown, .mdx<br>or .txt files</span></div>`;
+function o7frame(opt, state, th = "light") {
+  const ok = state !== "no";
+  const cur = cursor(110, 255, ok, ok ? 2 : 1);
+  if (state === "empty") {
+    const base = { ...MID, theme: th, title: "YAMV", loc: "", btn: "disabled", tree: false, pane: EMPTY(opt === "c") };
+    return win({ ...base, over: (opt === "b" ? OVER_OK : "") + cursor(120, 280, true) });
+  }
+  const base = { ...MID, theme: th, pane: col(DOCS.plan()), tree: { sel: "MAIN.md" } };
+  if (opt === "a") return win({ ...base, over: cur });
+  if (opt === "b") return win({ ...base, over: (ok ? OVER_OK : OVER_NO) + cur });
+  return win({ ...base, sideCls: ok ? "drop" : "drop no", sideTop: ok ? SLOT_OK : SLOT_NO, over: cur });
+}
+function o7() {
+  const z = 0.6;
+  const cells = (state, caps, th) => ["a", "b", "c"].map((k, i) => ({ html: o7frame(k, state, th), cap: caps[i] }));
+  return grid({
+    lanes: [
+      { q: "O7 · A", title: "No feedback (today)", cap: "The window draws nothing; only the OS cursor says whether a drop is taken; worst case: nothing says a .png will be ignored, or where the files will go." },
+      { q: "O7 · B", title: "Whole-window overlay", cap: "A tinted overlay with a dashed accent outline says Drop to open, or names the accepted types; worst case: over the page it must be its own window, as the ⟷ popover is." },
+      { q: "O7 · C", title: "The tree is the drop target", cap: "Only the tree highlights, with Add to this window; worst case: the empty main window and a one-document viewer have no tree, so they need another target." },
+    ],
+    strips: [
+      { title: "Studio light", z, capPos: "below", rows: [
+        { t: "2 files", ev: "MAIN.md and notes.md dragged over the page.", cells: cells("ok", ["Nothing in the window changes.", "The overlay covers everything below the title bar.", "The tree tints and outlines; the page shows nothing."], "light") },
+        { t: "1 file", ev: "A .png dragged over the page: nothing can open.", cells: cells("no", ["Nothing changes; the OS shows the no-drop cursor.", "The overlay is grey and names the accepted types.", "The tree outlines in grey and names the accepted types."], "light") },
+        { t: "Empty", ev: "2 files dragged over an empty main window (no tree).", cells: cells("empty", ["The empty state already says \"Drop markdown files here\".", "The same overlay.", "No tree, so the dashed md mark turns accent instead."], "light") },
+      ] },
+      { title: "Studio dark", z, capPos: "below", rows: [
+        { t: "2 files", ev: "MAIN.md and notes.md dragged over the page.", cells: cells("ok", ["Nothing in the window changes.", "The overlay, from the dark tokens.", "The tree highlight, from the dark tokens."], "dark") },
+      ] },
+    ],
+  });
+}
+
+/* ---------- O8 ---------- */
+const openBtn = (cls = "") => `<span class="wbtn ${cls}">${OPEN}</span>`;
+const sideTop = (cls = "") => `<div class="sidetop"><span class="wbtn ${cls}">${PLUS}</span></div>`;
+function o8() {
+  const z = 0.6, zd = 1.4;
+  const main = { ...MID, pane: col(DOCS.plan()), tree: { sel: "MAIN.md" } };
+  const viewer = { ...MID, title: "notes.md", loc: "~\\Downloads", tree: false, pane: col(DOCS.notes) };
+  const tipTitle = `<div class="tip" style="right:120px;top:36px">Open… (Ctrl+O)</div>`;
+  const detail = {
+    a: `<div class="solo" style="width:300px;height:150px;position:relative;background:var(--yamv-page-background);${vars("light")}">${EMPTY(false).replace(/<div class="md-mark[^]*?<\/p>/, "")}</div>`,
+    b: win({ w: 300, h: 110, title: "MAIN.md", loc: "", tree: false, tools: openBtn("hover"), pane: "",
+      over: `<div class="tip" style="right:122px;top:38px">Open… (Ctrl+O)</div>` }),
+    c: `<div class="side solo" style="width:230px;height:130px;padding:12px 8px;${vars("light")}"><div class="sidetop"><span class="wbtn hover">${PLUS}</span></div>${tree({ sel: "MAIN.md" })}
+        <div class="tip" style="right:6px;top:46px">Open… (Ctrl+O)</div></div>`,
+  };
+  return grid({
+    lanes: [
+      { q: "O8 · A", title: "Shortcut and empty state only (today)", cap: "Ctrl/Cmd+O, and the Open files… button while the window is empty; worst case: once documents are open nothing on screen says how to open more." },
+      { q: "O8 · B", title: "An Open… button in the title bar", cap: "A folder button left of ⟷, tooltip Open… (Ctrl+O), in every window; worst case: one more icon in the bar, and a viewer window needs a rule for where its opens go." },
+      { q: "O8 · C", title: "A + at the top of the tree", cap: "A 30 px strip above the tree with a + button; worst case: the empty main window and one-document viewers have no tree, so no button." },
+    ],
+    strips: [
+      { z, capPos: "below", rows: [
+        { t: "Main", ev: "The main window with documents open.", cells: [
+          { html: win({ ...main, over: note("Ctrl/Cmd+O only", "right:250px;top:46px") }), cap: "No visible way to open more." },
+          { html: win({ ...main, tools: openBtn(), over: ring("right:174px;top:4px;width:34px;height:30px") }), cap: "The folder button sits left of ⟷." },
+          { html: win({ ...main, sideTop: sideTop(), over: ring("right:6px;top:42px;width:40px;height:36px") }), cap: "The + sits at the tree's top right, over a hairline." }] },
+        { t: "Detail", ev: "At 140%, hovered, with its tooltip.", cells: [
+          { html: detail.a, z: zd, cap: "Only while the window is empty." },
+          { html: detail.b, z: zd, cap: "Same size and hover fill as ⟷." },
+          { html: detail.c, z: zd, cap: "Same size and hover fill as ⟷." }] },
+        { t: "Viewer", ev: "A viewer window: one document, no tree.", cells: [
+          { html: win({ ...viewer, over: note("Ctrl/Cmd+O only", "right:250px;top:46px") }), cap: "As in the main window." },
+          { html: win({ ...viewer, tools: openBtn(), over: ring("right:174px;top:4px;width:34px;height:30px") }), cap: "The button is here too; where do the files open?" },
+          { html: win({ ...viewer, over: note("no tree, so no +", "right:150px;top:46px") }), cap: "No tree, so no button: Ctrl/Cmd+O only." }] },
+      ] },
+    ],
+  });
+}
+
+/* ---------- O14 ---------- */
+function o14() {
+  const z = 0.67;
+  const w = (doc, scroll, extra = {}) => win({ ...SMALL, title: "live-reload.md", tree: { sel: "live-reload.md" }, pane: col(DOCS.live(doc)), attrs: `data-scroll="${scroll}" data-watch="#anchor"`, ...extra });
+  const before = () => w({}, "anchor:#anchor:20:f14");
+  const saving = () => w({}, "anchor:#anchor:20", { paneOv: note("↑ +20 lines on disk, above the view", "right:16px;bottom:10px") });
+  return grid({
+    lanes: [
+      { q: "O14 · A", title: "Same scroll fraction (today)", cap: "The page returns to the same fraction of its height; worst case: lines added above push the paragraph you were reading down the view, or out of it." },
+      { q: "O14 · B", title: "Anchored to the top source line", cap: "The page keeps the <code>data-line</code> of the block at the top of the view and the offset into it, and returns there; worst case: if that block was deleted, it lands on the nearest line before it." },
+    ],
+    strips: [{ z, rows: [
+      { t: "Before", ev: "Reading \"Scroll position\", partway down.", cells: [{ html: before(), cap: "The section you are reading is at the top." }, { html: before(), cap: "The section you are reading is at the top." }] },
+      { t: "0 ms", ev: "The editor saves: a 20-line section added near the top.", cells: [{ html: saving(), cap: "The page has not changed yet." }, { html: saving(), cap: "The page has not changed yet." }] },
+      { t: "150 ms", ev: "The reload is shown.", cells: [
+        { html: w({ ins14: true }, "fraction:f14"), cap: "<b>Same fraction, new length</b>: the view lands earlier in the text and your section slides down." },
+        { html: w({ ins14: true }, "anchor:#anchor:20"), cap: "<b>Same block at the top</b>: the section you were reading has not moved." }] },
+    ] }],
+  });
+}
+
+/* ---------- Toast ---------- */
+const MSGS = [
+  [WARN, "<code>notes/diagram.png</code> doesn't exist"],
+  [NO(14), "YAMV doesn't open <code>javascript:</code> links"],
+  [WARN, "Couldn't save the width; see the log"],
+];
+const toast = ([icon, text], o = {}) => `<div class="toast ${o.cls ?? ""}">${icon}<span>${text}</span><span class="x">✕</span><span class="timer" style="width:${o.t ?? 62}%"></span></div>`;
+const FIND_STATIC = `<div class="findbar"><span class="field">reload</span><span class="count">2 of 7</span><span class="fb">↑</span><span class="fb">↓</span><span class="fb">✕</span></div>`;
+function toastWin(opt, n, th = "light") {
+  const list = MSGS.slice(0, n);
+  const timers = [22, 55, 88];
+  const base = { ...MID, theme: th, pane: col(DOCS.plan()), tree: { sel: "MAIN.md" }, paneOv: FIND_STATIC };
+  if (opt === "a") {
+    const cards = list.map((m, i) => toast(m, { t: timers[3 - n + i] })).join("");
+    return win({ ...base, paneOv: FIND_STATIC + `<div class="tstack a">${cards}</div>` });
+  }
+  if (opt === "b") {
+    const cards = list.map((m, i) => toast(m, { t: timers[3 - n + i] })).join("");
+    return win({ ...base, over: `<div class="tstack b">${cards}</div>` });
+  }
+  const bars = list.map((m, i) => toast(m, { cls: "bar", t: timers[3 - n + i] })).join("");
+  return win({ ...base, paneOv: FIND_STATIC + `<div class="tstack c">${bars}</div>` });
+}
+function toastDetail(opt) {
+  const inner = opt === "c" ? toast(MSGS[0], { cls: "bar" }) : toast(MSGS[0]);
+  return `<div style="${vars("light")};padding:${opt === "c" ? "0" : "14px"};background:var(--yamv-page-background);width:${opt === "c" ? "300px" : "max-content"};border-radius:${opt === "c" ? 0 : 8}px">${inner}</div>`;
+}
+function toasts() {
+  const z = 0.6;
+  return grid({
+    lanes: [
+      { q: "Toast · A", title: "Card, bottom centre (recommended)", cap: "A small card with an icon, one line and ×, fading after 5 s; several stack upward, newest at the bottom; worst case: three cover about 130 px of the page's foot, in a borderless window of its own over the web view." },
+      { q: "Toast · B", title: "Card, top right under the title bar", cap: "The same card, stacking downward; worst case: it sits on the find bar and the top of the tree, and on the ⟷ popover when that is open; also its own borderless window." },
+      { q: "Toast · C", title: "Slim bar across the page's foot", cap: "A full-width bar with the text and ×; several stack upward; it can shrink the web view instead of covering it, so no extra window, but each bar reflows the page by 31 px." },
+    ],
+    strips: [
+      { title: "Studio light", z, capPos: "below", rows: [
+        { t: "One", ev: "A clicked link to a file that does not exist; find is open.", cells: [
+          { html: toastWin("a", 1), cap: "Clear of the find bar and the tree." },
+          { html: toastWin("b", 1), cap: "Covers the find bar's count and buttons." },
+          { html: toastWin("c", 1), cap: "Across the pane, never over the tree." }] },
+        { t: "Three", ev: "Three failures within 5 s: a missing file, a refused link, a width not saved.", cells: [
+          { html: toastWin("a", 3), cap: "Stacks upward; the oldest fades first (thin bar: time left)." },
+          { html: toastWin("b", 3), cap: "Stacks downward over the page and tree." },
+          { html: toastWin("c", 3), cap: "Three bars take about 93 px of the pane." }] },
+        { t: "Detail", ev: "At 125%.", cells: [
+          { html: toastDetail("a"), z: 1.25, cap: "Warning icon, one line, ×; the 2 px line is the 5 s timer." },
+          { html: toastDetail("b"), z: 1.25, cap: "The same card." },
+          { html: toastDetail("c"), z: 1.25, cap: "Chrome background, hairline on top." }] },
+      ] },
+      { title: "Studio dark · the recommended lane", z, capPos: "below", rows: [
+        { t: "Three", ev: "The same three failures.", cells: [{ html: toastWin("a", 3, "dark"), cap: "The card from the dark tokens; the shadow is not a token." }, null, null] },
+      ] },
+    ],
+  });
+}
+
+const QS = { o3, o4, o6, o7, o8, o14, toasts };
+for (const el of document.querySelectorAll("[data-q]")) el.innerHTML = QS[el.dataset.q]();
+
+/* ---------- after layout: find marks, scroll positions, scroll bars ---------- */
+function wrapFind(colEl) {
+  const pattern = /reload/gi;
+  const walker = document.createTreeWalker(colEl, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const marks = [];
+  for (const node of nodes) {
+    let current = node, consumed = 0;
+    for (const found of Array.from(node.nodeValue.matchAll(pattern))) {
+      const start = found.index - consumed;
+      const match = start > 0 ? current.splitText(start) : current;
+      const rest = match.splitText(found[0].length);
+      const mark = document.createElement("mark");
+      mark.className = "f";
+      match.parentNode.replaceChild(mark, match);
+      mark.appendChild(match);
+      marks.push(mark);
+      current = rest;
+      consumed = found.index + found[0].length;
+    }
+  }
+  return marks;
+}
+const F = {};
+function layout() {
+  for (const c of document.querySelectorAll(".col[data-find]")) {
+    const marks = wrapFind(c);
+    const cur = Number(c.dataset.cur);
+    marks[cur - 1].classList.add("cur");
+    c.closest(".pane").querySelector("[data-count]").textContent = `${cur} of ${marks.length}`;
+  }
+  for (const win of document.querySelectorAll(".win[data-scroll]")) {
+    const scale = win.getBoundingClientRect().width / parseFloat(win.style.width);
+    const pane = win.querySelector(".pane"), c = pane.querySelector(".col");
+    const paneH = pane.getBoundingClientRect().height / scale;
+    const top0 = c.getBoundingClientRect().top;
+    const off = (el) => (el.getBoundingClientRect().top - top0) / scale;
+    const total = c.getBoundingClientRect().height / scale;
+    const S = Math.max(1, total - paneH);
+    const [mode, a, b, save] = win.dataset.scroll.split(":");
+    const watched = win.dataset.watch ? c.querySelector(win.dataset.watch) : null;
+    const watchedOff = watched ? off(watched) : 0;
+    let s = 0;
+    if (mode === "center") { const m = c.querySelector("mark.cur"); s = off(m) - paneH / 2 + 12; }
+    else if (mode === "anchor") s = off(c.querySelector(a)) - Number(b);
+    else if (mode === "fraction") s = F[a] * S;
+    s = Math.min(S, Math.max(0, s));
+    if (save) F[save] = s / S;
+    c.style.transform = `translateY(${-s}px)`;
+    const thumbH = Math.max(24, paneH * paneH / total);
+    pane.insertAdjacentHTML("beforeend", `<div class="sb" style="height:${thumbH}px;top:${(s / S) * (paneH - thumbH)}px"></div>`);
+    if (save) pane.insertAdjacentHTML("beforeend", note(`scrolled ${Math.round((s / S) * 100)}% down`, "right:16px;bottom:10px"));
+    if (watched) {
+      const y = watchedOff - s, h = watched.getBoundingClientRect().height / scale;
+      const x0 = (c.getBoundingClientRect().left - pane.getBoundingClientRect().left) / scale + 30;
+      const wd = c.getBoundingClientRect().width / scale - 60;
+      if (y < paneH - 20) {
+        pane.insertAdjacentHTML("beforeend", ring(`left:${x0}px;top:${y - 6}px;width:${wd}px;height:${h + 4}px`));
+        if (mode === "fraction") pane.insertAdjacentHTML("beforeend", note(`your section: ${Math.round(y - 20)} px lower`, `right:16px;top:${Math.max(8, y - 40)}px`));
+      } else {
+        pane.insertAdjacentHTML("beforeend", note("↓ your section is below the view", `left:${x0}px;bottom:10px`));
+      }
+    }
+  }
+  document.body.classList.add("ready");
+}
+document.fonts.ready.then(() => requestAnimationFrame(layout));
+</script>
+</body>
+</html>
