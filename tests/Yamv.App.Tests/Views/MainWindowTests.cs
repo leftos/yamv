@@ -26,7 +26,7 @@ public sealed class MainWindowTests
     public Task Tree_shows_repo_group_badge_folder_and_documents() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             List<string> texts = VisibleTexts(fixture.Window.Tree);
@@ -43,7 +43,7 @@ public sealed class MainWindowTests
     public Task Missing_document_row_shows_missing_tag() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.Gone);
 
             Panel row = fixture.Row(fixture.Gone);
@@ -56,7 +56,7 @@ public sealed class MainWindowTests
     public Task Close_button_closes_its_document_without_selecting_it_first() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             List<string?> selections = [];
             fixture.ViewModel.PropertyChanged += (_, e) =>
@@ -85,7 +85,7 @@ public sealed class MainWindowTests
     public Task Clicking_a_row_then_down_and_up_moves_selection_and_keeps_focus_in_tree() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocB, fixture.DocA);
 
             IReadOnlyList<TreeItemViewModel> items = fixture.ViewModel.Items;
@@ -109,7 +109,7 @@ public sealed class MainWindowTests
     public Task Down_and_up_step_across_a_folder_header_in_one_press() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.Design, fixture.Plans);
 
             fixture.Click(fixture.Row(fixture.Design));
@@ -129,7 +129,7 @@ public sealed class MainWindowTests
     public Task Selecting_a_document_in_a_collapsed_folder_expands_the_folder() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.Design, fixture.Plans);
             FolderItemViewModel plans = AllRows(fixture.ViewModel.Items).OfType<FolderItemViewModel>().Single(row => row.Name == "plans");
             plans.IsExpanded = false;
@@ -147,7 +147,7 @@ public sealed class MainWindowTests
     public Task Window_with_no_documents_shows_empty_state_and_hides_document_view_and_sidebar() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync();
 
             Assert.True(fixture.Window.EmptyState.IsVisible);
@@ -163,7 +163,7 @@ public sealed class MainWindowTests
     public Task Selected_missing_document_shows_missing_pane_and_hides_document_view() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.Gone, fixture.DocA);
 
             Assert.Equal(fixture.Gone, fixture.ViewModel.SelectedPath);
@@ -178,7 +178,7 @@ public sealed class MainWindowTests
     public Task Selected_unreadable_document_shows_unreadable_pane_and_marks_its_row() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             fixture.Reader = path =>
                 path == fixture.DocA ? throw new IOException("The file is locked.", unchecked((int)0x80070020)) : File.ReadAllText(path);
 
@@ -206,7 +206,7 @@ public sealed class MainWindowTests
     public Task Retry_on_the_unreadable_pane_shows_the_document_again() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             bool locked = true;
             fixture.Reader = path => locked ? throw new IOException("The file is locked.", unchecked((int)0x80070020)) : File.ReadAllText(path);
 
@@ -232,7 +232,7 @@ public sealed class MainWindowTests
     public Task Remove_from_list_on_the_unreadable_pane_closes_the_selected_document() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             fixture.Reader = path =>
                 path == fixture.DocA ? throw new IOException("The file is locked.", unchecked((int)0x80070020)) : File.ReadAllText(path);
 
@@ -256,7 +256,7 @@ public sealed class MainWindowTests
     public Task Viewer_with_one_document_hides_splitter_and_sidebar() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture(persist: false);
+            await using var fixture = new Fixture(persist: false);
             await fixture.OpenAsync(fixture.DocA);
 
             Assert.False(fixture.Window.SidebarSplitter.IsVisible);
@@ -269,7 +269,7 @@ public sealed class MainWindowTests
     public Task Command_W_closes_the_selected_document() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
 
@@ -284,7 +284,7 @@ public sealed class MainWindowTests
     public Task Ctrl_tab_and_ctrl_shift_tab_step_selection_and_keep_focus_on_the_selected_row() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             fixture.Click(fixture.Row(fixture.DocA));
             await fixture.ViewModel.WhenRendersSettled();
@@ -302,7 +302,7 @@ public sealed class MainWindowTests
     public Task Command_W_with_focus_in_the_tree_keeps_focus_on_the_new_selected_row() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB, fixture.Gone);
             fixture.Click(fixture.Row(fixture.DocA));
             await fixture.ViewModel.WhenRendersSettled();
@@ -322,7 +322,7 @@ public sealed class MainWindowTests
     public Task Saved_bounds_keep_the_normal_rectangle_while_maximized() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             fixture.Window.Position = new PixelPoint(120, 80);
             fixture.Window.Width = 900;
             fixture.Window.Height = 700;
@@ -346,7 +346,7 @@ public sealed class MainWindowTests
     public Task Command_B_toggles_the_sidebar() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             fixture.Press(Key.B, CommandModifier);
@@ -362,7 +362,7 @@ public sealed class MainWindowTests
     public Task Command_R_renders_the_selected_document_again() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             int before = fixture.Surface.Shown.Count;
 
@@ -378,7 +378,7 @@ public sealed class MainWindowTests
     public Task Forwarded_command_w_from_the_page_closes_the_selected_document() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             bool mac = OperatingSystem.IsMacOS();
 
@@ -393,7 +393,7 @@ public sealed class MainWindowTests
     public Task Command_W_on_a_viewer_with_one_document_closes_the_window() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture(persist: false);
+            await using var fixture = new Fixture(persist: false);
             await fixture.OpenAsync(fixture.DocA);
 
             fixture.Press(Key.W, CommandModifier);
@@ -405,7 +405,7 @@ public sealed class MainWindowTests
     public Task Sidebar_width_above_the_limit_reads_480() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             fixture.Window.SidebarWidth = 600;
@@ -417,7 +417,7 @@ public sealed class MainWindowTests
     public Task Context_menus_list_the_actions_of_their_row_kind() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             string reveal = OperatingSystem.IsMacOS() ? "Reveal in Finder" : "Reveal in Explorer";
 
@@ -430,7 +430,7 @@ public sealed class MainWindowTests
     public Task Right_click_on_an_unselected_document_selects_and_shows_it_then_opens_its_menu() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             ContextMenu menu = fixture.RightClick(fixture.Row(fixture.DocB));
@@ -446,7 +446,7 @@ public sealed class MainWindowTests
     public Task Right_click_on_a_folder_row_or_group_header_keeps_the_selection() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             ContextMenu folderMenu = fixture.RightClick(fixture.FolderRow("docs"));
@@ -465,7 +465,7 @@ public sealed class MainWindowTests
     public Task Menu_close_selects_the_next_document_and_focuses_its_row_then_the_empty_state() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB, fixture.Gone);
 
             fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocA)), "Close");
@@ -488,7 +488,7 @@ public sealed class MainWindowTests
     public Task Menu_close_on_the_last_document_in_tree_order_selects_the_previous() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocB)), "Close");
@@ -502,7 +502,7 @@ public sealed class MainWindowTests
     public Task Menu_close_group_on_a_document_row_or_group_header_removes_that_group() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.Other, fixture.DocA, fixture.DocB);
 
             fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocB)), "Close group");
@@ -523,7 +523,7 @@ public sealed class MainWindowTests
     public Task Copy_path_and_reveal_send_each_row_kind_its_path() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB, fixture.Gone);
             string docs = Path.Combine(fixture.Repo, "docs");
 
@@ -555,7 +555,7 @@ public sealed class MainWindowTests
     public Task Command_O_opens_the_picked_files_and_selects_the_first() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             fixture.Click(fixture.Row(fixture.DocA));
             fixture.Files.DocumentsToPick = [fixture.Plans, fixture.Design];
@@ -573,7 +573,7 @@ public sealed class MainWindowTests
     public Task Forwarded_command_o_from_the_page_opens_the_picked_files() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA);
             fixture.Files.DocumentsToPick = [fixture.DocB];
             bool mac = OperatingSystem.IsMacOS();
@@ -590,7 +590,7 @@ public sealed class MainWindowTests
     public Task Command_O_in_a_viewer_adds_the_picked_file_and_shows_the_tree() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture(persist: false);
+            await using var fixture = new Fixture(persist: false);
             await fixture.OpenAsync(fixture.DocA);
             Assert.False(fixture.Window.Sidebar.IsVisible);
             fixture.Files.DocumentsToPick = [fixture.DocB];
@@ -608,7 +608,7 @@ public sealed class MainWindowTests
     public Task Command_O_with_a_cancelled_pick_changes_nothing() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             fixture.Press(Key.O, CommandModifier);
@@ -623,7 +623,7 @@ public sealed class MainWindowTests
     public Task Command_O_picking_an_open_file_selects_it_without_adding_it_twice() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             fixture.Files.DocumentsToPick = [fixture.DocB];
 
@@ -638,7 +638,7 @@ public sealed class MainWindowTests
     public Task Empty_state_open_files_button_opens_the_picked_files() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync();
             fixture.Files.DocumentsToPick = [fixture.DocA];
             Button button = fixture.Window.EmptyState.OpenFilesButton;
@@ -655,7 +655,7 @@ public sealed class MainWindowTests
     public Task Locate_replaces_the_missing_document_in_place_and_keeps_its_scroll_position() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             fixture.Surface.RaiseScroll(0.4);
             File.Delete(fixture.DocA);
@@ -683,7 +683,7 @@ public sealed class MainWindowTests
     public Task Locate_with_a_cancelled_pick_changes_nothing() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.Gone, fixture.DocA);
 
             fixture.ClickEvent(fixture.Window.MissingPane.LocateButton);
@@ -693,6 +693,31 @@ public sealed class MainWindowTests
             Assert.Equal([fixture.Gone, fixture.DocA], fixture.State.Documents);
             Assert.Equal(fixture.Gone, fixture.ViewModel.SelectedPath);
             Assert.True(fixture.Window.MissingPane.IsVisible);
+        });
+
+    [Fact]
+    public Task Disposing_the_fixture_waits_for_a_document_read_still_in_flight() =>
+        Headless.RunAsync(async () =>
+        {
+            using var opened = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            fixture.Reader = path =>
+            {
+                using var reader = new StreamReader(path);
+                opened.Set();
+                release.Wait(TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+                return reader.ReadToEnd();
+            };
+            fixture.ViewModel.SelectNext();
+            Assert.True(opened.Wait(TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken), "the read of b.md never started");
+
+            ValueTask disposing = fixture.DisposeAsync();
+            release.Set();
+            await disposing;
+
+            Assert.False(Directory.Exists(Path.GetDirectoryName(fixture.Repo)));
         });
 
     private static List<string?> Headers(ContextMenu? menu) =>
@@ -726,7 +751,7 @@ public sealed class MainWindowTests
     /// A shown main window over temp files: a repo with <c>docs/a.md</c>, <c>docs/b.md</c>, <c>docs/design/look.md</c> and
     /// <c>docs/plans/v1.md</c>, and a missing <c>docs/gone.md</c>.
     /// </summary>
-    private sealed class Fixture : IDisposable
+    private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "yamv-window-" + Guid.NewGuid().ToString("N"));
 
@@ -898,7 +923,7 @@ public sealed class MainWindowTests
             Dispatcher.UIThread.RunJobs();
         }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             if (!IsClosed)
             {
@@ -906,6 +931,7 @@ public sealed class MainWindowTests
             }
 
             ViewModel.Dispose();
+            await ViewModel.WhenRendersSettled();
             Directory.Delete(_root, recursive: true);
         }
     }

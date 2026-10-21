@@ -23,7 +23,7 @@ public sealed class MainWindowSessionTests
     public Task Selection_change_writes_the_session_500_ms_later() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             fixture.ViewModel.SelectNext();
@@ -39,7 +39,7 @@ public sealed class MainWindowSessionTests
     public Task Scroll_change_alone_writes_nothing_until_the_window_closes() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             fixture.Surface.RaiseScroll(0.5);
@@ -54,7 +54,7 @@ public sealed class MainWindowSessionTests
     public Task Scroll_after_a_scheduled_change_is_written_when_the_window_closes() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             fixture.ViewModel.SelectNext();
             await fixture.SettleAsync();
@@ -70,7 +70,7 @@ public sealed class MainWindowSessionTests
     public Task Sidebar_width_change_alone_schedules_a_save() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
             fixture.Window.SidebarWidth = 360;
@@ -84,7 +84,7 @@ public sealed class MainWindowSessionTests
     public Task Dispose_writes_a_change_made_after_the_window_closed() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             fixture.Window.Close();
             File.Delete(fixture.SessionFile);
@@ -99,7 +99,7 @@ public sealed class MainWindowSessionTests
     public Task Closing_the_window_with_a_save_pending_writes_at_once() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             fixture.ViewModel.SelectNext();
             await fixture.SettleAsync();
@@ -113,7 +113,7 @@ public sealed class MainWindowSessionTests
     public Task Saved_sidebar_width_follows_the_window_after_a_scheduled_save() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             fixture.Window.SidebarWidth = 360;
 
@@ -128,7 +128,7 @@ public sealed class MainWindowSessionTests
     public Task Saved_theme_is_the_one_the_bridge_was_asked_for() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             fixture.Bridge.Apply("nope", "system");
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
 
@@ -143,7 +143,7 @@ public sealed class MainWindowSessionTests
     public Task Locate_writes_the_new_path_to_the_session() =>
         Headless.RunAsync(async () =>
         {
-            using var fixture = new Fixture();
+            await using var fixture = new Fixture();
             await fixture.OpenAsync(fixture.DocA, fixture.DocB);
             File.Delete(fixture.DocA);
             fixture.ViewModel.Reload();
@@ -165,7 +165,7 @@ public sealed class MainWindowSessionTests
     /// A shown main window over two temp documents, saving through a <see cref="MainWindowSession"/> to a temp session file on
     /// a fake clock. <see cref="OpenAsync"/> lets the saves that opening and showing schedule run, then deletes the file.
     /// </summary>
-    private sealed class Fixture : IDisposable
+    private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "yamv-session-" + Guid.NewGuid().ToString("N"));
         private readonly MainWindowSession _session;
@@ -227,7 +227,7 @@ public sealed class MainWindowSessionTests
 
         public void DisposeSession() => _session.Dispose();
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             _session.Dispose();
             if (Window.IsVisible)
@@ -237,6 +237,7 @@ public sealed class MainWindowSessionTests
 
             ViewModel.Dispose();
             Bridge.Dispose();
+            await ViewModel.WhenRendersSettled();
             Directory.Delete(_root, recursive: true);
         }
 
