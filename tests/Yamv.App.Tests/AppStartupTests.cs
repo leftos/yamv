@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Threading.Channels;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Themes.Fluent;
@@ -11,6 +12,7 @@ using Yamv.App.Views;
 using Yamv.Core;
 using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
+using Yamv.Core.Instance;
 using Yamv.Core.Launch;
 using Yamv.Core.Session;
 using Yamv.Core.Settings;
@@ -335,27 +337,215 @@ public sealed class AppStartupTests
         });
 
     [Fact]
-    public Task ViewerStart_NeverTouchesTheGate() =>
+    public Task Activate_WithOnlyViewersOpen_BringsTheLatestViewerForward() =>
         Headless.Run(() =>
         {
-            using var start = new GateStart(
-                viewerFiles: [Path.Combine(Path.GetTempPath(), "yamv-gone-" + Guid.NewGuid().ToString("N") + ".md")],
-                stopAnswering: null
-            );
-            int raised = 0;
-            start.Gate.Activate += (_, _) => raised++;
-            start.Window.Show();
+            using var start = new GateStart(viewerFiles: [MissingFile()], stopAnswering: null);
+            Window first = start.Window;
+            first.Show();
             Dispatcher.UIThread.RunJobs();
+            Window second = ShowViewer(start.App);
 
+            second.WindowState = WindowState.Minimized;
+            start.Gate.Request();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(WindowState.Normal, second.WindowState);
+
+            first.Activate();
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(first.IsActive);
+            first.WindowState = WindowState.Minimized;
             start.Gate.Request();
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(0, raised);
-            Assert.DoesNotContain(start.Log.Entries, entry => entry.Message.StartsWith("Activate:", StringComparison.Ordinal));
+            Assert.Equal(WindowState.Normal, first.WindowState);
+            Assert.Equal(2, start.Log.Entries.Count(entry => entry.Message == "Activate: viewer window brought forward."));
+            Assert.Equal(0, start.BroughtForwardCount);
         });
 
     [Fact]
-    public Task MainClose_StopsAnsweringBeforeTheSessionIsSaved() =>
+    public Task OpenViewer_TwiceMakesTwoWindowsAndOneBridge() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            start.Window.Show();
+            ThemeBridge bridge = start.App.Bridge!;
+            int surfaces = SurfaceCount(bridge);
+
+            Window first = ShowViewer(start.App);
+            Window second = ShowViewer(start.App);
+
+            Assert.NotSame(first, second);
+            Assert.Equal([first, second], start.App.ViewerWindows);
+            Assert.True(first.IsVisible);
+            Assert.True(second.IsVisible);
+            Assert.Same(bridge, start.App.Bridge);
+            Assert.Equal(surfaces + 2, SurfaceCount(bridge));
+        });
+
+    [Fact]
+    public Task OpenViewer_BeginsTheRequestThenCompletesOpenedBeforeTheWindowShows() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            start.Window.Show();
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([MissingFile()]);
+            int shown = 0;
+
+            // A refusal while the window opens ends the request only if opened was not answered before: then the launch hears it.
+            using IDisposable onOpened = Window.WindowOpenedEvent.AddClassHandler<MainWindow>(
+                (window, _) =>
+                {
+                    shown++;
+                    request.Complete(InstanceReply.Refused);
+                }
+            );
+            Assert.True(start.App.OpenViewer([MissingFile()], request));
+
+            Assert.Equal(1, shown);
+            Assert.False(request.TryBegin());
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task OpenViewer_OnAnAbandonedRequest_OpensNothing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            start.Window.Show();
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([MissingFile()]);
+            await Task.Run(requests.Server.Coordinator.StopAnswering, TestContext.Current.CancellationToken);
+
+            Assert.False(start.App.OpenViewer([MissingFile()], request));
+
+            Assert.Empty(start.App.ViewerWindows);
+            Assert.Equal(
+                InstanceRequestOutcome.Closing,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+            Assert.Contains(
+                start.Log.Entries,
+                entry => entry.Message == "Open: an open of 1 file(s) was abandoned before the app took it; opening nothing."
+            );
+        });
+
+    [Fact]
+    public Task ShowNewViewer_WhenShowThrows_ClosesTheWindowAndForgetsIt() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            start.Window.Show();
+            ThemeBridge bridge = start.App.Bridge!;
+            int surfaces = SurfaceCount(bridge);
+            Window? failed = null;
+            int failedClosed = 0;
+            using IDisposable onClosed = Window.WindowClosedEvent.AddClassHandler<MainWindow>(
+                (window, _) =>
+                {
+                    if (ReferenceEquals(window, failed))
+                    {
+                        failedClosed++;
+                    }
+                }
+            );
+            using (
+                Window.WindowOpenedEvent.AddClassHandler<MainWindow>(
+                    (window, _) =>
+                    {
+                        failed = window;
+                        throw new InvalidOperationException("The native window failed after it appeared.");
+                    }
+                )
+            )
+            {
+                start.App.ShowNewViewer([MissingFile()]);
+            }
+
+            Assert.NotNull(failed);
+            Assert.Equal(1, failedClosed);
+            Assert.False(failed.IsVisible);
+            Assert.Empty(start.App.ViewerWindows);
+            Assert.Equal(surfaces, SurfaceCount(bridge));
+            Assert.Contains(
+                start.Log.Entries,
+                entry => entry.Level == "error" && entry.Message == "Open: the viewer window for 1 file(s) could not open."
+            );
+            Assert.True(start.Window.IsVisible);
+        });
+
+    [Fact]
+    public Task ViewerWindowClosed_DisposesItsCompositionAndUnregistersItsSurface() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"));
+            start.Window.Show();
+            Window viewer = ShowViewer(start.App);
+            ThemeBridge bridge = start.App.Bridge!;
+            int surfaces = SurfaceCount(bridge);
+
+            viewer.Close();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(start.App.ViewerWindows);
+            Assert.Equal(surfaces - 1, SurfaceCount(bridge));
+            Assert.Empty(calls);
+            Assert.True(start.Window.IsVisible);
+        });
+
+    [Fact]
+    public Task OpenViewer_NeverWritesSession() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [MissingFile()], stopAnswering: null);
+            start.Window.Show();
+            Window viewer = ShowViewer(start.App);
+            Assert.IsType<DocumentWindowViewModel>(viewer.DataContext).ToggleSidebar();
+
+            viewer.Close();
+            start.Window.Close();
+            Dispatcher.UIThread.RunJobs();
+            start.App.ReleaseMainWindow();
+
+            Assert.False(File.Exists(start.SessionFile));
+        });
+
+    [Fact]
+    public Task ClosingTheMainWindowWithAViewerOpen_KeepsAnsweringAndTheViewer() =>
+        Headless.RunAsync(async () =>
+        {
+            List<string> calls = [];
+            using var requests = new OpenRequests();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"));
+            Window main = start.Window;
+            main.Show();
+            Window viewer = ShowViewer(start.App);
+            Assert.IsType<DocumentWindowViewModel>(main.DataContext).ToggleSidebar();
+
+            main.Close();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(calls);
+            Assert.True(viewer.IsVisible);
+            Assert.True(start.LoadSavedSession().SidebarHidden);
+            string file = MissingFile();
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([file]);
+            Assert.True(start.App.OpenViewer([file], request));
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+            Assert.Equal(2, start.App.ViewerWindows.Count);
+            Assert.Same(viewer, start.App.ViewerWindows[0]);
+        });
+
+    [Fact]
+    public Task ClosingTheLastWindow_StopsAnsweringBeforeTheMainSessionFlush() =>
         Headless.Run(() =>
         {
             List<string> order = [];
@@ -367,12 +557,12 @@ public sealed class AppStartupTests
 
             main.Close();
             Dispatcher.UIThread.RunJobs();
-            order.Add("closed");
-            start.App.ReleaseMainWindow();
 
             // The sidebar was hidden inside the stop action: only a session flush that came after it saved that.
-            Assert.Equal(["stopped answering", "closed"], order);
+            Assert.Equal(["stopped answering"], order);
             Assert.True(start.LoadSavedSession().SidebarHidden);
+            start.App.ReleaseMainWindow();
+            Assert.Equal(["stopped answering"], order);
         });
 
     [Fact]
@@ -384,12 +574,93 @@ public sealed class AppStartupTests
             using var start = new GateStart(viewerFiles: [], stopAnswering: () => StopAnsweringAndHideSidebar(main!, order));
             main = start.Window;
             main.Show();
+            ShowViewer(start.App);
             Dispatcher.UIThread.RunJobs();
 
             start.App.ReleaseMainWindow();
 
             Assert.Equal(["stopped answering"], order);
             Assert.True(start.LoadSavedSession().SidebarHidden);
+            Assert.Empty(start.App.ViewerWindows);
+        });
+
+    [Fact]
+    public Task ClosingTheLastViewerAfterMain_StopsAnsweringOnce() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"));
+            start.Window.Show();
+            Window viewer = ShowViewer(start.App);
+
+            start.Window.Close();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(calls);
+
+            viewer.Close();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(["stop"], calls);
+
+            start.App.ReleaseMainWindow();
+            Assert.Equal(["stop"], calls);
+        });
+
+    [Fact]
+    public Task OpenViewer_AfterTheLastWindowClosed_AnswersClosing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            start.Window.Show();
+            start.Window.Close();
+            Dispatcher.UIThread.RunJobs();
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([MissingFile()]);
+
+            Assert.False(start.App.OpenViewer([MissingFile()], request));
+
+            Assert.Empty(start.App.ViewerWindows);
+            Assert.Equal(
+                InstanceRequestOutcome.Closing,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task Teardown_WhenThePidDeleteFails_StillSavesAndReleases() =>
+        Headless.RunAsync(async () =>
+        {
+            using var server = new TestInstanceServer(request => request.Complete(InstanceReply.Refused));
+            int begun = 0;
+            using var start = new GateStart(
+                viewerFiles: [],
+                stopAnswering: () =>
+                {
+                    begun++;
+                    Program.StopAnsweringInBackground(server.Coordinator, server.Log);
+                }
+            );
+            File.Delete(server.PidFile);
+            Directory.CreateDirectory(server.PidFile);
+            Window main = start.Window;
+            main.Show();
+            Assert.IsType<DocumentWindowViewModel>(main.DataContext).ToggleSidebar();
+
+            main.Close();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, begun);
+            Assert.True(start.LoadSavedSession().SidebarHidden);
+
+            // What Program does once the UI loop is over: finish the stop, then release the lock.
+            await Task.Run(server.Coordinator.StopAnswering, TestContext.Current.CancellationToken)
+                .WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken);
+            Assert.Equal(1, PidDeleteWarnings(server));
+            await Task.Run(server.Coordinator.Dispose, TestContext.Current.CancellationToken)
+                .WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken);
+
+            // The stop logged the failed delete before the lock was released; the release did not try again.
+            Assert.Equal(1, PidDeleteWarnings(server));
+            using var next = new InstanceCoordinator(server.LockPath, new RecordingAppLog());
+            Assert.True(next.TryAcquireMainLock());
         });
 
     [Fact]
@@ -408,39 +679,25 @@ public sealed class AppStartupTests
             Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: no main window to bring forward.");
         });
 
-    [Fact]
-    public Task MainClose_AfterASecondStart_RunsNeitherStopActionAgain() =>
-        Headless.Run(() =>
-        {
-            List<string> calls = [];
-            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("first"));
-            Window first = start.Window;
-            first.Show();
-            Dispatcher.UIThread.RunJobs();
+    /// <summary>Shows a viewer window over a missing file as an open request does once the app took it, and returns it.</summary>
+    private static Window ShowViewer(App app)
+    {
+        app.ShowNewViewer([MissingFile()]);
+        return app.ViewerWindows[^1];
+    }
 
-            App.StopAnswering = () => calls.Add("second");
-            Window second = start.App.CreateStartWindow();
-            try
-            {
-                second.Show();
-                Dispatcher.UIThread.RunJobs();
-                first.Close();
-                Dispatcher.UIThread.RunJobs();
+    private static int PidDeleteWarnings(TestInstanceServer server) =>
+        server.Log.Entries.Count(entry =>
+            entry.Level == "warning" && entry.Message.StartsWith("Could not delete the main-instance pid file", StringComparison.Ordinal)
+        );
 
-                start.Gate.Request();
-                Dispatcher.UIThread.RunJobs();
+    private static string MissingFile() => Path.Combine(Path.GetTempPath(), "yamv-gone-" + Guid.NewGuid().ToString("N") + ".md");
 
-                // Releasing the first start for the second one ran the first's action; closing its window afterwards runs
-                // nothing, and leaves the second start's window to be brought forward.
-                Assert.Equal(["first"], calls);
-                Assert.Equal(1, start.BroughtForwardCount);
-                Assert.DoesNotContain(start.Log.Entries, entry => entry.Message == "Activate: no main window to bring forward.");
-            }
-            finally
-            {
-                second.Close();
-            }
-        });
+    private static int SurfaceCount(ThemeBridge bridge)
+    {
+        object surfaces = typeof(ThemeBridge).GetField("_surfaces", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge)!;
+        return (int)surfaces.GetType().GetProperty("Count")!.GetValue(surfaces)!;
+    }
 
     /// <summary>Records the stop and changes what the session stores, so a later flush is the only way that change reaches disk.</summary>
     private static void StopAnsweringAndHideSidebar(Window main, List<string> order)
@@ -508,8 +765,33 @@ public sealed class AppStartupTests
     }
 
     /// <summary>
+    /// A real instance server whose handler only keeps each request, so the test hands it to the app as the UI job would.
+    /// </summary>
+    private sealed class OpenRequests : IDisposable
+    {
+        private readonly Channel<InstanceRequest> _requests = Channel.CreateUnbounded<InstanceRequest>();
+
+        public OpenRequests() => Server = new TestInstanceServer(request => _requests.Writer.TryWrite(request));
+
+        public TestInstanceServer Server { get; }
+
+        /// <summary>Sends an open launch for <paramref name="files"/>; returns its request as the server read it, and the launch's outcome.</summary>
+        public async Task<(InstanceRequest Request, Task<InstanceRequestOutcome> Outcome)> SendAsync(IReadOnlyList<string> files)
+        {
+            Task<InstanceRequestOutcome> outcome = Server.SendOpenAsync(files);
+            InstanceRequest request = await _requests
+                .Reader.ReadAsync(TestContext.Current.CancellationToken)
+                .AsTask()
+                .WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken);
+            return (request, outcome);
+        }
+
+        public void Dispose() => Server.Dispose();
+    }
+
+    /// <summary>
     /// A start with an activation gate and a recording process log handed to <see cref="App"/>, over a fresh data folder;
-    /// disposing it closes the start window and restores the statics and environment.
+    /// disposing it closes every document window and restores the statics and environment.
     /// </summary>
     private sealed class GateStart : IDisposable
     {
@@ -557,12 +839,20 @@ public sealed class AppStartupTests
         public int BroughtForwardCount => Log.Entries.Count(entry => entry.Message == "Activate: main window brought forward.");
 
         /// <summary>The session the start's data folder holds now.</summary>
-        public SessionState LoadSavedSession() => new SessionStore(Path.Combine(_dataFolder, "session.json"), Log).Load();
+        public SessionState LoadSavedSession() => new SessionStore(SessionFile, Log).Load();
+
+        /// <summary>The start data folder's <c>session.json</c>.</summary>
+        public string SessionFile => Path.Combine(_dataFolder, "session.json");
 
         public void Dispose()
         {
             try
             {
+                foreach (Window viewer in App.ViewerWindows.Where(viewer => viewer.IsVisible))
+                {
+                    viewer.Close();
+                }
+
                 if (Window.IsVisible)
                 {
                     Window.Close();

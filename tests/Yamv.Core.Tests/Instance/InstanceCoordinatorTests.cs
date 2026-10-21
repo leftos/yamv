@@ -47,6 +47,16 @@ public sealed class InstanceCoordinatorTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void ReplyBound_NotPositive_Throws(int milliseconds)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new InstanceCoordinator(_lockPath, _log) { ReplyBound = TimeSpan.FromMilliseconds(milliseconds) }
+        );
+    }
+
     [Fact]
     public void TryAcquireMainLock_SecondCoordinatorOnSamePath_FailsUntilFirstIsDisposed()
     {

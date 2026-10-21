@@ -108,10 +108,24 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     internal Action<int>? FrameQueued { get; set; }
 
     /// <summary>
-    /// How long a connection waits for its request's reply before abandoning the request and closing without one; 10 s. Set it
-    /// before <see cref="StartServer"/>.
+    /// How long a connection waits for its request's reply before abandoning the request and closing without one; 10 s by
+    /// default. A launcher's open deadline (<see cref="Launch.SecondLaunch.OpenDeadline"/>) stays below it, or a request the app
+    /// has begun may close with no reply and its files be sent twice.
     /// </summary>
-    internal TimeSpan ReplyBound { get; set; } = TimeSpan.FromSeconds(10);
+    /// <exception cref="ArgumentOutOfRangeException">The value is not positive or is longer than <see cref="int.MaxValue"/> ms.</exception>
+    public TimeSpan ReplyBound
+    {
+        get;
+        init
+        {
+            if (value <= TimeSpan.Zero || value.TotalMilliseconds > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "A reply bound is positive and at most int.MaxValue ms.");
+            }
+
+            field = value;
+        }
+    } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// How long writing a reply may take (on Windows it completes only once the launcher reads it), and how long a stopping server
