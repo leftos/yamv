@@ -19,7 +19,7 @@ Every busy command goes through `pwsh -NoProfile -File tools/gate.ps1`, written 
 - One test class or method: `gate.ps1 run --log .tmp/test-one.log --slot light --timeout 300 -- dotnet test --project tests/Yamv.Core.Tests -c Release --no-build --filter-class "*TitleTextTests"` (or `--filter-method "*Name*"`).
 - App tests (headless Avalonia) are their own project; one class: `gate.ps1 run --log .tmp/test-one.log --slot light --timeout 300 -- dotnet test --project tests/Yamv.App.Tests -c Release --no-build --filter-class "*ThemeBridgeTests"`.
 - Page check (headless Chromium against a stubbed host): in `tools/dev/page-check/`, `npm install` then `npm run check`.
-- Screenshot of the real app: `pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ArgLine '--theme dark' -Out .tmp/shot.png`.
+- Screenshot of the real app: `pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ArgLine '--theme dark' -Out .tmp/shot.png` (the dev harness). `-App` runs the real main window instead, `-Session <file>` seeds its `session.json`, and `-DeleteAfterShown <path>` deletes a file after the window shows (both need `-App`). Every run uses a fresh data folder under `.tmp\yamv-data` (`YAMV_DATA_DIR`), never `%APPDATA%\YAMV`.
 - Format: `dotnet csharpier format .`; style: `dotnet format style Yamv.slnx --severity info --include <files>`.
 - Commit: the prek pre-commit hooks run format, style and a Release build, so commit through `gate.ps1 run --log .tmp/commit.log --slot none --timeout 1200 -- git commit -F .tmp/msg-<slug>.txt`.
 
@@ -27,6 +27,8 @@ Every busy command goes through `pwsh -NoProfile -File tools/gate.ps1`, written 
 
 - `Yamv.Core` never references Avalonia; anything testable without a window lives there.
 - The document is drawn by a web page (`src/Yamv.App/Web/`) inside Avalonia's `NativeWebView`, loaded over `file://` from the asset cache. The page and `Controls/DocumentView.cs` talk by message name, so a rename changes both sides; the full list and the other cross-file couplings are under Integration Footguns in `docs/ARCHITECTURE.md`.
-- **Nothing an agent runs may show a window on the owner's desktop or take focus.** A real `yamv.exe` (a harness, a screenshot, an end-to-end check) runs only through `pwsh -NoProfile -File tools/hidden-desktop.ps1 -- <command>` (a private Win32 desktop, copied from godot-mcp), and its capture happens inside that desktop, never through a bring-to-front. Avalonia UI tests use `Avalonia.Headless`. Page-only CSS/JS checks render in headless Chromium (`npx playwright screenshot`). A check that cannot run hidden is tagged `[Trait("Category", "Desktop")]`, excluded by default (the test project's `DesktopTestFilter` property), and run only when the owner asks, with `-p:DesktopTestFilter='--filter-trait "Category=Desktop"'`.
+- **Nothing an agent runs may show a window on the owner's desktop or take focus.** A real `yamv.exe` (a harness, a screenshot, an end-to-end check) runs only through `pwsh -NoProfile -File tools/hidden-desktop.ps1 -- <command>` (a private Win32 desktop, copied from godot-mcp), and its capture happens inside that desktop, never through a bring-to-front.
+
+  Avalonia UI tests use `Avalonia.Headless`. Page-only CSS/JS checks render in headless Chromium (`npx playwright screenshot`). A check that cannot run hidden is tagged `[Trait("Category", "Desktop")]`, excluded by default (the test project's `DesktopTestFilter` property), and run only when the owner asks, with `-p:DesktopTestFilter='--filter-trait "Category=Desktop"'`.
 - Test mode: stable (the full suite runs at every landing).
 - The look follows `docs/design/look.md`; a UI change that departs from it gets a mock first.

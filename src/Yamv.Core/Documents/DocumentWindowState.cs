@@ -75,8 +75,11 @@ public sealed class DocumentWindowState
     /// <summary>The rows the window's tree shows.</summary>
     public DocumentTree Tree => tree;
 
-    /// <summary>True when the window shows its tree: it persists, or it holds two or more documents.</summary>
-    public bool ShowTree => persist || documents.Count >= 2;
+    /// <summary>
+    /// True when the window shows its tree: it holds two or more documents, or it persists and holds at least one. An empty
+    /// main window shows only its empty state.
+    /// </summary>
+    public bool ShowTree => documents.Count >= 2 || (persist && documents.Count > 0);
 
     /// <summary>True when the window holds no document.</summary>
     public bool IsEmpty => documents.Count == 0;

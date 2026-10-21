@@ -3,14 +3,24 @@ namespace Yamv.Core;
 /// <summary>The per-user folders YAMV keeps its state in.</summary>
 public static class AppPaths
 {
+    /// <summary>The environment variable that, when set and not empty, names the data directory on every platform.</summary>
+    public const string DataDirectoryVariable = "YAMV_DATA_DIR";
+
     /// <summary>
-    /// <c>%APPDATA%\YAMV</c> on Windows, <c>~/Library/Application Support/YAMV</c> on macOS,
+    /// The full path of <c>YAMV_DATA_DIR</c> when that variable is set and not empty, so a dev run or a test never touches
+    /// the user's own state. Otherwise <c>%APPDATA%\YAMV</c> on Windows, <c>~/Library/Application Support/YAMV</c> on macOS,
     /// <c>$XDG_CONFIG_HOME/yamv</c> (or <c>~/.config/yamv</c>) elsewhere. Not created by this call.
     /// </summary>
     public static string DataDirectory
     {
         get
         {
+            string? overridden = Environment.GetEnvironmentVariable(DataDirectoryVariable);
+            if (!string.IsNullOrEmpty(overridden))
+            {
+                return Path.GetFullPath(overridden);
+            }
+
             if (OperatingSystem.IsWindows())
             {
                 return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "YAMV");

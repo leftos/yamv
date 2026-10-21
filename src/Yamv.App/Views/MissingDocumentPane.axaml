@@ -1,0 +1,66 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  x:Class="Yamv.App.Views.MissingDocumentPane"
+  x:DataType="vm:DocumentWindowViewModel"
+>
+  <UserControl.Styles>
+    <Style Selector="Button.pane">
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Padding" Value="12,0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource YamvPageBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="40,0">
+    <TextBlock
+      Text="This file is no longer there"
+      FontSize="17"
+      FontWeight="SemiBold"
+      Foreground="{DynamicResource YamvText}"
+      HorizontalAlignment="Center"
+      Margin="0,0,0,6"
+    />
+    <TextBlock
+      Text="It was moved or deleted:"
+      FontSize="13.5"
+      Foreground="{DynamicResource YamvTextMuted}"
+      HorizontalAlignment="Center"
+      Margin="0,0,0,18"
+    />
+    <Border HorizontalAlignment="Center" Padding="6,2" CornerRadius="4" Background="{DynamicResource YamvChromeBackground}">
+      <SelectableTextBlock
+        x:Name="MissingPath"
+        Text="{Binding SelectedPath}"
+        FontFamily="Cascadia Mono, Consolas, Menlo, monospace"
+        FontSize="12"
+        Foreground="{DynamicResource YamvTextSecondary}"
+        TextWrapping="Wrap"
+      />
+    </Border>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,16">
+      <Button x:Name="LocateButton" Classes="pane" Content="Locate…" IsEnabled="False" />
+      <Button
+        x:Name="RemoveButton"
+        Classes="pane"
+        Content="Remove from list"
+        Command="{Binding RemoveMissingCommand}"
+        CommandParameter="{Binding SelectedPath}"
+      />
+    </StackPanel>
+    <TextBlock
+      Text="YAMV keeps watching, and reopens it if it comes back."
+      FontSize="12.5"
+      Foreground="{DynamicResource YamvTextMuted}"
+      HorizontalAlignment="Center"
+    />
+  </StackPanel>
+</UserControl>

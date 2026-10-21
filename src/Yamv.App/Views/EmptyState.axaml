@@ -1,0 +1,72 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  x:Class="Yamv.App.Views.EmptyState"
+  x:DataType="vm:DocumentWindowViewModel"
+>
+  <UserControl.Styles>
+    <Style Selector="Border.key">
+      <Setter Property="Padding" Value="4,0" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="BorderThickness" Value="1,1,1,2" />
+      <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    <Style Selector="Border.key > TextBlock">
+      <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Menlo, monospace" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+  </UserControl.Styles>
+  <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+    <Panel Width="54" Height="54" Margin="0,0,0,16" HorizontalAlignment="Center" Opacity="0.7">
+      <Rectangle RadiusX="14" RadiusY="14" Stroke="{DynamicResource YamvTextMuted}" StrokeThickness="1.5" StrokeDashArray="3,2" />
+      <TextBlock
+        Text="md"
+        FontFamily="Cascadia Mono, Consolas, Menlo, monospace"
+        FontSize="18"
+        FontWeight="SemiBold"
+        Foreground="{DynamicResource YamvTextMuted}"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+      />
+    </Panel>
+    <TextBlock
+      Text="No documents open"
+      FontSize="17"
+      FontWeight="SemiBold"
+      Foreground="{DynamicResource YamvText}"
+      HorizontalAlignment="Center"
+      Margin="0,0,0,6"
+    />
+    <TextBlock FontSize="13.5" Foreground="{DynamicResource YamvTextMuted}" TextAlignment="Center" HorizontalAlignment="Center" Margin="0,0,0,18">
+      <Run Text="Drop markdown files here, or open some." />
+      <LineBreak />
+      <Run Text="They stay open next time." />
+    </TextBlock>
+    <Button
+      x:Name="OpenFilesButton"
+      Content="Open files…"
+      IsEnabled="False"
+      HorizontalAlignment="Center"
+      Height="30"
+      Padding="12,0"
+      CornerRadius="6"
+      FontSize="12.5"
+      FontWeight="Medium"
+      VerticalContentAlignment="Center"
+      Background="{DynamicResource YamvAccent}"
+      BorderBrush="{DynamicResource YamvAccent}"
+      Foreground="White"
+    />
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4" Margin="0,14,0,0">
+      <Border Classes="key">
+        <TextBlock x:Name="ModifierKey" Text="Ctrl" />
+      </Border>
+      <Border Classes="key">
+        <TextBlock Text="O" />
+      </Border>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

@@ -12,14 +12,14 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
 ## Window
 
 - **Custom title bar**, drawn into the window's title area. It shows the document name in semibold, then its location inside its group in muted text (`yamv / docs / plans`). Window controls are on the right on Windows; on macOS the traffic lights stay on the left. The bar is 38 px tall and takes the theme's chrome colours.
-- The document pane is on the left. Its text column is centred at the content width ([content-width.md](content-width.md)), which is set per folder with the title bar's `⟷` popover. The **tree sidebar is on the right** and 250–280 px wide, resizable by a splitter, and its width is remembered.
+- The document pane is on the left. Its text column is centred at the content width ([content-width.md](content-width.md)), which is set per folder with the title bar's `⟷` popover. The **tree sidebar is on the right**, 280 px by default and resizable between 200 and 480 px by a splitter, and its width is remembered. It is hidden for a viewer window with one document and for an empty main window.
 - There are no tabs. The tree is the only list of open documents.
 
 ## Tree
 
 - **Group header**: the name in semibold (the repo folder name, or the folder path with `~` for home), with a `GIT` or `DIR` badge on the right. Hovering shows the full path in a tooltip. Headers collapse with a chevron.
 - Folder rows are muted and have a chevron. Compacted chains are joined with `/` (`docs/plans`).
-- Document rows have a file icon. The selected row gets the selection fill and a 3 px accent bar on its left edge. A hovered row shows a `×` close button on its right.
+- Document rows have a file icon. The selected row gets the selection fill and a 3 px accent bar on its left edge. A hovered or selected row shows a `×` close button on its right. Selecting a document expands its group and folders, and Up/Down move between documents, skipping headers.
 - Context menu: Reveal in Explorer/Finder, Copy path, Close, Close group.
 
 ## Edge states

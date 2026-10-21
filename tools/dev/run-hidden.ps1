@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Starts the Release yamv.exe harness, captures its window after a wait, stops it and prints the log lines the run wrote.
+    Starts the Release yamv.exe (the dev harness, or with -App the real main window), captures its window after a wait,
+    stops it and prints the log lines the run wrote.
 
 .DESCRIPTION
     Run it on a hidden desktop, so no window ever shows on the user's screen:
@@ -9,29 +10,53 @@
 
     Before it starts yamv.exe it waits for the msedgewebview2 processes of a previous run to exit. Each run gets a
     fresh WebView2 user data folder, .tmp\webview2\<run stamp> under the repo, through WEBVIEW2_USER_DATA_FOLDER, so a
-    hidden run never joins the browser of a YAMV running on the owner's desktop. It waits for the harness's
-    "Harness: showing" log line (a fresh profile starts slowly), captures the window with capture-window.ps1, stops
-    yamv.exe, waits for its msedgewebview2 processes again, and prints the part of the YAMV log
-    (%APPDATA%\YAMV\logs\yamv.log) written since it started.
+    hidden run never joins the browser of a YAMV running on the owner's desktop.
+
+    Every run gets a fresh data folder, .tmp\yamv-data\<run stamp> under the repo, through YAMV_DATA_DIR (any inherited
+    value is replaced), so the owner's session, themes and log in %APPDATA%\YAMV are never read or written. By default it
+    starts the dev harness (YAMV_DEV_HARNESS=1) and waits for its "Harness: showing" log line. With -App it starts the
+    real main window, copies -Session into the data folder as session.json first, and waits for the window's
+    "Window: shown" log line. Both lines are read from the data folder's logs\yamv.log. A fresh WebView2 profile starts
+    slowly, hence the wait. With -DeleteAfterShown it then deletes that file and waits for the window's missing-file
+    re-check. Then it captures the window with capture-window.ps1, stops yamv.exe, waits for its msedgewebview2 processes
+    again, and prints the log.
 
 .PARAMETER ArgLine
     The harness's command line, for example '--theme dark --find'. Default: none.
+
+.PARAMETER App
+    Run the real main window instead of the harness, on a fresh data folder under .tmp\yamv-data.
+
+.PARAMETER Session
+    With -App: a session.json to start from, copied into the fresh data folder. Default: none (an empty window).
+
+.PARAMETER DeleteAfterShown
+    With -App: a file to delete once the window has shown, normally the session's selected document, so the capture shows
+    the window after it switched from that document to its missing pane. The capture waits 3 s for the 2 s re-check.
 
 .PARAMETER Out
     The PNG file to write.
 
 .PARAMETER Wait
-    The most seconds to wait for the "Harness: showing" log line before capturing anyway. Default 30.
+    The most seconds to wait for the "Harness: showing" (with -App, "Window: shown") log line before capturing
+    anyway. Default 30.
 
 .PARAMETER WebViewTimeoutSeconds
     How long to wait for msedgewebview2 processes to exit, before and after the run. Default 15.
 
 .EXAMPLE
     pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ArgLine '--theme dark' -Out .tmp/shot-dark.png
+
+.EXAMPLE
+    pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -App `
+        -Session .tmp/session.json -Out .tmp/main.png
 #>
 [CmdletBinding()]
 param(
     [string] $ArgLine = '',
+    [switch] $App,
+    [string] $Session = '',
+    [string] $DeleteAfterShown = '',
     [Parameter(Mandatory)] [string] $Out,
     [int] $Wait = 30,
     [int] $WebViewTimeoutSeconds = 15
@@ -43,7 +68,26 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $exe = Join-Path $root 'src\Yamv.App\bin\Release\net10.0\yamv.exe'
 $capture = Join-Path $PSScriptRoot 'capture-window.ps1'
-$log = Join-Path $env:APPDATA 'YAMV\logs\yamv.log'
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+if (($Session -or $DeleteAfterShown) -and -not $App) {
+    throw '-Session and -DeleteAfterShown need -App: the harness does not read a session.'
+}
+$dataDir = Join-Path $root ".tmp\yamv-data\$stamp"
+New-Item -ItemType Directory -Path $dataDir | Out-Null
+$env:YAMV_DATA_DIR = $dataDir
+$log = Join-Path $dataDir 'logs\yamv.log'
+Write-Output "Data folder: $dataDir"
+if ($App) {
+    if ($Session) {
+        Copy-Item -LiteralPath $Session -Destination (Join-Path $dataDir 'session.json')
+    }
+    $env:YAMV_DEV_HARNESS = $null
+    $readyLine = 'Window: shown'
+}
+else {
+    $env:YAMV_DEV_HARNESS = '1'
+    $readyLine = 'Harness: showing'
+}
 
 function Wait-WebViewExit {
     param([int] $TimeoutSeconds)
@@ -76,18 +120,18 @@ function Read-LogSince {
     }
 }
 
-function Wait-HarnessShowing {
+function Wait-Ready {
     param([long] $Offset, [System.Diagnostics.Process] $Process, [int] $TimeoutSeconds)
 
     $until = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $until -and -not $Process.HasExited) {
-        if ((Read-LogSince -Offset $Offset) -match 'Harness: showing') {
+        if ((Read-LogSince -Offset $Offset) -match $readyLine) {
             Start-Sleep -Seconds 1
             return
         }
         Start-Sleep -Milliseconds 300
     }
-    Write-Warning "No 'Harness: showing' log line after $TimeoutSeconds s; capturing anyway."
+    Write-Warning "No '$readyLine' log line after $TimeoutSeconds s; capturing anyway."
 }
 
 if (-not (Test-Path -LiteralPath $exe)) {
@@ -100,13 +144,18 @@ $startArgs = @{ FilePath = $exe; PassThru = $true }
 if ($ArgLine) {
     $startArgs.ArgumentList = $ArgLine
 }
-$userData = Join-Path $root ".tmp\webview2\$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')"
+$userData = Join-Path $root ".tmp\webview2\$stamp"
 New-Item -ItemType Directory -Path $userData | Out-Null
 $env:WEBVIEW2_USER_DATA_FOLDER = $userData
 Write-Output "WebView2 user data folder: $userData"
 $process = Start-Process @startArgs
 try {
-    Wait-HarnessShowing -Offset $start -Process $process -TimeoutSeconds $Wait
+    Wait-Ready -Offset $start -Process $process -TimeoutSeconds $Wait
+    if ($DeleteAfterShown) {
+        Remove-Item -LiteralPath $DeleteAfterShown
+        Write-Output "Deleted $DeleteAfterShown; waiting for the missing-file re-check."
+        Start-Sleep -Seconds 3
+    }
     & $capture -ProcessId $process.Id -Out $Out
     Write-Output "pid=$($process.Id) exited=$($process.HasExited)"
 }

@@ -1,0 +1,47 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  xmlns:chrome="using:Avalonia.Controls.Chrome"
+  x:Class="Yamv.App.Views.TitleBar"
+  x:DataType="vm:DocumentWindowViewModel"
+>
+  <Border
+    x:Name="Bar"
+    Height="38"
+    Background="{DynamicResource YamvChromeBackground}"
+    BorderBrush="{DynamicResource YamvLine}"
+    BorderThickness="0,0,0,1"
+    chrome:WindowDecorationProperties.ElementRole="TitleBar"
+  >
+    <DockPanel>
+      <StackPanel
+        x:Name="TitleBarTools"
+        DockPanel.Dock="Right"
+        Orientation="Horizontal"
+        HorizontalAlignment="Right"
+        chrome:WindowDecorationProperties.ElementRole="User"
+      />
+      <DockPanel x:Name="TitleText" VerticalAlignment="Center" Margin="14,0,0,0" IsHitTestVisible="False">
+        <TextBlock
+          x:Name="TitleName"
+          DockPanel.Dock="Left"
+          Text="{Binding TitleName}"
+          FontSize="12.5"
+          FontWeight="SemiBold"
+          TextTrimming="CharacterEllipsis"
+          Foreground="{DynamicResource YamvText}"
+          Margin="0,0,10,0"
+        />
+        <TextBlock
+          x:Name="TitleLocation"
+          Text="{Binding TitleLocation}"
+          FontSize="12.5"
+          FontWeight="Medium"
+          TextTrimming="CharacterEllipsis"
+          Foreground="{DynamicResource YamvTextMuted}"
+        />
+      </DockPanel>
+    </DockPanel>
+  </Border>
+</UserControl>

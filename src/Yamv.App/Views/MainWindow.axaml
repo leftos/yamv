@@ -1,8 +1,276 @@
 <Window
   xmlns="https://github.com/avaloniaui"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  xmlns:views="using:Yamv.App.Views"
   x:Class="Yamv.App.Views.MainWindow"
-  Title="YAMV"
+  x:DataType="vm:DocumentWindowViewModel"
+  Title="{Binding WindowTitle}"
   Width="1100"
-  Height="900"
-/>
+  Height="760"
+  MinWidth="560"
+  MinHeight="320"
+  ExtendClientAreaToDecorationsHint="True"
+  ExtendClientAreaTitleBarHeightHint="38"
+  Background="{DynamicResource YamvPageBackground}"
+  Foreground="{DynamicResource YamvText}"
+  FontFamily="{DynamicResource YamvUiFont}"
+>
+  <Window.Styles>
+    <!-- Tree rows: the fills, the accent bar and the close button are drawn here, so Fluent's own item fills never show. -->
+    <Style Selector="TreeView#Tree">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ToggleButton.chevron">
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="Transparent" Width="12" Height="16">
+            <Path
+              Name="Glyph"
+              Data="M0,0 L7,0 L3.5,4 Z"
+              Fill="{DynamicResource YamvTextMuted}"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+            />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="ToggleButton.chevron:unchecked /template/ Path#Glyph">
+      <Setter Property="RenderTransform" Value="rotate(-90deg)" />
+    </Style>
+    <Style Selector="Border.badge">
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="5,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.badge > TextBlock">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.4" />
+    </Style>
+    <Style Selector="Border.git">
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvAccentSoft}" />
+    </Style>
+    <Style Selector="Border.git > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource YamvAccent}" />
+    </Style>
+    <Style Selector="Border.dir">
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+    </Style>
+    <Style Selector="Border.dir > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+    <Style Selector="Border.missingTag">
+      <Setter Property="Background" Value="{DynamicResource YamvWarningBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvWarningLine}" />
+      <Setter Property="Margin" Value="6,0,0,0" />
+    </Style>
+    <Style Selector="Border.missingTag > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource YamvWarning}" />
+      <Setter Property="FontSize" Value="9.5" />
+      <Setter Property="LetterSpacing" Value="0.5" />
+    </Style>
+    <Style Selector="Panel.row">
+      <Setter Property="Height" Value="27" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Panel.row > Border.fill">
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Panel.row:pointerover > Border.fill">
+      <Setter Property="Background" Value="{DynamicResource YamvHoverBackground}" />
+    </Style>
+    <Style Selector="Panel.row.selected > Border.fill">
+      <Setter Property="Background" Value="{DynamicResource YamvSelectionBackground}" />
+    </Style>
+    <Style Selector="Panel.row TextBlock.name">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextSecondary}" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="Panel.row.folder TextBlock.name">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+    <Style Selector="Panel.row.selected TextBlock.name">
+      <Setter Property="Foreground" Value="{DynamicResource YamvSelectionText}" />
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="Panel.row Path.fileIcon">
+      <Setter Property="Stroke" Value="{DynamicResource YamvTextSecondary}" />
+      <Setter Property="Opacity" Value="0.7" />
+    </Style>
+    <Style Selector="Panel.row.selected Path.fileIcon">
+      <Setter Property="Stroke" Value="{DynamicResource YamvSelectionText}" />
+    </Style>
+    <Style Selector="Panel.row.missing TextBlock.name">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="TextDecorations" Value="Strikethrough" />
+    </Style>
+    <Style Selector="Panel.row.missing Path.fileIcon">
+      <Setter Property="Stroke" Value="{DynamicResource YamvTextMuted}" />
+      <Setter Property="Opacity" Value="0.49" />
+    </Style>
+    <Style Selector="Button.close">
+      <Setter Property="IsVisible" Value="False" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Width" Value="20" />
+      <Setter Property="Height" Value="20" />
+      <Setter Property="Margin" Value="4,0,0,0" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <!-- The transparent panel keeps the 20 x 20 hit area whatever the hover fill resolves to. -->
+          <Panel Background="Transparent">
+            <Border Name="Back" CornerRadius="4" />
+            <TextBlock Text="×" FontSize="14" Foreground="{DynamicResource YamvTextMuted}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.close:pointerover /template/ Border#Back">
+      <Setter Property="Background" Value="{DynamicResource YamvLine}" />
+    </Style>
+    <Style Selector="Panel.row:pointerover Button.close, Panel.row.selected Button.close">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+  </Window.Styles>
+
+  <DockPanel x:Name="Root">
+    <views:TitleBar DockPanel.Dock="Top" />
+    <Grid x:Name="Body" ColumnDefinitions="*,Auto,280">
+      <Panel Grid.Column="0" x:Name="DocumentColumn">
+        <ContentControl x:Name="DocumentHost">
+          <ContentControl.IsVisible>
+            <MultiBinding Converter="{x:Static BoolConverters.And}">
+              <Binding Path="!IsEmpty" />
+              <Binding Path="!SelectedIsMissing" />
+            </MultiBinding>
+          </ContentControl.IsVisible>
+        </ContentControl>
+        <views:EmptyState x:Name="EmptyState" IsVisible="{Binding IsEmpty}" />
+        <views:MissingDocumentPane x:Name="MissingPane" IsVisible="{Binding SelectedIsMissing}" />
+      </Panel>
+      <GridSplitter
+        Grid.Column="1"
+        x:Name="SidebarSplitter"
+        Width="4"
+        MinWidth="4"
+        Background="Transparent"
+        ResizeDirection="Columns"
+        ResizeBehavior="PreviousAndNext"
+      />
+      <Border
+        Grid.Column="2"
+        x:Name="Sidebar"
+        Background="{DynamicResource YamvSidebarBackground}"
+        BorderBrush="{DynamicResource YamvLine}"
+        BorderThickness="1,0,0,0"
+      >
+        <TreeView
+          x:Name="Tree"
+          ItemsSource="{Binding Items}"
+          SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+          AutomationProperties.Name="Open documents"
+          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+          Padding="8,0,8,12"
+        >
+          <TreeView.Resources>
+            <ControlTheme x:Key="{x:Type TreeViewItem}" TargetType="TreeViewItem" x:DataType="vm:TreeItemViewModel">
+              <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+              <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+              <Setter Property="Background" Value="Transparent" />
+              <Setter Property="FocusAdorner" Value="{x:Null}" />
+              <Setter Property="Template">
+                <ControlTemplate>
+                  <StackPanel>
+                    <ContentPresenter
+                      Name="PART_HeaderPresenter"
+                      Content="{TemplateBinding Header}"
+                      ContentTemplate="{TemplateBinding HeaderTemplate}"
+                      HorizontalContentAlignment="Stretch"
+                    />
+                    <ItemsPresenter Name="PART_ItemsPresenter" IsVisible="{TemplateBinding IsExpanded}" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                  </StackPanel>
+                </ControlTemplate>
+              </Setter>
+            </ControlTheme>
+          </TreeView.Resources>
+          <TreeView.DataTemplates>
+            <TreeDataTemplate DataType="vm:GroupItemViewModel" ItemsSource="{Binding Children}">
+              <Border Classes="group" Margin="0,12,0,0" Padding="8,5" Background="Transparent" ToolTip.Tip="{Binding Path}">
+                <DockPanel>
+                  <ToggleButton Classes="chevron" IsChecked="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,5,0" />
+                  <Border Classes="badge git" DockPanel.Dock="Right" IsVisible="{Binding IsRepo}">
+                    <TextBlock Text="GIT" />
+                  </Border>
+                  <Border Classes="badge dir" DockPanel.Dock="Right" IsVisible="{Binding !IsRepo}">
+                    <TextBlock Text="DIR" />
+                  </Border>
+                  <TextBlock
+                    Text="{Binding Name}"
+                    FontWeight="SemiBold"
+                    FontSize="12.5"
+                    Foreground="{DynamicResource YamvText}"
+                    VerticalAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
+                  />
+                </DockPanel>
+              </Border>
+            </TreeDataTemplate>
+            <TreeDataTemplate DataType="vm:FolderItemViewModel" ItemsSource="{Binding Children}">
+              <Panel Classes="row folder" ToolTip.Tip="{Binding Path}">
+                <Border Classes="fill" />
+                <DockPanel Margin="{Binding $parent[TreeViewItem].Level, Converter={x:Static views:TreeIndent.Margin}}">
+                  <ToggleButton Classes="chevron" IsChecked="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,5,0" />
+                  <TextBlock Classes="name" Text="{Binding Name}" />
+                </DockPanel>
+              </Panel>
+            </TreeDataTemplate>
+            <TreeDataTemplate DataType="vm:DocumentItemViewModel">
+              <Panel
+                Classes="row document"
+                Classes.selected="{Binding IsSelected}"
+                Classes.missing="{Binding IsMissing}"
+                ToolTip.Tip="{Binding Path}"
+              >
+                <Border Classes="fill" />
+                <Border
+                  Width="3"
+                  Margin="0,6"
+                  CornerRadius="2"
+                  HorizontalAlignment="Left"
+                  Background="{DynamicResource YamvAccent}"
+                  IsVisible="{Binding IsSelected}"
+                />
+                <DockPanel Margin="{Binding $parent[TreeViewItem].Level, Converter={x:Static views:TreeIndent.Margin}}">
+                  <Path
+                    Classes="fileIcon"
+                    Data="M1,0.5 H6.5 L10,4 V13.5 H1 Z M6.5,0.5 V4 H10"
+                    StrokeThickness="1"
+                    Width="13"
+                    VerticalAlignment="Center"
+                    Margin="0,0,7,0"
+                  />
+                  <Button
+                    Classes="close"
+                    DockPanel.Dock="Right"
+                    Command="{Binding CloseCommand}"
+                    AutomationProperties.Name="{Binding Name, StringFormat='Close {0}'}"
+                  />
+                  <Border Classes="badge missingTag" DockPanel.Dock="Right" IsVisible="{Binding IsMissing}">
+                    <TextBlock Text="MISSING" />
+                  </Border>
+                  <TextBlock Classes="name" Text="{Binding Name}" />
+                </DockPanel>
+              </Panel>
+            </TreeDataTemplate>
+          </TreeView.DataTemplates>
+        </TreeView>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>

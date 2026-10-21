@@ -28,11 +28,13 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private readonly MarkdownRenderer _renderer = new();
     private readonly Dictionary<string, double> _scrollPositions;
     private readonly HashSet<Task> _renders = [];
+    private readonly Dictionary<string, bool> _folderExpansion;
     private readonly ITimer _missingTimer;
     private List<DocumentItemViewModel> _documentRows = [];
     private int _syncDepth;
     private int _renderGeneration;
     private string? _shownPath;
+    private List<ShapeRow>? _treeShape;
     private string _sessionKey;
     private bool _closeRequested;
     private bool _disposed;
@@ -61,6 +63,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _readText = readText;
         _log = log;
         _scrollPositions = new Dictionary<string, double>(state.PathComparer);
+        _folderExpansion = new Dictionary<string, bool>(state.PathComparer);
         _state.Changed += OnStateChanged;
         _surface.ScrollChanged += OnScrollChanged;
         Sync();
@@ -77,7 +80,10 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>Raised when the last document of a window that does not persist was closed, so the window closes too.</summary>
     public event EventHandler? CloseRequested;
 
-    /// <summary>The tree's top-level rows, rebuilt on every change.</summary>
+    /// <summary>
+    /// The tree's top-level rows. They are rebuilt when the tree's shape changes; otherwise the same rows are kept and their
+    /// selection, missing flag and expansion updated.
+    /// </summary>
     [ObservableProperty]
     public partial IReadOnlyList<TreeItemViewModel> Items { get; private set; } = [];
 
@@ -104,7 +110,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     public partial string WindowTitle { get; private set; } = AppName;
 
-    /// <summary>True when the window shows its tree: it is the main window, or it holds two or more documents.</summary>
+    /// <summary>True when the window shows its tree: it holds two or more documents, or it is the main window and holds one.</summary>
     [ObservableProperty]
     public partial bool ShowTree { get; private set; }
 
@@ -352,10 +358,25 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         try
         {
             string? selected = _state.SelectedPath;
+            if (selected is not null && !SamePath(selected, SelectedPath))
+            {
+                ExpandFoldersAbove(_state.Tree.Items, selected);
+            }
+
             GroupNode? group = selected is null ? null : _state.GroupOf(selected);
             (string Name, string Location) title = TitleText.For(selected, group);
-            _documentRows = [];
-            Items = [.. _state.Tree.Items.Select(item => Row(item, selected))];
+            List<ShapeRow> shape = TreeShape(_state.Tree.Items);
+            if (_treeShape is not null && shape.SequenceEqual(_treeShape))
+            {
+                UpdateRows(_state.Tree.Items, Items, selected);
+            }
+            else
+            {
+                _documentRows = [];
+                Items = [.. _state.Tree.Items.Select(item => Row(item, selected))];
+                _treeShape = shape;
+            }
+
             SelectedPath = selected;
             TitleName = title.Name;
             TitleLocation = title.Location;
@@ -379,7 +400,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             case GroupItem group:
                 return new GroupItemViewModel(group, Rows(group.Children, selected), _state.SetGroupExpanded, _state.CloseGroup);
             case FolderItem folder:
-                return new FolderItemViewModel(folder, Rows(folder.Children, selected));
+                return new FolderItemViewModel(folder, Rows(folder.Children, selected), IsFolderExpanded(folder.Path), SetFolderExpanded);
             case DocumentItem document:
                 var row = new DocumentItemViewModel(document, SamePath(document.Path, selected), _state.Close);
                 _documentRows.Add(row);
@@ -388,6 +409,81 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
                 throw new ArgumentException($"A tree cannot show a {item.GetType().Name}.", nameof(item));
         }
     }
+
+    /// <summary>Marks every folder above the document at <paramref name="path"/> expanded; true when the document was found.</summary>
+    private bool ExpandFoldersAbove(IReadOnlyList<TreeItem> items, string path)
+    {
+        foreach (TreeItem item in items)
+        {
+            switch (item)
+            {
+                case DocumentItem document when SamePath(document.Path, path):
+                    return true;
+                case GroupItem group when ExpandFoldersAbove(group.Children, path):
+                    return true;
+                case FolderItem folder when ExpandFoldersAbove(folder.Children, path):
+                    _folderExpansion[folder.Path] = true;
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The tree's shape: every row's kind, name, path and depth in tree order. While it stays the same the rows are kept, so
+    /// the tree view keeps its row controls and keyboard focus.
+    /// </summary>
+    private static List<ShapeRow> TreeShape(IReadOnlyList<TreeItem> items)
+    {
+        List<ShapeRow> shape = [];
+        AppendShape(shape, items, depth: 0);
+        return shape;
+    }
+
+    private static void AppendShape(List<ShapeRow> shape, IReadOnlyList<TreeItem> items, int depth)
+    {
+        foreach (TreeItem item in items)
+        {
+            (char kind, IReadOnlyList<TreeItem> children) = item switch
+            {
+                GroupItem group => (group.IsRepo ? 'R' : 'G', group.Children),
+                FolderItem folder => ('F', folder.Children),
+                _ => ('D', (IReadOnlyList<TreeItem>)[]),
+            };
+            shape.Add(new ShapeRow(kind, item.Name, item.Path, depth));
+            AppendShape(shape, children, depth + 1);
+        }
+    }
+
+    /// <summary>Copies the selection, missing flags and group expansion of a tree of the same shape onto the existing rows.</summary>
+    private void UpdateRows(IReadOnlyList<TreeItem> items, IReadOnlyList<TreeItemViewModel> rows, string? selected)
+    {
+        for (int index = 0; index < items.Count; index++)
+        {
+            switch (items[index], rows[index])
+            {
+                case (GroupItem group, GroupItemViewModel row):
+                    row.ShowExpanded(group.IsExpanded);
+                    UpdateRows(group.Children, row.Children, selected);
+                    break;
+                case (FolderItem folder, FolderItemViewModel row):
+                    row.IsExpanded = IsFolderExpanded(folder.Path);
+                    UpdateRows(folder.Children, row.Children, selected);
+                    break;
+                case (DocumentItem document, DocumentItemViewModel row):
+                    row.IsMissing = document.IsMissing;
+                    row.IsSelected = SamePath(document.Path, selected);
+                    break;
+                default:
+                    throw new InvalidOperationException($"The tree row at {items[index].Path} does not match its row view model.");
+            }
+        }
+    }
+
+    private bool IsFolderExpanded(string folderPath) => _folderExpansion.GetValueOrDefault(folderPath, true);
+
+    private void SetFolderExpanded(string folderPath, bool expanded) => _folderExpansion[folderPath] = expanded;
 
     private List<TreeItemViewModel> Rows(IReadOnlyList<TreeItem> items, string? selected) => [.. items.Select(item => Row(item, selected))];
 
@@ -492,6 +588,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private bool IsMissing(string path) => _state.Tree.Documents.Any(document => document.IsMissing && SamePath(document.Path, path));
 
     private bool SamePath(string? first, string? second) => first is not null && second is not null && _state.PathComparer.Equals(first, second);
+
+    /// <summary>One row of the tree's shape: its kind (repo group, folder group, folder or document), name, path and depth.</summary>
+    private readonly record struct ShapeRow(char Kind, string Name, string Path, int Depth);
 }
 
 /// <summary>What kind of session change <see cref="DocumentWindowViewModel.SessionDirty"/> reports.</summary>

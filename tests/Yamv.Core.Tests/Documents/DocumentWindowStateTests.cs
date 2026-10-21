@@ -623,7 +623,17 @@ public sealed class DocumentWindowStateTests
     }
 
     [Fact]
-    public void ShowTree_MainWindow_IsAlwaysShown() => Assert.True(Create().ShowTree);
+    public void ShowTree_MainWindow_IsShownWhileItHoldsADocument()
+    {
+        DocumentWindowState state = Create();
+        Assert.False(state.ShowTree);
+
+        state.Add([RepoDocA]);
+        Assert.True(state.ShowTree);
+
+        state.Close(RepoDocA);
+        Assert.False(state.ShowTree);
+    }
 
     private static string P(params string[] parts) => Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", Path.Combine(parts));
 

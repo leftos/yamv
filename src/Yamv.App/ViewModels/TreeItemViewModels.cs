@@ -18,6 +18,9 @@ public abstract partial class TreeItemViewModel(string name, string path) : View
     /// <summary>True when this row is the window's selected document.</summary>
     [ObservableProperty]
     public partial bool IsSelected { get; set; }
+
+    /// <summary>True when the row's children are shown. A document row has none, so it is always false there.</summary>
+    public abstract bool IsExpanded { get; set; }
 }
 
 /// <summary>A top-level group row: a git work-tree root or a plain folder.</summary>
@@ -48,7 +51,7 @@ public sealed class GroupItemViewModel : TreeItemViewModel
     public IReadOnlyList<TreeItemViewModel> Children { get; }
 
     /// <summary>True when the group's children are shown. Setting it records the choice in the window state.</summary>
-    public bool IsExpanded
+    public override bool IsExpanded
     {
         get => _isExpanded;
         set
@@ -62,19 +65,40 @@ public sealed class GroupItemViewModel : TreeItemViewModel
 
     /// <summary>Closes every document of the group.</summary>
     public IRelayCommand CloseGroupCommand { get; }
+
+    /// <summary>Shows the window state's expansion of the group without recording it back as a user's choice.</summary>
+    internal void ShowExpanded(bool expanded) => SetProperty(ref _isExpanded, expanded, nameof(IsExpanded));
 }
 
 /// <summary>A folder row below a group.</summary>
 /// <param name="item">The folder as the window state's tree holds it.</param>
 /// <param name="children">The rows directly below the folder.</param>
-public sealed class FolderItemViewModel(FolderItem item, IReadOnlyList<TreeItemViewModel> children) : TreeItemViewModel(item.Name, item.Path)
+/// <param name="isExpanded">True when the folder's children are shown.</param>
+/// <param name="setExpanded">Records a user's expand or collapse of the folder, by folder path.</param>
+public sealed class FolderItemViewModel(FolderItem item, IReadOnlyList<TreeItemViewModel> children, bool isExpanded, Action<string, bool> setExpanded)
+    : TreeItemViewModel(item.Name, item.Path)
 {
+    private bool _isExpanded = isExpanded;
+
     /// <summary>The folder and document rows directly below the folder.</summary>
     public IReadOnlyList<TreeItemViewModel> Children { get; } = children;
+
+    /// <summary>True when the folder's children are shown. Setting it records the choice for the window's life.</summary>
+    public override bool IsExpanded
+    {
+        get => _isExpanded;
+        set
+        {
+            if (SetProperty(ref _isExpanded, value))
+            {
+                setExpanded(Path, value);
+            }
+        }
+    }
 }
 
 /// <summary>A document row.</summary>
-public sealed class DocumentItemViewModel : TreeItemViewModel
+public sealed partial class DocumentItemViewModel : TreeItemViewModel
 {
     /// <summary>Creates the row for <paramref name="item"/>.</summary>
     /// <param name="item">The document as the window state's tree holds it.</param>
@@ -89,7 +113,15 @@ public sealed class DocumentItemViewModel : TreeItemViewModel
     }
 
     /// <summary>True when the document is no longer on disk.</summary>
-    public bool IsMissing { get; }
+    [ObservableProperty]
+    public partial bool IsMissing { get; set; }
+
+    /// <summary>Always false: a document row has no children. Setting it changes nothing.</summary>
+    public override bool IsExpanded
+    {
+        get => false;
+        set { }
+    }
 
     /// <summary>Closes the document.</summary>
     public IRelayCommand CloseCommand { get; }

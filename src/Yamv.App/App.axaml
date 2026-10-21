@@ -8,5 +8,19 @@
 
   <Application.Styles>
     <FluentTheme />
+    <!--
+      Avalonia's drawn window decorations keep only their minimize, maximize and close buttons: their title text and
+      full-screen button would sit over the app's own title bar. The parts are matched by name alone, so a change of their type
+      in Fluent cannot bring them back. The title panel's visibility is template-bound, so it is hidden by opacity. Hidden by
+      IsVisible alone, the full-screen button still kept its slot on Windows and pushed the others 47 px from the corner, so
+      its width is zeroed too.
+    -->
+    <Style Selector="WindowDrawnDecorations /template/ #PART_TitleTextPanel" x:SetterTargetType="Visual">
+      <Setter Property="Opacity" Value="0" />
+    </Style>
+    <Style Selector="WindowDrawnDecorations /template/ #PART_FullScreenButton" x:SetterTargetType="Layoutable">
+      <Setter Property="IsVisible" Value="False" />
+      <Setter Property="Width" Value="0" />
+    </Style>
   </Application.Styles>
 </Application>

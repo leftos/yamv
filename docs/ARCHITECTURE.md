@@ -14,6 +14,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Change the theme file format, a token, or a built-in theme | `src/Yamv.Core/Theming/ThemeTokens.cs` → `ThemeParser.cs` → `ThemeSerializer.cs` → `themes/yamv-theme.schema.json` → `src/Yamv.Core/Theming/BuiltIn/` → `tests/Yamv.Core.Tests/Theming/` | [themes.md](design/themes.md) |
 | Change how a document looks or behaves in the page (rendering, find, links, images) | `src/Yamv.App/Web/yamv.js` → `Web/yamv.css` → `Web/template.html` → `src/Yamv.App/Controls/DocumentView.cs` → `tools/dev/page-check/` | |
 | Change the window's view model (selection, rendering, session restore, shortcuts' commands) | `src/Yamv.App/ViewModels/DocumentWindowViewModel.cs` → `src/Yamv.Core/Documents/DocumentWindowState.cs` → `tests/Yamv.App.Tests/ViewModels/` | |
+| Change what the main window or viewer window shows (title bar, tree, empty or missing state) | `src/Yamv.App/Views/MainWindow.axaml` → `Views/TitleBar.axaml` → `ViewModels/DocumentWindowViewModel.cs` → `src/Yamv.Core/Documents/` → `tests/Yamv.App.Tests/Views/` + `tests/Yamv.Core.Tests/Documents/` | [look.md](design/look.md) |
 | Change how a theme reaches the window chrome | `src/Yamv.App/Services/ThemeBridge.cs` → `src/Yamv.Core/Theming/ChromePalette.cs` → `tests/Yamv.App.Tests/Services/ThemeBridgeTests.cs` | [themes.md](design/themes.md) |
 | Change how YAMV is built, published, packaged or run in CI, or its app icon | `scripts/publish.ps1` → `scripts/make-app.sh` → `.github/workflows/ci.yml` → `src/Yamv.App/Yamv.App.csproj` → `tools/dev/make-icons.py` → `src/Yamv.App/Assets/` | README "Building and packaging" |
 | Change what `--register` / `--unregister` writes to the Windows registry | `src/Yamv.Core/Registration/WindowsFileAssociation.cs` → `RegistrationResult.cs` → `tests/Yamv.Core.Tests/Registration/` | [v1-build.md](plans/v1-build.md) step 7 |
@@ -43,6 +44,9 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
     The view model wraps Core's `DocumentWindowState`, renders the selection off the UI thread (a stale render is dropped by generation), keeps scroll per shown document, re-checks missing files every 2 s, and builds and restores the session.
 
     `ThemeBridge` picks the session's theme, sets the Avalonia theme variant, swaps one merged resource dictionary of chrome brushes (`YamvChromeBackground` … `YamvWarningLine`) and font (`YamvUiFont`, from Core's `ChromePalette`), and sends the theme CSS to every registered surface.
+  - `Services/MainWindowFactory` composes the real main window: the log, the session, the theme catalog and bridge, `DocumentView`, `DocumentWindowState` and the view model.
+
+    `Views/` holds `MainWindow` (custom title bar, `TitleBar`, and the tree sidebar on the right), `EmptyState` and `MissingDocumentPane`; `HarnessWindow` is the dev harness (the old document-view test window), opened instead of the main window when `YAMV_DEV_HARNESS=1`. `YAMV_DATA_DIR`, when set and not empty, is the data directory for the session, lock, logs and themes on every platform (`AppPaths.DataDirectoryVariable`).
   - The find bar lives inside the page, because Avalonia cannot draw over a native web view (airspace). For the same reason an empty or missing state hides the web view rather than covering it.
 
 ## Integration Footguns
@@ -57,14 +61,16 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 - The instance endpoint is derived from the lock file's full path (`InstanceEndpoint`): `main.sock` beside the lock on macOS and Linux, `yamv-` plus a hash of the user SID and the lock path on Windows. Moving `AppPaths.MainLockFile` moves the endpoint, so a build with the old path cannot reach a main running the new one.
 - `InstanceCoordinator.StartServer`'s handler runs on a thread-pool thread: the App posts to the UI thread and never blocks in it (a `Dispose` from inside it releases the lock and returns at once; any other concurrent `Dispose` returns only after the lock is released). `SignalAsync` returning true means the main instance read the frame on Windows, but only that the frame reached the socket's send buffer on Unix.
 - On Windows, `File.Move(overwrite)` is refused while any other handle has the target open, so every multi-writer file in the data folder (`widths.json`) retries its replace.
+- Fluent's window decoration parts are hidden by name in `App.axaml`: `PART_TitleTextPanel` by `Opacity` (its visibility is template-bound) and `PART_FullScreenButton` by `IsVisible` plus `Width=0` (`IsVisible` alone kept its layout slot). An Avalonia upgrade re-checks them with a `run-hidden.ps1 -App` capture.
+- A native view cannot be overlaid, so the window toggles `DocumentView`'s visibility for the empty and missing states instead of drawing over it.
 - `ThemeCatalog.LoadAll` can list two entries with one id (an invalid user file beside the built-in it shadows): look a theme up by id preferring the valid entry.
 
 ## Test locations
 
 - `tests/Yamv.Core.Tests`: everything in Core. A new Core type gets a test file at the mirrored path.
-- `tests/Yamv.App.Tests`: App logic that needs Avalonia types (view model, `ThemeBridge`), run headless as plain `[Fact]`s through `HeadlessUnitTestSession` (`Avalonia.Headless.XUnit` fails discovery under xunit.v3). `Fakes/` holds the fake surface and log; `Yamv.App` exposes its internals to it.
+- `tests/Yamv.App.Tests`: App logic that needs Avalonia types (view model, `ThemeBridge`), run headless as plain `[Fact]`s through `HeadlessUnitTestSession` (`Avalonia.Headless.XUnit` fails discovery under xunit.v3). `Fakes/` holds the fake surface and log; `Yamv.App` exposes its internals to it. `Views/` holds headless window tests (title bar, tree, empty and missing states).
 - `tools/dev/page-check/`: a headless Chromium check of the document page (`npm install`, then `npm run check`), against a stubbed host.
-- `tools/dev/run-hidden.ps1` with `tools/dev/capture-window.ps1`, both run under `tools/hidden-desktop.ps1`: screenshots of the real app off the owner's desktop. `docs/design/fixtures/sample.md` is the sample document.
+- `tools/dev/run-hidden.ps1` with `tools/dev/capture-window.ps1`, both run under `tools/hidden-desktop.ps1`: screenshots of the real app off the owner's desktop, each run on a fresh data folder (`-App` for the main window, `-Session` to seed it). `docs/design/fixtures/sample.md` is the sample document.
 
 ## Deep docs
 

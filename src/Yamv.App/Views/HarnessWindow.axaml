@@ -1,0 +1,8 @@
+<Window
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="Yamv.App.Views.HarnessWindow"
+  Title="YAMV"
+  Width="1100"
+  Height="900"
+/>
