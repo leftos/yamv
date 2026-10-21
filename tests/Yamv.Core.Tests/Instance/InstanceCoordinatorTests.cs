@@ -75,6 +75,152 @@ public sealed class InstanceCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task StopAnswering_StopsServerAndDeletesPidFileButKeepsTheLockUntilDispose()
+    {
+        using InstanceCoordinator other = new(_lockPath, _log);
+        InstanceCoordinator main = StartMain(out _);
+        try
+        {
+            Assert.True(File.Exists(PidPath));
+
+            main.StopAnswering();
+
+            Assert.False(File.Exists(PidPath));
+            Assert.Null(InstanceCoordinator.TryReadMainPid(_lockPath, _log));
+            bool delivered = await InstanceCoordinator
+                .SignalAsync(_lockPath, InstanceMessages.Activate, TimeSpan.FromMilliseconds(200), _log, Token)
+                .WaitAsync(HangGuard, Token);
+            Assert.False(delivered);
+            Assert.False(other.TryAcquireMainLock());
+
+            main.StopAnswering();
+            main.Dispose();
+
+            Assert.True(other.TryAcquireMainLock());
+        }
+        finally
+        {
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task StopAnswering_WaitingOnABlockedHandler_HasAlreadyDeletedThePidFile()
+    {
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        InstanceCoordinator main = await StartMainWithBlockedHandlerAsync(_ => release.Task.Wait(HangGuard, Token));
+        TaskCompletionSource countedQueue = WhenWarningLogged("Dropped 1 instance message(s)");
+        Thread stopping = new(main.StopAnswering) { IsBackground = true };
+        try
+        {
+            stopping.Start();
+            // StopAnswering logs the drop count after the accept loop stops and before it waits on the blocked handler.
+            await countedQueue.Task.WaitAsync(HangGuard, Token);
+
+            Assert.True(stopping.IsAlive, "StopAnswering returned while the handler was still blocked.");
+            Assert.Null(InstanceCoordinator.TryReadMainPid(_lockPath, _log));
+            Assert.False(File.Exists(PidPath));
+        }
+        finally
+        {
+            release.TrySetResult();
+            Assert.True(stopping.Join(HangGuard), "StopAnswering did not return after the handler was released.");
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Dispose_WhileStopAnsweringWaitsOnABlockedHandler_WaitsForTheHandler()
+    {
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool handlerEnded = false;
+        bool? handlerEndedWhenDisposeReturned = null;
+        InstanceCoordinator main = await StartMainWithBlockedHandlerAsync(_ =>
+        {
+            release.Task.Wait(HangGuard, Token);
+            Volatile.Write(ref handlerEnded, true);
+        });
+        TaskCompletionSource countedQueue = WhenWarningLogged("Dropped 1 instance message(s)");
+        Thread stopping = new(main.StopAnswering) { IsBackground = true };
+        Thread disposing = new(() =>
+        {
+            main.Dispose();
+            handlerEndedWhenDisposeReturned = Volatile.Read(ref handlerEnded);
+        })
+        {
+            IsBackground = true,
+        };
+        try
+        {
+            stopping.Start();
+            await countedQueue.Task.WaitAsync(HangGuard, Token);
+            disposing.Start();
+            await WaitUntilBlockedOrEndedAsync(disposing);
+
+            Assert.True(disposing.IsAlive, "Dispose returned while StopAnswering's handler was still blocked.");
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        Assert.True(disposing.Join(HangGuard), "Dispose did not return after the handler was released.");
+        Assert.True(stopping.Join(HangGuard), "StopAnswering did not return after the handler was released.");
+        Assert.True(handlerEndedWhenDisposeReturned);
+    }
+
+    [Fact]
+    public void StopAnswering_ServerNeverStarted_DeletesPidFileAndKeepsTheLock()
+    {
+        using InstanceCoordinator other = new(_lockPath, _log);
+        InstanceCoordinator main = new(_lockPath, _log);
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+
+            main.StopAnswering();
+            main.StopAnswering();
+
+            Assert.False(File.Exists(PidPath));
+            Assert.False(other.TryAcquireMainLock());
+            main.Dispose();
+            Assert.True(other.TryAcquireMainLock());
+            Assert.Empty(_log.Errors);
+        }
+        finally
+        {
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public void TryAcquireMainLockQuietly_HeldByAnother_ReturnsHeldAndLogsNothing()
+    {
+        using InstanceCoordinator main = new(_lockPath, _log);
+        using InstanceCoordinator waiting = new(_lockPath, _log);
+        Assert.True(main.TryAcquireMainLock());
+
+        Assert.Equal(MainLockAttempt.HeldByAnother, waiting.TryAcquireMainLockQuietly());
+
+        Assert.Empty(_log.Infos);
+        Assert.Empty(_log.Warnings);
+        Assert.Empty(_log.Errors);
+        main.Dispose();
+        Assert.Equal(MainLockAttempt.Acquired, waiting.TryAcquireMainLockQuietly());
+    }
+
+    [Fact]
+    public void TryAcquireMainLockQuietly_LockFileCannotBeOpened_ReturnsCannotOpenAndLogsAnError()
+    {
+        Directory.CreateDirectory(_lockPath);
+        using InstanceCoordinator main = new(_lockPath, _log);
+
+        Assert.Equal(MainLockAttempt.CannotOpen, main.TryAcquireMainLockQuietly());
+
+        Assert.Single(_log.Errors);
+    }
+
+    [Fact]
     public void TryAcquireMainLock_AlreadyHeld_DoesNotRewritePidFile()
     {
         using InstanceCoordinator main = new(_lockPath, _log);

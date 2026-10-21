@@ -1,12 +1,15 @@
+using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using Yamv.App.Services;
 using Yamv.App.ViewModels;
 using Yamv.App.Views;
 using Yamv.Core;
 using Yamv.Core.Diagnostics;
+using Yamv.Core.Launch;
 using Yamv.Core.Theming;
 
 namespace Yamv.App;
@@ -26,15 +29,40 @@ public partial class App : Application
     private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
     private IAppLog? _log;
+    private ActivationGate? _connectedGate;
+
+    /// <summary>Unhooks the main window's <c>Closed</c> handler and runs its start's stop action if it has not run yet.</summary>
+    private Action? _releaseMainWindowHooks;
+
+    /// <summary>
+    /// The current start's own closed flag, set only by that start's main window, so an activate posted after it closed finds no
+    /// window; null for a viewer or harness start.
+    /// </summary>
+    private StrongBox<bool>? _mainWindowClosed;
 
     /// <summary>The files a viewer launch opens: empty for a main launch. Set before Avalonia starts.</summary>
     internal static IReadOnlyList<string> ViewerFiles { get; set; } = [];
 
+    /// <summary>The log <c>Program</c> made for the process, or null when it made none. Set before Avalonia starts.</summary>
+    internal static IAppLog? ProcessLog { get; set; }
+
+    /// <summary>
+    /// The gate the instance server's <c>activate</c> messages pass through, for a main launch; null for viewer and harness
+    /// launches. Set before Avalonia starts.
+    /// </summary>
+    internal static ActivationGate? Activation { get; set; }
+
+    /// <summary>
+    /// Stops the main instance answering second launches while it keeps the lock, for a main launch; null for viewer and harness
+    /// launches. Run once when the main window has closed, before the app's exit saves the session. Set before Avalonia starts.
+    /// </summary>
+    internal static Action? StopAnswering { get; set; }
+
     /// <summary>The one theme bridge the app applies through; null before the first window is built and after it is released.</summary>
     internal ThemeBridge? Bridge => _bridge;
 
-    /// <summary>The process's one log, made when the first window is built.</summary>
-    private IAppLog Log => _log ??= new FileAppLog(AppPaths.LogFile);
+    /// <summary>The process's one log: <see cref="ProcessLog"/> when set, else one made when the first window is built.</summary>
+    private IAppLog Log => _log ??= ProcessLog ?? new FileAppLog(AppPaths.LogFile);
 
     /// <summary>
     /// Forgets the process's log, so the next window makes one where the data folder is then. A test that changes
@@ -73,14 +101,100 @@ public partial class App : Application
         _bridge = bridge;
         _mainWindow =
             ViewerFiles.Count == 0 ? MainWindowFactory.Create(this, bridge, log) : MainWindowFactory.CreateViewer(this, bridge, ViewerFiles, log);
+        if (ViewerFiles.Count == 0 && Activation is { } gate)
+        {
+            ConnectGate(gate, _mainWindow.Window);
+        }
+
+        if (ViewerFiles.Count == 0)
+        {
+            HookMainWindowClosed(_mainWindow.Window, StopAnswering);
+        }
+
         return _mainWindow.Window;
+    }
+
+    /// <summary>
+    /// When the main window has closed, marks this start's window closed for <see cref="BringMainWindowForward"/> and runs this
+    /// start's <paramref name="stopAnswering"/>: <c>Closed</c>, unlike <c>Closing</c>, cannot be cancelled.
+    /// <see cref="ReleaseMainWindow"/> unhooks this and runs the action too when it has not run yet, before it saves the session,
+    /// so the order holds whichever of the window's <c>Closed</c> and the app's exit comes first. The action runs at most once.
+    /// </summary>
+    private void HookMainWindowClosed(Window window, Action? stopAnswering)
+    {
+        var closed = new StrongBox<bool>();
+        Action? pending = stopAnswering;
+        void RunStopAnsweringOnce()
+        {
+            Action? action = pending;
+            pending = null;
+            action?.Invoke();
+        }
+
+        void OnClosed(object? sender, EventArgs e)
+        {
+            window.Closed -= OnClosed;
+            closed.Value = true;
+            RunStopAnsweringOnce();
+        }
+
+        window.Closed += OnClosed;
+        _mainWindowClosed = closed;
+        _releaseMainWindowHooks = () =>
+        {
+            window.Closed -= OnClosed;
+            RunStopAnsweringOnce();
+        };
+    }
+
+    /// <summary>Brings the main window forward on each activate the gate raises, and marks the gate ready on its first show.</summary>
+    private void ConnectGate(ActivationGate gate, Window window)
+    {
+        _connectedGate = gate;
+        gate.Activate += OnActivateRequested;
+        void MarkReadyOnce(object? sender, EventArgs e)
+        {
+            window.Opened -= MarkReadyOnce;
+            gate.MarkReady();
+        }
+
+        window.Opened += MarkReadyOnce;
+    }
+
+    /// <summary>Raised on whichever thread asked; the work moves to the UI thread and never blocks the asker.</summary>
+    private void OnActivateRequested(object? sender, EventArgs e) => Dispatcher.UIThread.Post(BringMainWindowForward);
+
+    private void BringMainWindowForward()
+    {
+        Window? window = _mainWindow?.Window;
+        if (window is null || _mainWindowClosed is { Value: true })
+        {
+            Log.LogInfo("Activate: no main window to bring forward.");
+            return;
+        }
+
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+
+        window.Show();
+        window.Activate();
+        Log.LogInfo("Activate: main window brought forward.");
     }
 
     /// <summary>Disposes what the start window owns, and the bridge the app owns, once the app exits.</summary>
     internal void ReleaseMainWindow()
     {
+        _connectedGate?.Activate -= OnActivateRequested;
+        _connectedGate = null;
+        Action? releaseHooks = _releaseMainWindowHooks;
+        _releaseMainWindowHooks = null;
+        releaseHooks?.Invoke();
+
         _mainWindow?.Dispose();
         _mainWindow = null;
+        _mainWindowClosed = null;
         _bridge?.Dispose();
         _bridge = null;
         _harnessBridge?.Dispose();

@@ -64,6 +64,12 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     private Task? _handlerLoop;
     private bool _disposed;
 
+    /// <summary>True once <see cref="StopAnswering"/> or <see cref="Dispose"/> has begun stopping the server.</summary>
+    private bool _stoppedAnswering;
+
+    /// <summary>True once the server's shutdown token has been cancelled, so disposing it can no longer race the cancel.</summary>
+    private bool _shutdownCancelled;
+
     /// <summary>The server instance waiting for the next client; touched only by the accept loop.</summary>
     private NamedPipeServerStream? _listener;
 
@@ -130,17 +136,27 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
 
     /// <summary>
     /// Takes the main-instance lock, held until <see cref="Dispose"/> or the process ends. True when this process now holds it
-    /// (or already did); false when another process holds it or the lock file cannot be opened. On first taking it, records this
-    /// process's pid and start time in the pid file beside the lock (see <see cref="TryReadMainPid"/>); a failed write is a warning.
+    /// (or already did); false when another process holds it (logged as info) or the lock file cannot be opened (logged as an
+    /// error). On first taking it, records this process's pid and start time in the pid file beside the lock (see
+    /// <see cref="TryReadMainPid"/>); a failed write is a warning.
     /// </summary>
-    public bool TryAcquireMainLock()
+    public bool TryAcquireMainLock() => AcquireMainLock(logHeldByAnother: true) == MainLockAttempt.Acquired;
+
+    /// <summary>
+    /// Takes the main-instance lock as <see cref="TryAcquireMainLock"/> does, for a launch that retries it while another process
+    /// holds it: a lock held by another process is not logged, so the retries stay quiet. A lock file that cannot be opened is
+    /// still logged as an error, and reported as <see cref="MainLockAttempt.CannotOpen"/> so the caller stops retrying.
+    /// </summary>
+    public MainLockAttempt TryAcquireMainLockQuietly() => AcquireMainLock(logHeldByAnother: false);
+
+    private MainLockAttempt AcquireMainLock(bool logHeldByAnother)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_lockStream is not null)
             {
-                return true;
+                return MainLockAttempt.Acquired;
             }
 
             try
@@ -155,20 +171,24 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
             }
             catch (IOException ex) when (IsShareViolation(ex))
             {
-                log.LogInfo(
-                    $"Another process holds the main-instance lock {_paths.FullLockPath}, so this one is not the main instance: {ex.Message}"
-                );
-                return false;
+                if (logHeldByAnother)
+                {
+                    log.LogInfo(
+                        $"Another process holds the main-instance lock {_paths.FullLockPath}, so this one is not the main instance: {ex.Message}"
+                    );
+                }
+
+                return MainLockAttempt.HeldByAnother;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 log.LogError($"Could not open the main-instance lock {_paths.FullLockPath}; check that its folder is writable.", ex);
-                return false;
+                return MainLockAttempt.CannotOpen;
             }
 
-            // Outside the catches above: the lock is held now, so no pid-file failure may turn this into a false.
+            // Outside the catches above: the lock is held now, so no pid-file failure may turn this into a failure.
             WritePidFile();
-            return true;
+            return MainLockAttempt.Acquired;
         }
     }
 
@@ -223,6 +243,11 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
             if (_acceptLoop is not null)
             {
                 throw new InvalidOperationException("The instance server is already running.");
+            }
+
+            if (_stoppedAnswering)
+            {
+                throw new InvalidOperationException("The instance server cannot start after StopAnswering.");
             }
 
             CancellationToken token = _shutdown.Token;
@@ -304,21 +329,55 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     }
 
     /// <summary>
-    /// Stops the server: waits up to 5 s for the accept loop, logs how many queued messages were dropped, waits up to 5 s for a
-    /// running handler (logging a warning when either wait runs out) and releases the lock. Safe to call more than once and from
-    /// several threads: a later call returns once the first has released the lock. A call from inside this coordinator's message
-    /// handler returns at once: as the first call it skips the wait on its own handler, and as a later one the first call is
-    /// waiting on that handler.
+    /// Stops answering second launches while keeping the lock: deletes the pid file first, then stops the server as
+    /// <see cref="Dispose"/> does, waiting the same bounded way. A launch from then on fails its signal, finds no pid and retries
+    /// the lock for a bounded time, so it becomes the main instance once this one has released the lock. The main instance calls
+    /// this as it starts to shut down, before it saves its session; <see cref="Dispose"/> then only waits for the server and
+    /// releases the lock. Safe to call more than once, before <see cref="StartServer"/> or without it, and after
+    /// <see cref="Dispose"/>, where it does nothing.
+    /// </summary>
+    public void StopAnswering()
+    {
+        Task? acceptLoop;
+        Task? handlerLoop;
+        lock (_gate)
+        {
+            if (_stoppedAnswering)
+            {
+                return;
+            }
+
+            _stoppedAnswering = true;
+
+            // First, so a stop that waits on a stuck handler never leaves a pid a second launch could bring forward.
+            DeleteOwnPidFile();
+            acceptLoop = _acceptLoop;
+            handlerLoop = _handlerLoop;
+        }
+
+        _ = StopServer(acceptLoop, handlerLoop);
+    }
+
+    /// <summary>
+    /// Stops the server, unless <see cref="StopAnswering"/> already began to: waits up to 5 s for the accept loop, logs how many
+    /// queued messages were dropped, waits up to 5 s for a running handler (logging a warning when either wait runs out) and
+    /// releases the lock. After <see cref="StopAnswering"/>, finished or still running on another thread, it waits for both loops
+    /// the same bounded way before releasing the lock. Safe to call more than once and from several threads: a later call returns
+    /// once the first has released the lock. A call from inside this coordinator's message handler returns at once: as the first
+    /// call it skips the wait on its own handler, and as a later one the first call is waiting on that handler.
     /// </summary>
     public void Dispose()
     {
         Task? acceptLoop;
         Task? handlerLoop;
         bool alreadyDisposing;
+        bool stopStartedElsewhere;
         lock (_gate)
         {
             alreadyDisposing = _disposed;
             _disposed = true;
+            stopStartedElsewhere = _stoppedAnswering;
+            _stoppedAnswering = true;
             acceptLoop = _acceptLoop;
             handlerLoop = _handlerLoop;
         }
@@ -331,7 +390,8 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
 
         try
         {
-            StopServer(acceptLoop, handlerLoop);
+            bool stopped = stopStartedElsewhere ? WaitForLoops(acceptLoop, handlerLoop) : StopServer(acceptLoop, handlerLoop);
+            DisposeShutdownIfDone(stopped);
         }
         finally
         {
@@ -356,35 +416,63 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
 
     /// <summary>
     /// Cancels both loops, waits for the accept loop, logs the dropped-message count and waits for the handler loop, unless the
-    /// caller is that handler: the loop it runs in ends once it returns.
+    /// caller is that handler: the loop it runs in ends once it returns. True when both loops have ended.
     /// </summary>
-    private void StopServer(Task? acceptLoop, Task? handlerLoop)
+    private bool StopServer(Task? acceptLoop, Task? handlerLoop)
     {
         // The queue is never completed: a frame read just before the cancel is still queued, so the count below includes it.
         _shutdown.Cancel();
-
-        // The accept loop never runs user code, so it stops on its own; once it has, no frame joins the queue being counted.
-        bool acceptStopped =
-            acceptLoop is null
-            || WaitForLoop(
-                acceptLoop,
-                $"The instance server's accept loop on pipe '{Endpoint}' did not stop within {DisposeWait.TotalSeconds:0} s; "
-                    + "the dropped-message count may be short."
-            );
-        LogDroppedMessages();
-        if (IsOnOwnHandlerThread)
+        lock (_gate)
         {
-            return;
+            _shutdownCancelled = true;
         }
 
-        bool handlerStopped =
+        // The accept loop never runs user code, so it stops on its own; once it has, no frame joins the queue being counted.
+        bool acceptStopped = WaitForAcceptLoop(acceptLoop);
+        LogDroppedMessages();
+        return WaitForHandlerLoop(handlerLoop) && acceptStopped;
+    }
+
+    /// <summary>Waits for both loops that another call is stopping, the same bounded way. True when both have ended.</summary>
+    private bool WaitForLoops(Task? acceptLoop, Task? handlerLoop)
+    {
+        bool acceptStopped = WaitForAcceptLoop(acceptLoop);
+        return WaitForHandlerLoop(handlerLoop) && acceptStopped;
+    }
+
+    private bool WaitForAcceptLoop(Task? acceptLoop) =>
+        acceptLoop is null
+        || WaitForLoop(
+            acceptLoop,
+            $"The instance server's accept loop on pipe '{Endpoint}' did not stop within {DisposeWait.TotalSeconds:0} s; "
+                + "the dropped-message count may be short."
+        );
+
+    /// <summary>Waits for the handler loop; false at once on the handler's own thread, whose loop ends once it returns.</summary>
+    private bool WaitForHandlerLoop(Task? handlerLoop) =>
+        !IsOnOwnHandlerThread
+        && (
             handlerLoop is null
             || WaitForLoop(
                 handlerLoop,
                 $"The instance server on pipe '{Endpoint}' did not stop within {DisposeWait.TotalSeconds:0} s; "
-                    + "a message handler is probably blocked. Releasing the lock anyway."
-            );
-        if (acceptStopped && handlerStopped)
+                    + "a message handler is probably blocked. Going on without it."
+            )
+        );
+
+    /// <summary>
+    /// Disposes the shutdown token once both loops have ended and its cancel has run, so a <see cref="StopAnswering"/> still on
+    /// its way to the cancel never meets a disposed token.
+    /// </summary>
+    private void DisposeShutdownIfDone(bool loopsStopped)
+    {
+        bool cancelled;
+        lock (_gate)
+        {
+            cancelled = _shutdownCancelled;
+        }
+
+        if (loopsStopped && cancelled)
         {
             _shutdown.Dispose();
         }
@@ -398,7 +486,11 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     {
         try
         {
-            DeleteOwnPidFile();
+            lock (_gate)
+            {
+                DeleteOwnPidFile();
+            }
+
             LockReleasing?.Invoke();
         }
         finally
@@ -461,6 +553,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     {
         if (_pidFileWritten)
         {
+            _pidFileWritten = false;
             DeleteFileLoggingFailure(
                 _paths.PidPath,
                 $"Could not delete the main-instance pid file {_paths.PidPath}; a second launch ignores it once this process has exited."
@@ -763,7 +856,8 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
                     // Only a listener's creation runs while no listener is waiting. The runtime rejects the endpoint itself (on Unix,
                     // a socket path too long for the platform): a retry cannot fix it.
                     log.LogError(
-                        $"The instance server cannot listen on '{Endpoint}' and has stopped; second launches will open their own window.",
+                        $"The instance server cannot listen on '{Endpoint}' and has stopped; "
+                            + "second launches will bring its window forward without it.",
                         ex
                     );
                     return;
@@ -803,7 +897,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
                 return failures.RecordKnownCause(
                     ex,
                     $"The instance pipe {Endpoint} is held by another account or a previous YAMV that is still exiting; "
-                        + "second launches will open their own window until it is free."
+                        + "second launches will bring its window forward without it until it is free."
                 );
             }
         }
@@ -955,4 +1049,17 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
             return false;
         }
     }
+}
+
+/// <summary>What one try for the main-instance lock found.</summary>
+public enum MainLockAttempt
+{
+    /// <summary>This process now holds the lock.</summary>
+    Acquired,
+
+    /// <summary>Another process holds the lock; it may release it, so a retry can succeed.</summary>
+    HeldByAnother,
+
+    /// <summary>The lock file cannot be opened at all; a retry cannot fix that.</summary>
+    CannotOpen,
 }

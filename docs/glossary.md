@@ -15,12 +15,13 @@
 - **Inherited value**: a token's value in the token editor when the tab sets none: shown grey, taken from Shared or the defaults (on the Shared tab, from the defaults). Setting it, even to the same value, makes it set; ↺ removes a set value.
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.
 - **Main instance**: the one YAMV process started with no file arguments. It remembers its open documents between runs; a second no-arg launch brings it to the front and exits.
-- **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted on a clean exit.
+- **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted when the main instance stops answering, as its main window closes, before the final session save.
 - **Missing document**: an open document whose file no longer exists, or a path a viewer launch named that does not exist; it stays in the tree, greyed, until removed or until the file comes back.
 - **Open with registration**: what `yamv --register` writes on Windows so YAMV appears in Explorer's Open with for `.md` and `.markdown`: the `YAMV.Markdown` ProgID, an `OpenWithProgids` entry per extension and the `Applications\yamv.exe` key, all under the current user. It never sets the default handler.
 - **Persist**: a window's flag saying its documents, selection and layout are saved to the session file; true only for the main instance's window.
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.
 - **Reveal**: showing a path in the platform's file manager from a tree menu: a file is shown selected in Explorer or Finder, a folder or group root is opened, and a missing document opens its nearest folder that still exists (`RevealCommand`).
+- **Second launch**: a no-argument `yamv` start while another process holds the main-instance lock; it asks the main instance to come forward and exits 0, brings that window forward itself and exits 1 when the signal fails, or, with no pid file, waits up to 5 s for the lock and starts as the main instance (`SecondLaunch`).
 - **Sidebar**: the pane on the window's right holding the tree of open documents.
 - **Theme family**: one `.yamv-theme.json` file, holding a light variant, a dark variant or both ([themes.md](design/themes.md)).
 - **Token**: a named theme value (a colour, font, size) that drives both the document page (as a `--yamv-*` CSS property) and the app chrome.
