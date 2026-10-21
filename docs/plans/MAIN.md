@@ -7,9 +7,8 @@
 ### Window and launch (4/5 done)
 - [/] YAMV-8 Launch modes: main vs viewer, activating the main instance, macOS file activation
 
-### Features (1/7 done)
+### Features (2/7 done)
 - [/] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
-- [/] YAMV-10 Content width: per-folder slider (480 px to Full) in a title-bar popover
 - [ ] YAMV-50 Content width step: scrollbar in the pane measure, other instances, steps during a render, letter layouts
 - [/] YAMV-11 Theme settings window, Import notice and a watcher on the user themes folder
 - [ ] YAMV-48 Toast for failed operations: never only a log line
@@ -48,6 +47,15 @@
 - [ ] YAMV-64 Document file watcher follow-ups: error loop after healthy ticks, unstarted source, spin helper, dead-share threads
 - [ ] YAMV-68 Toast when the theme in use goes bad or is deleted outside the app
 - [ ] YAMV-69 Content-width popover: keep the keyboard focus ring when the Clear all question moves focus
+- [ ] YAMV-73 Live reload follow-ups from the 3a review: grace edges, UI-thread probe, test backstops
+- [ ] YAMV-75 Theme catalog repeats its invalid-file warning on every reload
+- [ ] YAMV-77 Scroll anchor follow-ups: empty-text ties, Core-generated page fixtures, oversized render records
+- [ ] YAMV-78 ThemeBridge: test that an Apply of another theme ends the kept bad streak
+- [ ] YAMV-79 Content-width popover follows a window resize while open
+- [ ] YAMV-80 Content-width slider draws no accent fill left of the knob
+- [ ] YAMV-81 Tail switch: the view follows text appended to a document
+- [ ] YAMV-82 Scroll anchor edges: raw-HTML find blocks, a bad session entry, test names
+- [ ] YAMV-83 Settings writer: write only the changed field; close the watcher's stale-read window
 
 ## Single instance
 
