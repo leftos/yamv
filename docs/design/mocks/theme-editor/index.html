@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV token editor options</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1500px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 36px; font-size: 16px; max-width: 1380px; line-height: 1.5; }
+section { margin-bottom: 60px; }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > p { color: #eef0f2; margin: 0 0 20px; font-size: 15px; max-width: 1380px; line-height: 1.5; }
+section > p code, .cap code { font: 13px "JetBrains Mono V"; }
+.lanes { display: flex; gap: 48px; align-items: flex-start; }
+.lane { width: 350px; flex: none; position: relative; }
+.ll { font: 650 17px "Inter V"; color: #fff; margin: 0 0 10px; }
+.sub { font: 600 11px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: #eef0f2; margin: 16px 0 6px; }
+.cap { color: #fff; font-size: 14px; line-height: 1.45; margin-top: 12px; }
+
+/* a cut of the settings window: only its middle column, every colour a token set inline from the script */
+.col { width: 350px; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-size: 13px; font-family: "Inter V", sans-serif; }
+.col .tokens { border-right: 0; flex: 1; }
+.col.tail .tscroll { padding-bottom: 10px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--yamv-line); border-radius: 6px;
+       background: var(--yamv-page-background); color: var(--yamv-text); font: 550 12.5px "Inter V"; white-space: nowrap; }
+.btn.primary { background: var(--yamv-accent); border-color: var(--yamv-accent); color: #fff; }
+.btn.sm { height: 26px; font-size: 12px; padding: 0 10px; }
+
+/* middle: tokens (copied from the approved theme-settings mock) */
+.tokens { width: 350px; flex: none; border-right: 1px solid var(--yamv-line); display: flex; flex-direction: column; min-height: 0; position: relative; background: var(--yamv-page-background); }
+.thead { padding: 14px 16px 10px; border-bottom: 1px solid var(--yamv-line); flex: none; }
+.thead .t { display: flex; align-items: center; gap: 8px; }
+.thead .t b { font: 650 15px "Inter V"; color: var(--yamv-heading); }
+.badge { font: 600 9.5px "Inter V"; letter-spacing: .05em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; }
+.thead .d { font-size: 11.5px; color: var(--yamv-text-muted); margin: 3px 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg { display: flex; border: 1px solid var(--yamv-line); border-radius: 7px; overflow: hidden; }
+.seg span { flex: 1; text-align: center; padding: 5px 0; font-size: 12.5px; color: var(--yamv-text-secondary); border-right: 1px solid var(--yamv-line); }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 600; }
+.hint { font-size: 11.5px; color: var(--yamv-text-muted); margin-top: 8px; line-height: 1.4; }
+.tscroll { flex: 1; min-height: 0; overflow: hidden; padding: 2px 16px 0; position: relative; display: flex; flex-direction: column; }
+.tscroll > * { flex: none; }
+.sbar { position: absolute; right: 3px; width: 4px; border-radius: 2px; background: var(--yamv-text-muted); opacity: .35; }
+.gh { font: 600 10.5px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: var(--yamv-text-muted); margin: 12px 0 3px; }
+.tok { display: flex; align-items: center; gap: 9px; height: 28px; font-size: 12.5px; color: var(--yamv-text-secondary); position: relative; }
+.tok .sw { width: 18px; height: 18px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(127,127,127,.35); flex: none;
+           background-image: linear-gradient(var(--c), var(--c)), repeating-conic-gradient(#ccc 0 25%, #fff 0 50%); background-size: auto, 8px 8px; }
+.tok .lab { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tok .mod { color: var(--yamv-accent); font-size: 9px; margin-left: 4px; }
+.fld { height: 24px; border: 1px solid var(--yamv-line); border-radius: 5px; background: var(--yamv-page-background); display: flex; align-items: center;
+       padding: 0 7px; font: 11.5px "JetBrains Mono V"; color: var(--yamv-text); flex: none; }
+.fld.hex { width: 92px; }
+.fld.font { width: 140px; font-family: "Inter V"; font-size: 12px; }
+.fld.font .caret { margin-left: auto; color: var(--yamv-text-muted); font-size: 9px; }
+.fld.num { width: 58px; justify-content: flex-end; }
+.unit { width: 18px; font-size: 11px; color: var(--yamv-text-muted); margin-left: -4px; }
+.inh .fld { color: var(--yamv-text-muted); }
+.fld.focus { border-color: var(--yamv-accent); box-shadow: 0 0 0 3px var(--yamv-accent-soft); color: var(--yamv-text); }
+.check { width: 16px; height: 16px; border-radius: 4px; background: var(--yamv-accent); display: grid; place-items: center; flex: none; margin-right: 1px; }
+.reset { width: 16px; flex: none; color: var(--yamv-text-muted); display: grid; place-items: center; }
+
+/* Q1: two-line token rows */
+.tok.two { height: 38px; }
+.tok.two .lab { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
+.tok.two .lab > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+.tok.two .l2 { font: 10.5px "JetBrains Mono V"; color: var(--yamv-text-muted); }
+.tok.two.compact { height: 34px; font-size: 12px; }
+.tok.two.compact .lab { gap: 1px; }
+.tok.two.compact .l2 { font: 10px "Inter V"; }
+.tip { position: absolute; z-index: 5; background: var(--yamv-page-background); border: 1px solid var(--yamv-line); border-radius: 6px; padding: 6px 9px;
+       box-shadow: 0 6px 18px rgba(0,0,0,.22); font-size: 11.5px; color: var(--yamv-text); line-height: 1.45; white-space: nowrap; }
+.tip b { font-weight: 600; }
+.tip .m { font: 10.5px "JetBrains Mono V"; color: var(--yamv-text-secondary); }
+.tip .m i { font-style: normal; color: var(--yamv-text-muted); }
+.cursor { position: absolute; z-index: 6; pointer-events: none; }
+
+/* Q2: the missing half */
+.dis .tok > * { opacity: .5; }
+.dis .tok .fld { background: var(--yamv-chrome-background); }
+.dis .tok .lab { color: var(--yamv-text-muted); opacity: 1; }
+.nohalf { margin: 10px 0 2px; padding: 9px 10px 9px 11px; border: 1px solid var(--yamv-line); border-radius: 8px; background: var(--yamv-chrome-background);
+          display: flex; gap: 10px; align-items: center; font-size: 11.5px; color: var(--yamv-text-secondary); line-height: 1.4; }
+.nohalf span:first-child { flex: 1; }
+.seg span.add { color: var(--yamv-accent); font-weight: 600; background: var(--yamv-page-background);
+                background-image: repeating-linear-gradient(90deg, var(--yamv-accent-soft) 0 4px, transparent 4px 7px); background-size: 100% 1px; background-repeat: no-repeat; background-position: bottom; }
+.empty { flex: 1; display: grid; place-items: center; text-align: center; padding: 0 28px 30px; }
+.empty .mk { width: 44px; height: 44px; border-radius: 12px; border: 1.5px dashed var(--yamv-text-muted); margin: 0 auto 14px; opacity: .6; display: grid; place-items: center; color: var(--yamv-text-muted); }
+.empty .h { font: 650 13.5px "Inter V"; color: var(--yamv-text); margin-bottom: 5px; }
+.empty .s { font-size: 12px; color: var(--yamv-text-muted); line-height: 1.45; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: token editor options</h1>
+<p class="page">Two open choices in the theme settings window's middle column, drawn at real size beside each other. Each lane is the 350 px token column cut out of the <a style="color:#fff" href="../theme-settings/index.html">approved settings mock</a>, in the window's own Studio light colours. Everything else in the window stays as approved.</p>
+
+<section>
+  <h2>Q1 · Token rows with a second line</h2>
+  <p>Ruling: a row shows the friendly label, the token name in a muted second line, and a tooltip. Both lanes show the Light tab of a user theme, My Studio, with the same column height, so the number of rows that fit is part of the comparison. <b>Accent</b> is an unsaved change (dot after the label, field focused), <b>Quote bar</b> and <b>Selected row</b> are set in this tab (normal colour, ↺), every other value is inherited (grey). Below each column, the same list scrolled to the end shows the font, number and checkbox fields on the taller rows.</p>
+  <div class="lanes">
+    <div class="lane" data-q1="a"></div>
+    <div class="lane" data-q1="b"></div>
+  </div>
+</section>
+
+<section>
+  <h2>Q2 · "Add dark" on a theme with only a light half</h2>
+  <p>My Notes is a user theme whose file has a <code>light</code> half and no <code>dark</code> half. Each lane is what the user sees on going to the Dark tab (lane B: what the tab row offers instead). Wording note: the brief's text said the missing half's look is "Studio dark", but <code>ThemeResolver.Pick</code> gives a one-half theme's only half in either appearance (look.md: "If the family has only one variant, that variant is always used"), so the copy here says dark mode shows the light half. The rows lane A lists are Studio dark plus Shared, which is what a new dark half starts from.</p>
+  <div class="lanes">
+    <div class="lane" data-q2="a"></div>
+    <div class="lane" data-q2="b"></div>
+    <div class="lane" data-q2="c"></div>
+  </div>
+</section>
+
+<script>
+const TOKENS = [
+  ["pageBackground", "Page background", "Page"], ["text", "Text", "Page"], ["textSecondary", "Secondary text", "Page"], ["textMuted", "Muted text", "Page"],
+  ["heading", "Headings", "Page"], ["accent", "Accent", "Page"], ["accentSoft", "Accent, soft", "Page"], ["line", "Lines", "Page"], ["quote", "Quote bar", "Page"],
+  ["chromeBackground", "Title bar and footers", "Chrome"], ["sidebarBackground", "Sidebar", "Chrome"], ["selectionBackground", "Selected row", "Chrome"],
+  ["selectionText", "Selected row text", "Chrome"], ["hoverBackground", "Hovered row", "Chrome"], ["warning", "Warning", "Chrome"],
+  ["warningBackground", "Warning fill", "Chrome"], ["warningLine", "Warning border", "Chrome"],
+  ["codeBackground", "Code background", "Code"], ["codeLine", "Code block border", "Code"], ["findMatch", "Find match", "Code"], ["findCurrent", "Current match", "Code"],
+  ["syntaxKeyword", "Keywords", "Syntax"], ["syntaxString", "Strings", "Syntax"], ["syntaxComment", "Comments", "Syntax"], ["syntaxType", "Types and functions", "Syntax"],
+  ["syntaxNumber", "Numbers", "Syntax"],
+  ["uiFont", "App font", "Type", "font"], ["bodyFont", "Body font", "Type", "font"], ["headingFont", "Heading font", "Type", "font"], ["monoFont", "Code font", "Type", "font"],
+  ["bodySize", "Body size", "Layout", "num", "px"], ["lineHeight", "Line height", "Layout", "num", ""], ["h1Size", "H1 size", "Layout", "num", "em"],
+  ["headingWeight", "Heading weight", "Layout", "num", ""], ["h2Rule", "Rule under H2", "Layout", "bool"],
+];
+const COMMON = { uiFont: "Inter", bodyFont: "Inter", headingFont: "Inter", monoFont: "JetBrains Mono", bodySize: "15.5", lineHeight: "1.62", h1Size: "2.05", headingWeight: "700", h2Rule: true };
+const LIGHT = { ...COMMON, pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", quote: "#d0d7de", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  warning: "#9a6700", warningBackground: "#fff8c5", warningLine: "#e5d17b", codeBackground: "#f6f8fa", codeLine: "#e4e8ec", findMatch: "#fff1a8", findCurrent: "#ffb340",
+  syntaxKeyword: "#cf222e", syntaxString: "#0a3069", syntaxComment: "#6e7781", syntaxType: "#8250df", syntaxNumber: "#0550ae" };
+const DARK = { ...COMMON, pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", quote: "#3d444d", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  warning: "#d29922", warningBackground: "#bb800926", warningLine: "#9e6a03", codeBackground: "#161b22", codeLine: "#262c34", findMatch: "#5c4813", findCurrent: "#9e6a03",
+  syntaxKeyword: "#ff7b72", syntaxString: "#a5d6ff", syntaxComment: "#8b949e", syntaxType: "#d2a8ff", syntaxNumber: "#79c0ff" };
+/* Q1, My Studio light: quote, selectionBackground and bodySize are saved in the Light tab; accent is the unsaved change */
+const MY_LIGHT = { ...LIGHT, quote: "#0969da", selectionBackground: "#dbeafe", bodySize: "16", accent: "#1a7f37" };
+/* Q2, My Notes: Shared sets the body font, the light half sets three colours; there is no dark half */
+const NOTES_SHARED = { bodyFont: "Source Serif 4" };
+const NOTES_LIGHT = { ...LIGHT, ...NOTES_SHARED, pageBackground: "#fbfaf7", text: "#24292f", accent: "#8250df" };
+const NOTES_DARK_INHERITED = { ...DARK, ...NOTES_SHARED };
+
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (v) => Object.entries(v).filter(([k]) => typeof v[k] === "string" && v[k].startsWith("#")).map(([k, x]) => `${kebab(k)}:${x}`).join(";");
+const resetIco = `<svg width="12" height="12" viewBox="0 0 16 16"><path d="M3.5 8a4.5 4.5 0 1 0 1.4-3.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M4.5 2v3h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const tick = `<svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5.2 4 7.5 8.5 2.5" fill="none" stroke="#fff" stroke-width="1.6"/></svg>`;
+const moon = `<svg width="18" height="18" viewBox="0 0 16 16"><path d="M12.5 10.2A5.2 5.2 0 0 1 5.8 3.5a5.2 5.2 0 1 0 6.7 6.7z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+const arrow = `<svg class="cursor" width="13" height="19" viewBox="0 0 13 19"><path d="M1 1v15l3.6-3.4 2.6 5.6 2.3-1-2.6-5.5H12z" fill="#fff" stroke="#000" stroke-width="1.1" stroke-linejoin="round"/></svg>`;
+
+/* row = "one" (approved 28 px), "two" (Q1 A) or "compact" (Q1 B) */
+function tokRow(t, cfg) {
+  const [name, label, , kind = "color", unit] = t;
+  const v = cfg.values[name];
+  const set = cfg.set.includes(name);
+  const unsaved = cfg.unsaved === name;
+  const reset = `<span class="reset">${set || unsaved ? resetIco : ""}</span>`;
+  const dot = unsaved ? '<span class="mod">●</span>' : "";
+  const lab = cfg.row === "one" ? `<span class="lab">${label}${dot}</span>`
+    : `<span class="lab"><span class="l1">${label}${dot}</span><span class="l2">${name}</span></span>`;
+  let field;
+  if (kind === "font") field = `<span class="fld font">${v}<span class="caret">▼</span></span>`;
+  else if (kind === "num") field = `<span class="fld num">${v}</span><span class="unit">${unit}</span>`;
+  else if (kind === "bool") field = `<span class="check">${tick}</span>`;
+  else field = `<span class="fld hex ${unsaved ? "focus" : ""}">${v}</span>`;
+  const sw = kind === "color" ? `<span class="sw" style="--c:${v}"></span>` : "";
+  const cls = ["tok", cfg.row === "one" ? "" : "two", cfg.row === "compact" ? "compact" : "", set || unsaved ? "" : "inh"].join(" ");
+  const tip = cfg.tip === name ? ` data-tip="${label}|${name}|${kebab(name)}"` : "";
+  return `<div class="${cls}"${tip}>${sw}${lab}${field}${reset}</div>`;
+}
+function rows(groups, cfg) {
+  let html = "";
+  for (const g of groups) {
+    html += `<div class="gh">${g}</div>`;
+    for (const t of TOKENS.filter((x) => x[2] === g)) html += tokRow(t, cfg);
+  }
+  return html;
+}
+function head(cfg) {
+  const tabs = cfg.tabs.map(([n, c]) => `<span class="${c || ""}">${n}</span>`).join("");
+  return `<div class="thead"><div class="t"><b>${cfg.name}</b><span class="badge">Yours</span></div>
+    <div class="d">${cfg.desc}</div><div class="seg">${tabs}</div>${cfg.note || ""}</div>`;
+}
+const HINT = `<div class="hint">Grey values come from Shared or the defaults. ↺ removes a value from this tab.</div>`;
+function column(height, inner, extra = "") {
+  return `<div class="col ${extra}" style='${vars(LIGHT)};height:${height}'><div class="tokens">${inner}</div></div>`;
+}
+
+/* Q1 */
+const STUDIO = { name: "My Studio", desc: "my-studio.yamv-theme.json · light and dark",
+  tabs: [["Shared"], ["Light", "on"], ["Dark"]], note: HINT };
+function q1Lane(row, letter, caption) {
+  const cfg = { row, values: MY_LIGHT, set: ["quote", "selectionBackground", "bodySize"], unsaved: "accent", tip: letter === "A" ? "selectionBackground" : null };
+  const top = column("780px", head(STUDIO) + `<div class="tscroll">${rows(["Page", "Chrome"], cfg)}<span class="sbar" style="top:2px;height:120px"></span></div>`);
+  const end = column("auto", `<div class="tscroll">${rows(["Type", "Layout"], cfg)}</div>`, "tail");
+  return `<div class="ll">Q1 · ${letter}</div>${top}<div class="sub">The same list, scrolled to the end</div>${end}<div class="cap">${caption}</div>`;
+}
+
+/* Q2 */
+const NOTES = { name: "My Notes", desc: "my-notes.yamv-theme.json · light only" };
+const q2a = () => `<div class="ll">Q2 · A</div>` + column("600px",
+  head({ ...NOTES, tabs: [["Shared"], ["Light"], ["Dark", "on"]] })
+  + `<div class="tscroll dis"><div class="nohalf"><span>This theme has no dark half. In dark mode YAMV shows its light half.</span><span class="btn sm primary">Add dark</span></div>`
+  + rows(["Page", "Chrome"], { row: "one", values: NOTES_DARK_INHERITED, set: [] }) + `<span class="sbar" style="top:2px;height:110px"></span></div>`)
+  + `<div class="cap">All three tabs stay. Dark lists every token as inherited and disabled, under a strip with <b>Add dark</b>; adding the half turns the same rows editable in place.</div>`;
+const q2b = () => `<div class="ll">Q2 · B</div>` + column("600px",
+  head({ ...NOTES, tabs: [["Shared"], ["Light", "on"], ["+ Add dark", "add"]], note: HINT })
+  + `<div class="tscroll">${rows(["Page", "Chrome"], { row: "one", values: NOTES_LIGHT, set: ["pageBackground", "text", "accent"] })}<span class="sbar" style="top:2px;height:110px"></span></div>`)
+  + `<div class="cap">There is no Dark tab: its place is a tab-shaped <b>+ Add dark</b> button. Pressing it adds the half and opens the new Dark tab. The Light tab is open here for context.</div>`;
+const q2c = () => `<div class="ll">Q2 · C</div>` + column("600px",
+  head({ ...NOTES, tabs: [["Shared"], ["Light"], ["Dark", "on"]] })
+  + `<div class="empty"><div><div class="mk">${moon}</div><div class="h">No dark half yet</div>
+     <div class="s">Until you add one, dark mode shows<br>this theme's light half.</div><span class="btn primary">Add dark</span></div></div>`)
+  + `<div class="cap">All three tabs stay. Dark shows no rows, only a centred empty state with <b>Add dark</b>, which fills the tab with the new half's rows.</div>`;
+
+const Q1 = {
+  a: () => q1Lane("two", "A", "Two-line rows, 38 px. Label 12.5 px; token name 10.5 px JetBrains Mono, muted. The tooltip is open on <b>Selected row</b>."),
+  b: () => q1Lane("compact", "B", "Compact two-line rows, 34 px. Label 12 px; token name 10 px Inter, muted. Same tooltip as A (not drawn)."),
+};
+const Q2 = { a: q2a, b: q2b, c: q2c };
+for (const el of document.querySelectorAll("[data-q1]")) el.innerHTML = Q1[el.dataset.q1]();
+for (const el of document.querySelectorAll("[data-q2]")) el.innerHTML = Q2[el.dataset.q2]();
+
+/* the tooltip and the pointer sit on the lane, under the hovered label, so the column does not clip them */
+for (const row of document.querySelectorAll("[data-tip]")) {
+  const lane = row.closest(".lane"), lr = lane.getBoundingClientRect(), lab = row.querySelector(".l1").getBoundingClientRect();
+  const [label, name, css] = row.dataset.tip.split("|");
+  const x = lab.left - lr.left + 30, y = lab.top - lr.top + 8;
+  lane.insertAdjacentHTML("beforeend", arrow);
+  const cur = lane.lastElementChild;
+  cur.style.left = `${x}px`;
+  cur.style.top = `${y}px`;
+  lane.insertAdjacentHTML("beforeend", `<div class="tip" style='${vars(LIGHT)}'><b>${label}</b><br><span class="m">${name} <i>·</i> ${css}</span></div>`);
+  const tip = lane.lastElementChild;
+  tip.style.left = `${x - 24}px`;
+  tip.style.top = `${y + 22}px`;
+}
+</script>
+</body>
+</html>
