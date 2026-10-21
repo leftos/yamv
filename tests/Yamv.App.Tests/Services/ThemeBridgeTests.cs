@@ -199,6 +199,66 @@ public sealed class ThemeBridgeTests : IDisposable
             Assert.Equal("system", bridge.RequestedAppearance);
         });
 
+    [Fact]
+    public Task RequestChanged_is_raised_once_after_an_apply_that_changes_the_theme_id() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge bridge = CreateBridge();
+            List<(string ThemeId, string Appearance)> seen = [];
+            bridge.RequestChanged += (_, _) => seen.Add((bridge.RequestedThemeId, bridge.RequestedAppearance));
+
+            bridge.Apply("paper", "system");
+
+            Assert.Equal([("paper", "system")], seen);
+        });
+
+    [Fact]
+    public Task RequestChanged_is_raised_once_after_an_apply_that_changes_only_the_appearance() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge bridge = CreateBridge();
+            List<(string ThemeId, string Appearance)> seen = [];
+            bridge.RequestChanged += (_, _) => seen.Add((bridge.RequestedThemeId, bridge.RequestedAppearance));
+
+            bridge.Apply("studio", "dark");
+
+            Assert.Equal([("studio", "dark")], seen);
+        });
+
+    [Fact]
+    public Task RequestChanged_is_not_raised_after_an_apply_with_the_same_requested_values() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge bridge = CreateBridge();
+            int raised = 0;
+            bridge.RequestChanged += (_, _) => raised++;
+
+            bridge.Apply("studio", "system");
+            bridge.Apply("studio", "LIGHT");
+            Assert.Equal(0, raised);
+
+            bridge.Apply("ink", "light");
+            bridge.Apply("ink", "light");
+            Assert.Equal(1, raised);
+        });
+
+    [Fact]
+    public Task RequestChanged_for_an_unknown_id_sees_that_id_requested_while_studio_shows() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge bridge = CreateBridge();
+            List<(string ThemeId, string? Shown)> seen = [];
+            bridge.RequestChanged += (_, _) => seen.Add((bridge.RequestedThemeId, bridge.Current?.Id));
+
+            bridge.Apply("nope", "dark");
+
+            Assert.Equal([("nope", "studio")], seen);
+        });
+
     private ThemeBridge CreateBridge() => new(new ThemeCatalog(_themesFolder, _log), Application.Current!, _log);
 
     private ResolvedTheme Resolve(string id, Appearance appearance)

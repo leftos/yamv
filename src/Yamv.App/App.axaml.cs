@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -10,11 +11,17 @@ using Yamv.App.Views;
 using Yamv.Core;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Launch;
+using Yamv.Core.Settings;
 using Yamv.Core.Theming;
 using Yamv.Core.Widths;
 
 namespace Yamv.App;
 
+[SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "An Avalonia Application is never disposed; ReleaseMainWindow disposes what the app owns when it exits."
+)]
 public partial class App : Application
 {
     /// <summary>The environment variable that, set to <c>1</c>, starts the dev harness instead of the main window.</summary>
@@ -35,6 +42,7 @@ public partial class App : Application
     private MainWindowComposition? _mainWindow;
     private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
+    private SettingsWriter? _settingsWriter;
     private IAppLog? _log;
     private ActivationGate? _connectedGate;
 
@@ -67,6 +75,12 @@ public partial class App : Application
 
     /// <summary>The one theme bridge the app applies through; null before the first window is built and after it is released.</summary>
     internal ThemeBridge? Bridge => _bridge;
+
+    /// <summary>
+    /// What saves the bridge's theme picks to <c>settings.json</c>; null before the first main or viewer window is built and
+    /// after it is released.
+    /// </summary>
+    internal SettingsWriter? SettingsWriter => _settingsWriter;
 
     /// <summary>The process's one log: <see cref="ProcessLog"/> when set, else one made when the first window is built.</summary>
     private IAppLog Log => _log ??= ProcessLog ?? new FileAppLog(AppPaths.LogFile);
@@ -106,11 +120,14 @@ public partial class App : Application
         IAppLog log = Log;
         ThemeBridge bridge = MainWindowFactory.CreateBridge(this, log);
         _bridge = bridge;
+        var settings = new SettingsStore(AppPaths.SettingsFile, log);
+        AppSettings saved = settings.Load();
+        bridge.Apply(saved.ThemeId, saved.Appearance);
+        _settingsWriter = new SettingsWriter(settings, log);
+        bridge.RequestChanged += OnThemeRequestChanged;
         var widths = new WidthStore(AppPaths.WidthsFile, log);
         _mainWindow =
-            ViewerFiles.Count == 0
-                ? MainWindowFactory.Create(this, bridge, widths, log)
-                : MainWindowFactory.CreateViewer(this, bridge, widths, ViewerFiles, log);
+            ViewerFiles.Count == 0 ? MainWindowFactory.Create(bridge, widths, log) : MainWindowFactory.CreateViewer(bridge, widths, ViewerFiles, log);
         if (ViewerFiles.Count == 0 && Activation is { } gate)
         {
             ConnectGate(gate, _mainWindow.Window);
@@ -193,7 +210,10 @@ public partial class App : Application
         Log.LogInfo("Activate: main window brought forward.");
     }
 
-    /// <summary>Disposes what the start window owns, and the bridge the app owns, once the app exits.</summary>
+    /// <summary>
+    /// Disposes what the start window owns, then the settings writer, waiting up to 2 s for the theme picks still being saved,
+    /// then the bridge the app owns, once the app exits.
+    /// </summary>
     internal void ReleaseMainWindow()
     {
         _connectedGate?.Activate -= OnActivateRequested;
@@ -205,10 +225,22 @@ public partial class App : Application
         _mainWindow?.Dispose();
         _mainWindow = null;
         _mainWindowClosed = null;
+        _bridge?.RequestChanged -= OnThemeRequestChanged;
+        _settingsWriter?.Dispose();
+        _settingsWriter = null;
         _bridge?.Dispose();
         _bridge = null;
         _harnessBridge?.Dispose();
         _harnessBridge = null;
+    }
+
+    /// <summary>Saves the theme the bridge was just asked for; the writer does the file IO off this thread.</summary>
+    private void OnThemeRequestChanged(object? sender, EventArgs e)
+    {
+        if (_bridge is { } bridge)
+        {
+            _settingsWriter?.Request(bridge.RequestedThemeId, bridge.RequestedAppearance);
+        }
     }
 
     /// <summary>

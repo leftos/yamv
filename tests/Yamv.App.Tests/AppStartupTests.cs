@@ -13,6 +13,7 @@ using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
 using Yamv.Core.Launch;
 using Yamv.Core.Session;
+using Yamv.Core.Settings;
 using Yamv.Core.Theming;
 using Yamv.Core.Widths;
 
@@ -87,6 +88,7 @@ public sealed class AppStartupTests
                 ThemeSettingsViewModel viewModel = Assert.IsType<ThemeSettingsViewModel>(settings.DataContext);
                 Assert.Equal("studio", viewModel.Selected?.Id);
                 Assert.Equal("system", viewModel.SelectedAppearance.Value);
+                Assert.Null(app.SettingsWriter);
             }
             finally
             {
@@ -194,6 +196,7 @@ public sealed class AppStartupTests
                 app.ResetLog();
 
                 Assert.Null(app.Bridge);
+                Assert.Null(app.SettingsWriter);
                 Assert.True(IsBridgeDisposed(bridge!));
             }
             finally
@@ -208,6 +211,49 @@ public sealed class AppStartupTests
                     Directory.Delete(dataFolder, recursive: true);
                 }
             }
+        });
+
+    [Fact]
+    public Task Start_applies_the_settings_file_to_the_bridge_and_writes_nothing_back() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            start.WriteSettings("""{ "themeId": "ink", "appearance": "dark" }""");
+            byte[] before = File.ReadAllBytes(start.SettingsFile);
+
+            start.App.CreateStartWindow();
+
+            Assert.Equal("ink", start.App.Bridge!.RequestedThemeId);
+            Assert.Equal("dark", start.App.Bridge.RequestedAppearance);
+            Assert.True(start.App.SettingsWriter!.WhenIdle().IsCompleted);
+            Assert.Equal(before, File.ReadAllBytes(start.SettingsFile));
+        });
+
+    [Fact]
+    public Task Apply_on_the_apps_bridge_is_saved_to_the_settings_file() =>
+        Headless.RunAsync(async () =>
+        {
+            using var start = new SettingsStart();
+            start.App.CreateStartWindow();
+
+            start.App.Bridge!.Apply("paper", "light");
+            await start.App.SettingsWriter!.WhenIdle().WaitAsync(TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken);
+
+            Assert.Equal(new AppSettings("paper", "light"), new SettingsStore(start.SettingsFile, new RecordingAppLog()).Load());
+        });
+
+    [Fact]
+    public Task Start_without_a_settings_file_uses_the_defaults_and_creates_none() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+
+            start.App.CreateStartWindow();
+
+            Assert.Equal("studio", start.App.Bridge!.RequestedThemeId);
+            Assert.Equal("system", start.App.Bridge.RequestedAppearance);
+            Assert.True(start.App.SettingsWriter!.WhenIdle().IsCompleted);
+            Assert.False(File.Exists(start.SettingsFile));
         });
 
     [Fact]
@@ -405,6 +451,61 @@ public sealed class AppStartupTests
 
     private static bool IsBridgeDisposed(ThemeBridge bridge) =>
         (bool)typeof(ThemeBridge).GetField("_disposed", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge)!;
+
+    /// <summary>
+    /// A main start over a fresh data folder whose <c>settings.json</c> a test may seed before it calls
+    /// <see cref="App.CreateStartWindow"/>; disposing it releases the start and restores the statics and environment.
+    /// </summary>
+    private sealed class SettingsStart : IDisposable
+    {
+        private readonly string _dataFolder = Path.Combine(Path.GetTempPath(), "yamv-app-start-" + Guid.NewGuid().ToString("N"));
+        private readonly string? _dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
+        private readonly string? _harnessBefore = Environment.GetEnvironmentVariable(App.HarnessVariable);
+
+        public SettingsStart()
+        {
+            App = Assert.IsType<App>(Application.Current);
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, _dataFolder);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, null);
+            App.ViewerFiles = [];
+            App.ProcessLog = Log;
+            App.ResetLog();
+        }
+
+        public App App { get; }
+
+        public RecordingAppLog Log { get; } = new();
+
+        public string SettingsFile => Path.Combine(_dataFolder, "settings.json");
+
+        /// <summary>Writes the data folder's <c>settings.json</c>.</summary>
+        /// <param name="json">The settings JSON.</param>
+        public void WriteSettings(string json)
+        {
+            Directory.CreateDirectory(_dataFolder);
+            File.WriteAllText(SettingsFile, json);
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                App.ReleaseMainWindow();
+            }
+            finally
+            {
+                App.ResetLog();
+                App.ViewerFiles = [];
+                App.ProcessLog = null;
+                Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, _dataBefore);
+                Environment.SetEnvironmentVariable(App.HarnessVariable, _harnessBefore);
+                if (Directory.Exists(_dataFolder))
+                {
+                    Directory.Delete(_dataFolder, recursive: true);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// A start with an activation gate and a recording process log handed to <see cref="App"/>, over a fresh data folder;

@@ -11,7 +11,7 @@ using Yamv.Core.Widths;
 
 namespace Yamv.App.Tests.Services;
 
-/// <summary>Builds viewer windows over a temp data folder, so each test has its own session file and themes.</summary>
+/// <summary>Builds viewer and main windows over a temp data folder, so each test has its own session file and themes.</summary>
 [Collection(nameof(EnvironmentVariables))]
 public sealed class MainWindowFactoryTests
 {
@@ -61,18 +61,31 @@ public sealed class MainWindowFactoryTests
         });
 
     [Fact]
-    public Task Viewer_takes_its_theme_from_the_session_and_leaves_the_file_alone() =>
+    public Task Viewer_leaves_the_bridges_theme_alone_and_creates_no_session_file() =>
         Headless.RunAsync(async () =>
         {
             await using var viewer = new ViewerFixture();
-            viewer.WriteSession("""{ "themeId": "ink", "appearance": "dark" }""");
-            byte[] before = File.ReadAllBytes(viewer.SessionFile);
+            viewer.Bridge.Apply("ink", "dark");
 
             viewer.Build(viewer.PathOf("gone.md"));
 
             Assert.Equal("ink", viewer.Bridge.RequestedThemeId);
             Assert.Equal("dark", viewer.Bridge.RequestedAppearance);
-            Assert.Equal(before, File.ReadAllBytes(viewer.SessionFile));
+            Assert.False(File.Exists(viewer.SessionFile));
+        });
+
+    [Fact]
+    public Task Main_window_leaves_the_bridges_theme_alone_whatever_the_session_holds() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture();
+            viewer.WriteSession("""{ "themeId": "paper", "appearance": "light" }""");
+            viewer.Bridge.Apply("ink", "dark");
+
+            viewer.BuildMain();
+
+            Assert.Equal("ink", viewer.Bridge.RequestedThemeId);
+            Assert.Equal("dark", viewer.Bridge.RequestedAppearance);
         });
 
     [Fact]
@@ -86,7 +99,6 @@ public sealed class MainWindowFactoryTests
 
             Assert.Equal("{ not json", File.ReadAllText(viewer.SessionFile));
             Assert.False(File.Exists(viewer.SessionFile + ".bad"));
-            Assert.Equal(ThemeCatalog.DefaultThemeId, viewer.Bridge.RequestedThemeId);
         });
 
     [Fact]
@@ -106,9 +118,9 @@ public sealed class MainWindowFactoryTests
         });
 
     /// <summary>
-    /// Builds viewer windows over a temp data folder whose session file a test may seed, drawing their pages on a
-    /// <see cref="FakeDocumentSurface"/> that completes its renders, so the fixture can wait for every render before it
-    /// deletes the documents a render reads.
+    /// Builds a viewer window or a main window over a temp data folder whose session file a test may seed. A viewer draws its
+    /// pages on a <see cref="FakeDocumentSurface"/> that completes its renders, so the fixture can wait for every render
+    /// before it deletes the documents a render reads.
     /// </summary>
     private sealed class ViewerFixture : IAsyncDisposable
     {
@@ -148,8 +160,10 @@ public sealed class MainWindowFactoryTests
 
         /// <summary>Creates a viewer window over <paramref name="files"/>, drawn on <see cref="Surface"/>.</summary>
         /// <param name="files">The full paths the viewer shows.</param>
-        public void Build(params string[] files) =>
-            Composition = MainWindowFactory.CreateViewer(Application.Current!, Bridge, Widths, files, Log, new Border(), Surface);
+        public void Build(params string[] files) => Composition = MainWindowFactory.CreateViewer(Bridge, Widths, files, Log, new Border(), Surface);
+
+        /// <summary>Creates a main window over the temp data folder's session.</summary>
+        public void BuildMain() => Composition = MainWindowFactory.Create(Bridge, Widths, Log);
 
         /// <summary>The full path of a file in the documents folder; it is not created.</summary>
         /// <param name="name">The file's name.</param>

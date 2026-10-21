@@ -16,8 +16,9 @@
     Every run gets a fresh data folder, .tmp\yamv-data\<run stamp> under the repo, through YAMV_DATA_DIR (any inherited
     value is replaced), so the owner's session, themes and log in %APPDATA%\YAMV are never read or written. By default it
     starts the dev harness (YAMV_DEV_HARNESS=1) and waits for its "Harness: showing" log line. With -App it starts the
-    real main window, copies -Session into the data folder as session.json first, and waits for the window's
-    "Window: shown" log line. With -ThemeSettings it starts the theme settings window instead (YAMV_DEV_HARNESS=1 and
+    real main window, copies -Session into the data folder as session.json and -Settings as settings.json first, and
+    waits for the window's "Window: shown" log line. With -ThemeSettings it starts the theme settings window instead
+    (YAMV_DEV_HARNESS=1 and
     YAMV_DEV_THEME_SETTINGS=1), with Studio applied to follow the system, after copying the *.yamv-theme.json files of
     -Themes into the data folder's themes folder, and waits for its "Window: shown" log line. With -ImportFile it also
     opens the Import notice for that file, the harness's picker answering with it once, so the capture shows the notice.
@@ -35,7 +36,12 @@
     Run the real main window instead of the harness, on a fresh data folder under .tmp\yamv-data.
 
 .PARAMETER Session
-    With -App: a session.json to start from, copied into the fresh data folder. Default: none (an empty window).
+    With -App: a session.json to start from (its documents and layout), copied into the fresh data folder. Default: none
+    (an empty window). A theme to start with goes in -Settings.
+
+.PARAMETER Settings
+    With -App: a settings.json to start from, copied into the fresh data folder; seed a theme here, for example
+    { "themeId": "ink", "appearance": "dark" }. Default: none (Studio, following the system).
 
 .PARAMETER DeleteAfterShown
     With -App: a file to delete once the window has shown, normally the session's selected document, so the capture shows
@@ -67,7 +73,7 @@
 
 .EXAMPLE
     pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -App `
-        -Session .tmp/session.json -Out .tmp/main.png
+        -Session .tmp/session.json -Settings .tmp/settings.json -Out .tmp/main.png
 
 .EXAMPLE
     pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ThemeSettings `
@@ -82,6 +88,7 @@ param(
     [string] $ArgLine = '',
     [switch] $App,
     [string] $Session = '',
+    [string] $Settings = '',
     [string] $DeleteAfterShown = '',
     [switch] $ThemeSettings,
     [string] $Themes = '',
@@ -98,8 +105,8 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $exe = Join-Path $root 'src\Yamv.App\bin\Release\net10.0\yamv.exe'
 $capture = Join-Path $PSScriptRoot 'capture-window.ps1'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-if (($Session -or $DeleteAfterShown) -and -not $App) {
-    throw '-Session and -DeleteAfterShown need -App: the harness does not read a session.'
+if (($Session -or $Settings -or $DeleteAfterShown) -and -not $App) {
+    throw '-Session, -Settings and -DeleteAfterShown need -App: the harnesses read neither a session nor settings.json.'
 }
 if ($App -and $ThemeSettings) {
     throw '-App and -ThemeSettings each start a different window; pass one.'
@@ -127,6 +134,9 @@ Write-Output "Data folder: $dataDir"
 if ($App) {
     if ($Session) {
         Copy-Item -LiteralPath $Session -Destination (Join-Path $dataDir 'session.json')
+    }
+    if ($Settings) {
+        Copy-Item -LiteralPath $Settings -Destination (Join-Path $dataDir 'settings.json')
     }
     $env:YAMV_DEV_HARNESS = $null
     $env:YAMV_DEV_THEME_SETTINGS = $null

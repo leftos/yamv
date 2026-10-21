@@ -27,23 +27,20 @@ public static class MainWindowFactory
     }
 
     /// <summary>
-    /// Loads the session, applies its theme to <paramref name="application"/>, opens its documents in a persisting window
-    /// state, restores the sidebar width and window bounds, and returns the window with what it owns, including the
-    /// <see cref="MainWindowSession"/> that saves the session back.
+    /// Loads the session, opens its documents in a persisting window state, restores the sidebar width and window bounds, and
+    /// returns the window with what it owns, including the <see cref="MainWindowSession"/> that saves the session back. The
+    /// theme is the app's: the window leaves the bridge's theme as it was.
     /// </summary>
-    /// <param name="application">The application whose resources the theme is written into.</param>
     /// <param name="bridge">The app's theme bridge, which the window registers its document view with.</param>
     /// <param name="widths">The app's one width store, which gives each document its content width.</param>
     /// <param name="log">The process's log.</param>
-    public static MainWindowComposition Create(Application application, ThemeBridge bridge, WidthStore widths, IAppLog log)
+    public static MainWindowComposition Create(ThemeBridge bridge, WidthStore widths, IAppLog log)
     {
-        ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(bridge);
         ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(log);
         var store = new SessionStore(AppPaths.SessionFile, log);
         SessionState session = store.Load();
-        bridge.Apply(session.ThemeId, session.Appearance);
         var view = new DocumentView(log);
         bridge.Register(view);
         DocumentWindowViewModel? viewModel = null;
@@ -67,35 +64,26 @@ public static class MainWindowFactory
     }
 
     /// <summary>
-    /// Builds a viewer window over <paramref name="files"/>: a window that saves no session, reads the session only for its
-    /// theme, restores no layout, and opens the files as they are, a missing path included.
+    /// Builds a viewer window over <paramref name="files"/>: a window that neither reads nor saves a session, leaves the
+    /// bridge's theme as it was, restores no layout, and opens the files as they are, a missing path included.
     /// </summary>
-    /// <param name="application">The application whose resources the theme is written into.</param>
     /// <param name="bridge">The app's theme bridge, which the window registers its document view with.</param>
     /// <param name="widths">The app's one width store, which gives each document its content width.</param>
     /// <param name="files">The full paths the window shows.</param>
     /// <param name="log">The process's log.</param>
-    public static MainWindowComposition CreateViewer(
-        Application application,
-        ThemeBridge bridge,
-        WidthStore widths,
-        IReadOnlyList<string> files,
-        IAppLog log
-    )
+    public static MainWindowComposition CreateViewer(ThemeBridge bridge, WidthStore widths, IReadOnlyList<string> files, IAppLog log)
     {
-        ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(bridge);
         ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(log);
         var view = new DocumentView(log);
-        return CreateViewer(application, bridge, widths, files, log, view, view);
+        return CreateViewer(bridge, widths, files, log, view, view);
     }
 
     /// <summary>
     /// Builds a viewer window that draws its documents on <paramref name="surface"/>: a test supplies a fake surface, whose
     /// renders complete headless, in place of a web view.
     /// </summary>
-    /// <param name="application">The application whose resources the theme is written into.</param>
     /// <param name="bridge">The app's theme bridge, which the window registers its document surface with.</param>
     /// <param name="widths">The app's one width store, which gives each document its content width.</param>
     /// <param name="files">The full paths the window shows.</param>
@@ -103,7 +91,6 @@ public static class MainWindowFactory
     /// <param name="documentView">The control that draws the selected document.</param>
     /// <param name="surface">The view model's surface.</param>
     internal static MainWindowComposition CreateViewer(
-        Application application,
         ThemeBridge bridge,
         WidthStore widths,
         IReadOnlyList<string> files,
@@ -112,16 +99,12 @@ public static class MainWindowFactory
         IDocumentSurface surface
     )
     {
-        ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(bridge);
         ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(documentView);
         ArgumentNullException.ThrowIfNull(surface);
-        var store = new SessionStore(AppPaths.SessionFile, log);
-        SessionState session = store.LoadReadOnly();
-        bridge.Apply(session.ThemeId, session.Appearance);
         bridge.Register(surface);
         DocumentWindowViewModel? viewModel = null;
         try

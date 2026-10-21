@@ -51,6 +51,13 @@ public sealed class ThemeBridge : IDisposable
         _platformSettings?.ColorValuesChanged += OnPlatformColorsChanged;
     }
 
+    /// <summary>
+    /// Raised on the thread that called <see cref="Apply"/>, after an <see cref="Apply"/> that changed
+    /// <see cref="RequestedThemeId"/> or <see cref="RequestedAppearance"/>; both already hold the new values. An
+    /// <see cref="Apply"/> with the same requested values raises nothing.
+    /// </summary>
+    public event EventHandler? RequestChanged;
+
     /// <summary>The theme in use, or null before the first <see cref="Apply"/>.</summary>
     public ResolvedTheme? Current { get; private set; }
 
@@ -60,7 +67,9 @@ public sealed class ThemeBridge : IDisposable
     /// </summary>
     public string RequestedThemeId { get; private set; } = FallbackThemeId;
 
-    /// <summary>The appearance the last <see cref="Apply"/> asked for: <c>light</c>, <c>dark</c> or <c>system</c>; <c>system</c> before any.</summary>
+    /// <summary>
+    /// The appearance the last <see cref="Apply"/> asked for: <c>light</c>, <c>dark</c> or <c>system</c>; <c>system</c> before any.
+    /// </summary>
     public string RequestedAppearance { get; private set; } = "system";
 
     /// <summary>The resource key of a chrome colour token's brush: <c>Yamv</c> and the token name with its first letter upper-cased.</summary>
@@ -76,6 +85,7 @@ public sealed class ThemeBridge : IDisposable
     /// </summary>
     /// <param name="themeId">The id of the theme to use.</param>
     /// <param name="appearance"><c>light</c>, <c>dark</c> or <c>system</c>; anything else is <c>system</c>.</param>
+    /// <remarks>Raises <see cref="RequestChanged"/> when the requested theme id or appearance changed.</remarks>
     public void Apply(string themeId, string appearance)
     {
         ArgumentNullException.ThrowIfNull(themeId);
@@ -85,8 +95,16 @@ public sealed class ThemeBridge : IDisposable
         ApplyResolved(ThemeResolver.Resolve(theme, followsSystem ? PlatformAppearance() : requested));
         _theme = theme;
         _followsSystem = followsSystem;
+        string requestedAppearance = followsSystem ? "system" : appearance;
+        bool changed =
+            !string.Equals(RequestedThemeId, themeId, StringComparison.Ordinal)
+            || !string.Equals(RequestedAppearance, requestedAppearance, StringComparison.Ordinal);
         RequestedThemeId = themeId;
-        RequestedAppearance = followsSystem ? "system" : appearance;
+        RequestedAppearance = requestedAppearance;
+        if (changed)
+        {
+            RequestChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     /// <summary>Starts sending the theme css to <paramref name="surface"/>, beginning with the current one.</summary>

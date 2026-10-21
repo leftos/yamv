@@ -3,7 +3,7 @@
 A quiet markdown viewer for Windows and macOS.
 
 - `yamv` opens the main window with the documents you had open last time, grouped on the right by git repo or folder.
-- `yamv a.md b.md` opens a separate viewer window with just those files. It remembers nothing: it saves no session, opens at the default size and place, shows the tree only with 2+ documents, closes when its last document closes, and takes its theme from the saved session without changing it.
+- `yamv a.md b.md` opens a separate viewer window with just those files. It remembers nothing: it saves no session, opens at the default size and place, shows the tree only with 2+ documents, closes when its last document closes, and reads no session; its theme and Appearance come from the app-wide settings (`settings.json`).
 - A file that does not exist opens as a missing document (**Locate…**, **Remove from list**) instead of failing; `yamv a.md gone.md` opens one viewer with `a.md` selected and `gone.md` as a missing row.
 - Ctrl+O (Cmd+O on macOS), or the empty window's **Open files…** button, picks one or more markdown or text files and opens them; a file that is already open is selected instead of added twice.
 - Ctrl+[ and Ctrl+] (Cmd+[ and Cmd+] on macOS) make the text column 40 px narrower or wider, saved for the folder the document's width comes from, or for all documents when no folder has one. The keys are the ones in the US `[` and `]` positions, whatever the layout prints on them.
