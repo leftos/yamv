@@ -5,6 +5,16 @@ A quiet markdown viewer for Windows and macOS.
 - `yamv` opens the main window with the documents you had open last time, grouped on the right by git repo or folder.
 - `yamv a.md b.md` opens a separate viewer window with just those files. It remembers nothing.
 
+## Command line
+
+- `yamv --help`, `-h` or `/?` prints the usage to standard output and exits 0.
+- An unknown option, an option combined with other arguments, or a file that does not exist prints its message to standard error and exits 2.
+- `yamv --register` (Windows) adds YAMV to Explorer's Open with for `.md` and `.markdown`, for the `yamv.exe` you run it from, and never takes over the default handler. It prints `Registered YAMV for .md and .markdown in Open with (<path>).`, or `YAMV is already registered for .md and .markdown (<path>).` when nothing changed, and exits 0. Run from a program that is not `yamv.exe`, it prints `Not registering: <path> is not yamv.exe. Run --register from the installed yamv.exe.` and exits 1.
+- `yamv --unregister` removes the entries that point at the `yamv.exe` you run it from and leaves any that point at another program. It prints `Removed YAMV from Open with for .md and .markdown.`, or `Nothing to remove.`, and exits 0, with a note after the line when it left an entry in place. A registry failure prints `Could not register: <message>` or `Could not unregister: <message>` to standard error and exits 1.
+- On macOS, `--register` and `--unregister` print a note to standard error and exit 2: Finder's Open With lists YAMV from its app bundle.
+
+`yamv.exe` is a windowed program, so a terminal does not wait for it: its output arrives after the prompt returns, and its exit code shows only through `start /wait yamv --register` in cmd or `Start-Process -Wait -PassThru yamv --register` in PowerShell.
+
 Built with C# on .NET 10 and Avalonia 12. Docs start at [docs/README.md](docs/README.md).
 
 ## Build
