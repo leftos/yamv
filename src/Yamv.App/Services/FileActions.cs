@@ -4,24 +4,10 @@ using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using Yamv.Core.Diagnostics;
+using Yamv.Core.Documents;
 using Yamv.Core.Platform;
 
 namespace Yamv.App.Services;
-
-/// <summary>The file types the document pickers offer: markdown and text first, then all files.</summary>
-public static class DocumentFileTypes
-{
-    /// <summary>The picker filters, in the order the picker lists them.</summary>
-    public static IReadOnlyList<FilePickerFileType> Filters { get; } =
-    [
-        new("Markdown and text")
-        {
-            Patterns = ["*.md", "*.markdown", "*.mdx", "*.txt"],
-            AppleUniformTypeIdentifiers = ["net.daringfireball.markdown", "public.plain-text"],
-        },
-        new("All files") { Patterns = ["*"], AppleUniformTypeIdentifiers = ["public.item"] },
-    ];
-}
 
 /// <summary>The file types the theme pickers offer: YAMV themes first, then any JSON file.</summary>
 public static class ThemeFileTypes
@@ -42,6 +28,17 @@ public static class ThemeFileTypes
 /// <param name="startProcess">Starts a process; <see cref="StartProcess"/> outside tests.</param>
 internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> startProcess) : IFileActions
 {
+    /// <summary>The document pickers' filters, in the order the picker lists them, built from <see cref="DocumentFileTypes"/>.</summary>
+    private static readonly IReadOnlyList<FilePickerFileType> DocumentFilters =
+    [
+        new("Markdown and text")
+        {
+            Patterns = [.. DocumentFileTypes.Patterns],
+            AppleUniformTypeIdentifiers = ["net.daringfireball.markdown", "public.plain-text"],
+        },
+        new("All files") { Patterns = ["*"], AppleUniformTypeIdentifiers = ["public.item"] },
+    ];
+
     /// <summary>Starts the process and lets it run on its own, without waiting for it or reading its exit code.</summary>
     public static void StartProcess(ProcessStartInfo start) => Process.Start(start)?.Dispose();
 
@@ -52,7 +49,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> 
         {
             Title = "Open files",
             AllowMultiple = true,
-            FileTypeFilter = DocumentFileTypes.Filters,
+            FileTypeFilter = DocumentFilters,
         };
         return LocalPaths(await owner.StorageProvider.OpenFilePickerAsync(options));
     }
@@ -68,7 +65,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> 
         {
             Title = $"Locate {Path.GetFileName(oldPath)}",
             AllowMultiple = false,
-            FileTypeFilter = DocumentFileTypes.Filters,
+            FileTypeFilter = DocumentFilters,
             SuggestedStartLocation = start,
         };
         return LocalPaths(await storage.OpenFilePickerAsync(options)).FirstOrDefault();
