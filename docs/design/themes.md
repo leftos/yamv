@@ -20,18 +20,18 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
   "author": "YAMV",
   "description": "Warm off-white, serif body, rust accent.",
 
-  // Shared by both variants
+  // Shared by both halves
   "tokens": { "bodyFont": "Source Serif 4", "bodySize": 17.5, "lineHeight": 1.65 },
   "css": "",
 
-  // Either or both. A variant's tokens override the shared ones; its css is appended after the shared css
+  // Either or both. A half's tokens override the shared ones; its css is appended after the shared css
   "light": { "tokens": { "pageBackground": "#fbf8f2", "accent": "#a4542a" }, "css": "" },
   "dark":  { "tokens": { "pageBackground": "#1d1a17", "accent": "#df9a6b" } }
 }
 ```
 
 - A file must have at least one of `light` or `dark`.
-- **Resolution** for a variant: the default token values (Studio light for a light variant, Studio dark for a dark one), then the file's shared `tokens`, then the variant's `tokens`. The result always holds every token.
+- **Resolution** for a half: the default token values (Studio light for a light half, Studio dark for a dark one), then the file's shared `tokens`, then the half's `tokens`. The result always holds every token.
 - **Errors**:
   - A file that won't parse, a colour that isn't `#rgb`, `#rrggbb` or `#rrggbbaa`, a number out of range, a font name that is empty, only whitespace or holds a control character, or a token string that isn't valid text (an unpaired surrogate such as `"\ud800"`) makes the theme invalid. It is listed with the error. Selecting it in the theme settings window shows its errors, with Delete and Rename on unless its file name gives no valid theme id; it is never applied.
 
@@ -52,7 +52,7 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
   - The app never falls back silently. If the selected theme turns invalid, the window keeps the last valid version and shows the error in the theme settings window.
 - `css` is appended to the document page after YAMV's own stylesheet. It styles the document only, not the app chrome. Scripts can't run in the page (the page's Content-Security-Policy blocks them), so `css` can't run code.
 
-  Theme css can make the page load images from the web (`url(https://…)` in CSS), which can reveal that you opened a document and which links it holds. Import a theme from someone you trust, as you would a browser extension's styles. On Import the app shows a modal with a card for the file (name, author, which halves it has, whether it has css, and its errors and warnings) and this warning.
+  Theme css can make the page load images from the web (`url(https://…)` in CSS), which can reveal that you opened a document and which links it holds. Import a theme from someone you trust, as you would a browser extension's styles. On every Import the app shows a modal, "Import a theme", with a card for the file (name, author, which halves it has, whether it has css, the file's full path, and its errors and warnings) and this warning. A file that cannot be imported shows its file name and no chip, and only Cancel works.
 
 ## Tokens
 
@@ -77,7 +77,7 @@ Each token is also a CSS custom property on the document page, `--yamv-<kebab-ca
 | Chrome | `warning` | colour | `MISSING` tag text |
 | Chrome | `warningBackground` | colour | `MISSING` tag fill |
 | Chrome | `warningLine` | colour | `MISSING` tag border |
-| Code | `codeBackground` | colour | inline and block code |
+| Code | `codeBackground` | colour | inline and block code, the Import notice's safe box |
 | Code | `codeLine` | colour | code block border |
 | Code | `findMatch` | colour | find highlight |
 | Code | `findCurrent` | colour | current find highlight |

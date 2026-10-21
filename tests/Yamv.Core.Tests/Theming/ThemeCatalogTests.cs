@@ -202,6 +202,7 @@ public sealed class ThemeCatalogTests : IDisposable
         );
         Assert.Empty(inspection.Errors);
         Assert.Equal(["Unknown field 'extra' is ignored."], inspection.Warnings);
+        Assert.Equal(source, inspection.FilePath);
         Assert.False(Directory.Exists(UserFolder));
     }
 
@@ -234,6 +235,7 @@ public sealed class ThemeCatalogTests : IDisposable
 
         Assert.Null(inspection.Name);
         Assert.Equal(["The theme has no 'name'.", "Token 'accent' in light: '#12' is not a colour (#rgb, #rrggbb or #rrggbbaa)."], inspection.Errors);
+        Assert.Equal(source, inspection.FilePath);
     }
 
     [Fact]
@@ -247,9 +249,11 @@ public sealed class ThemeCatalogTests : IDisposable
     [Fact]
     public void Inspect_MissingFile_ListsTheReadError()
     {
-        ThemeInspection inspection = CreateCatalog().Inspect(Path.Combine(_root, "missing.yamv-theme.json"));
+        string missing = Path.Combine(_root, "missing.yamv-theme.json");
+        ThemeInspection inspection = CreateCatalog().Inspect(missing);
 
         Assert.Equal("missing.yamv-theme.json", inspection.FileName);
+        Assert.Equal(missing, inspection.FilePath);
         Assert.StartsWith("The file cannot be read: ", Assert.Single(inspection.Errors), StringComparison.Ordinal);
     }
 

@@ -137,6 +137,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         {
             return new ThemeInspection(
                 fileName,
+                path,
                 null,
                 null,
                 false,
@@ -157,7 +158,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         errors.AddRange(result.Errors);
         if (result.Theme is not { } theme)
         {
-            return new ThemeInspection(fileName, null, null, false, false, false, errors, result.Warnings, null, null, null);
+            return new ThemeInspection(fileName, path, null, null, false, false, false, errors, result.Warnings, null, null, null);
         }
 
         bool hasCss = new[] { theme.SharedCss, theme.Light?.Css, theme.Dark?.Css }.Any(css => !string.IsNullOrWhiteSpace(css));
@@ -169,6 +170,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
 
         return new ThemeInspection(
             fileName,
+            path,
             theme.Name,
             theme.Author,
             theme.Light is not null,

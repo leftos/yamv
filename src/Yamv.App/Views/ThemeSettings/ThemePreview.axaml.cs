@@ -27,7 +27,6 @@ public sealed partial class ThemePreview : UserControl
     private static readonly string[] PreviewColorTokens =
     [
         "quote",
-        "codeBackground",
         "codeLine",
         "syntaxKeyword",
         "syntaxString",

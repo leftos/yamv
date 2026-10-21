@@ -10,6 +10,7 @@ public sealed class ChromePaletteTests
         "chromeBackground",
         "sidebarBackground",
         "pageBackground",
+        "codeBackground",
         "text",
         "textSecondary",
         "textMuted",

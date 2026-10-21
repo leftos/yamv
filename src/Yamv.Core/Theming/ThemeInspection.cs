@@ -2,6 +2,7 @@ namespace Yamv.Core.Theming;
 
 /// <summary>What a theme file holds, read for the Import notice without copying it anywhere.</summary>
 /// <param name="FileName">The file's name, without its folder.</param>
+/// <param name="FilePath">The file's path, as it was given to <see cref="ThemeCatalog.Inspect"/>.</param>
 /// <param name="Name">The theme's name, or null when the file is not a valid theme.</param>
 /// <param name="Author">The theme's author, or null when it names none or the file is not a valid theme.</param>
 /// <param name="HasLight">Whether the theme has a light half.</param>
@@ -17,6 +18,7 @@ namespace Yamv.Core.Theming;
 /// <param name="DarkChip">The dark half's chip colours, or null when the theme has no dark half or the file is not a valid theme.</param>
 public sealed record ThemeInspection(
     string FileName,
+    string FilePath,
     string? Name,
     string? Author,
     bool HasLight,

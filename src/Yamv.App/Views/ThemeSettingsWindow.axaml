@@ -573,5 +573,6 @@
     </DockPanel>
 
     <ts:ConfirmDialog x:Name="Confirm" />
+    <ts:ImportNoticeDialog x:Name="ImportNotice" />
   </Panel>
 </Window>

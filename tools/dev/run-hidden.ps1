@@ -19,8 +19,10 @@
     real main window, copies -Session into the data folder as session.json first, and waits for the window's
     "Window: shown" log line. With -ThemeSettings it starts the theme settings window instead (YAMV_DEV_HARNESS=1 and
     YAMV_DEV_THEME_SETTINGS=1), with Studio applied to follow the system, after copying the *.yamv-theme.json files of
-    -Themes into the data folder's themes folder, and waits for its "Window: shown" log line. Its Delete deletes the file
-    outright inside the data folder, and Edit as text writes a "Harness: edit as text <path>" log line.
+    -Themes into the data folder's themes folder, and waits for its "Window: shown" log line. With -ImportFile it also
+    opens the Import notice for that file, the harness's picker answering with it once, so the capture shows the notice.
+    Its Delete deletes the file outright inside the data folder, and Edit as text writes a "Harness: edit as text <path>"
+    log line.
     Both lines are read from the data folder's logs\yamv.log. A fresh WebView2 profile starts
     slowly, hence the wait. With -DeleteAfterShown it then deletes that file and waits for the window's missing-file
     re-check. Then it captures the window with capture-window.ps1, stops yamv.exe, waits for its msedgewebview2 processes
@@ -46,6 +48,10 @@
     With -ThemeSettings: a folder whose *.yamv-theme.json files are copied into the fresh data folder's themes folder
     first. Default: none (only the built-in themes).
 
+.PARAMETER ImportFile
+    With -ThemeSettings: a theme file whose Import notice the window opens once it has shown, instead of waiting for a pick.
+    Passed to the harness as YAMV_DEV_IMPORT_FILE, which it answers its Import picker with once. Default: none.
+
 .PARAMETER Out
     The PNG file to write.
 
@@ -66,6 +72,10 @@
 .EXAMPLE
     pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ThemeSettings `
         -Themes .tmp/themes -Out .tmp/theme-settings.png
+
+.EXAMPLE
+    pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ThemeSettings `
+        -ImportFile .tmp/warm-solar.yamv-theme.json -Out .tmp/notice.png
 #>
 [CmdletBinding()]
 param(
@@ -75,6 +85,7 @@ param(
     [string] $DeleteAfterShown = '',
     [switch] $ThemeSettings,
     [string] $Themes = '',
+    [string] $ImportFile = '',
     [Parameter(Mandatory)] [string] $Out,
     [int] $Wait = 30,
     [int] $WebViewTimeoutSeconds = 15
@@ -96,6 +107,18 @@ if ($App -and $ThemeSettings) {
 if ($Themes -and -not $ThemeSettings) {
     throw '-Themes needs -ThemeSettings: only the theme settings window reads the themes folder here.'
 }
+if ($ImportFile -and -not $ThemeSettings) {
+    throw '-ImportFile needs -ThemeSettings: only the theme settings window has an Import notice.'
+}
+$importPath = if ($ImportFile) {
+    if (-not (Test-Path -LiteralPath $ImportFile -PathType Leaf)) {
+        throw "-ImportFile names no file: $ImportFile"
+    }
+    (Resolve-Path -LiteralPath $ImportFile).Path
+}
+else {
+    $null
+}
 $dataDir = Join-Path $root ".tmp\yamv-data\$stamp"
 New-Item -ItemType Directory -Path $dataDir | Out-Null
 $env:YAMV_DATA_DIR = $dataDir
@@ -107,6 +130,7 @@ if ($App) {
     }
     $env:YAMV_DEV_HARNESS = $null
     $env:YAMV_DEV_THEME_SETTINGS = $null
+    $env:YAMV_DEV_IMPORT_FILE = $null
     $readyLine = 'Window: shown'
 }
 elseif ($ThemeSettings) {
@@ -117,11 +141,13 @@ elseif ($ThemeSettings) {
     }
     $env:YAMV_DEV_HARNESS = '1'
     $env:YAMV_DEV_THEME_SETTINGS = '1'
+    $env:YAMV_DEV_IMPORT_FILE = $importPath
     $readyLine = 'Window: shown'
 }
 else {
     $env:YAMV_DEV_HARNESS = '1'
     $env:YAMV_DEV_THEME_SETTINGS = $null
+    $env:YAMV_DEV_IMPORT_FILE = $null
     $readyLine = 'Harness: showing'
 }
 

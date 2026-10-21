@@ -16,8 +16,9 @@ namespace Yamv.App.Views;
 /// The theme settings window: the theme list with its Rename and Delete context menu and the Appearance choice, the selected
 /// theme's header with the <c>EditorHost</c> for the token editor or the pane of a theme that did not load, the
 /// <c>PreviewHost</c> on the right, and the footer. Its chrome takes the app's theme resources, so it keeps the saved theme
-/// until Save. It asks its confirms inside itself (<see cref="ConfirmUnsavedAsync"/>, <see cref="ConfirmDeleteAsync"/>), and
-/// holds a close while the theme has unsaved edits until the unsaved confirm is answered.
+/// until Save. It asks its confirms inside itself (<see cref="ConfirmUnsavedAsync"/>, <see cref="ConfirmDeleteAsync"/>), shows the
+/// Import notice inside itself (<see cref="ConfirmImportAsync"/>), and holds a close while the theme has unsaved edits until the
+/// unsaved confirm is answered, and while the Import notice is open.
 /// </summary>
 public partial class ThemeSettingsWindow : Window
 {
@@ -71,12 +72,26 @@ public partial class ThemeSettingsWindow : Window
         return result == ConfirmResult.Primary;
     }
 
-    /// <summary>Holds a close while the theme has unsaved edits and asks the unsaved confirm; closes after Save or Discard.</summary>
+    /// <summary>
+    /// Holds a close while the Import notice is open, and while the theme has unsaved edits asks the unsaved confirm; closes after
+    /// Save or Discard.
+    /// </summary>
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
         base.OnClosing(e);
-        if (_closeAllowed || _viewModel is not { IsDirty: true, WorkingTheme: { } working })
+        if (_closeAllowed)
+        {
+            return;
+        }
+
+        if (ImportNotice.IsOpen)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        if (_viewModel is not { IsDirty: true, WorkingTheme: { } working })
         {
             return;
         }
@@ -88,10 +103,11 @@ public partial class ThemeSettingsWindow : Window
         }
     }
 
-    /// <summary>Completes a confirm still open when the window closes as Cancel, so what awaits it carries on.</summary>
+    /// <summary>Completes a confirm or an Import notice still open when the window closes as Cancel, so what awaits it carries on.</summary>
     protected override void OnClosed(EventArgs e)
     {
         Confirm.Cancel();
+        ImportNotice.Cancel();
         base.OnClosed(e);
     }
 
@@ -108,13 +124,31 @@ public partial class ThemeSettingsWindow : Window
         }
     }
 
+    /// <summary>Shows the Import notice for <paramref name="inspection"/>; true when the user chose Import.</summary>
+    /// <param name="inspection">The inspected file the notice describes.</param>
+    /// <exception cref="InvalidOperationException">The notice is already open.</exception>
+    public async Task<bool> ConfirmImportAsync(ThemeInspection inspection)
+    {
+        ArgumentNullException.ThrowIfNull(inspection);
+        if (ImportNotice.IsOpen)
+        {
+            throw new InvalidOperationException("An import notice is already open.");
+        }
+
+        return await ShowModalAsync(() => ImportNotice.ShowAsync(inspection));
+    }
+
     /// <summary>Shows the confirm with everything behind its scrim disabled, so Tab cannot reach the list or the footer.</summary>
-    private async Task<ConfirmResult> ShowConfirmAsync(string title, string body, string primary, string? secondary)
+    private Task<ConfirmResult> ShowConfirmAsync(string title, string body, string primary, string? secondary) =>
+        ShowModalAsync(() => Confirm.ShowAsync(title, body, primary, secondary));
+
+    /// <summary>Runs <paramref name="show"/> with everything behind its scrim disabled, so Tab cannot reach the list or the footer.</summary>
+    private async Task<T> ShowModalAsync<T>(Func<Task<T>> show)
     {
         WindowContent.IsEnabled = false;
         try
         {
-            return await Confirm.ShowAsync(title, body, primary, secondary);
+            return await show();
         }
         finally
         {
@@ -139,9 +173,10 @@ public partial class ThemeSettingsWindow : Window
 
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && Confirm.IsOpen)
+        if (e.Key == Key.Escape && (Confirm.IsOpen || ImportNotice.IsOpen))
         {
             Confirm.Cancel();
+            ImportNotice.Cancel();
             e.Handled = true;
         }
     }

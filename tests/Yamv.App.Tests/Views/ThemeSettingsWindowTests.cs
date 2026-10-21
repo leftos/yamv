@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
@@ -7,6 +8,7 @@ using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Yamv.App.Services;
 using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.App.Views;
@@ -783,6 +785,389 @@ public sealed class ThemeSettingsWindowTests
             Assert.True(fixture.Find<Control>("NoPreview").IsEffectivelyVisible);
         });
 
+    [Fact]
+    public Task Import_on_a_valid_file_opens_the_notice_with_its_card_and_what_a_theme_can_change() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            string source = fixture.AddImport(
+                "warm-solar.yamv-theme.json",
+                """{ "name": "Warm Solar", "author": "Ana", "light": { "css": "p { color: red }" }, "dark": {} }"""
+            );
+
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Control notice = fixture.Find<Control>("ImportNotice");
+            Assert.True(notice.IsEffectivelyVisible);
+            Assert.Equal("Warm Solar by Ana · light and dark · has css", fixture.NoticeLineText);
+            List<string> texts = VisibleTexts(notice);
+            Assert.Contains("Import a theme", texts);
+            Assert.Contains(source, texts);
+            Assert.Contains("A theme file can change:", texts);
+            Assert.Contains("colours, fonts and sizes, in the document and in the app's title bar, tree and dialogs;", texts);
+            Assert.Contains("the document page, with its own css, added after YAMV's stylesheet. It styles the document only, not the app.", texts);
+            Assert.Contains("Theme css can't run code: the page's Content-Security-Policy blocks scripts.", texts);
+            Assert.Contains(
+                "Theme css can make the page load images from the web, which can reveal that you opened a document and which links it"
+                    + " holds. Import a theme from someone you trust, as you would a browser extension's styles.",
+                texts
+            );
+            Button import = fixture.Find<Button>("NoticeImport");
+            Assert.True(import.IsDefault);
+            Assert.True(import.IsFocused);
+            Assert.Equal("Import", import.Content);
+            Assert.Equal("Cancel", fixture.Find<Button>("NoticeCancel").Content);
+            Assert.True(fixture.Find<Control>("NoticeChipLight").IsEffectivelyVisible);
+            Assert.True(fixture.Find<Control>("NoticeChipDark").IsEffectivelyVisible);
+        });
+
+    [Fact]
+    public Task The_card_says_light_only_and_no_css_while_the_other_half_and_css_say_theirs() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("plain.yamv-theme.json", """{ "name": "Plain", "light": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Assert.Equal("Plain light only · no css", fixture.NoticeLineText);
+
+            fixture.Press(Key.Escape);
+
+            fixture.AddImport("moon.yamv-theme.json", """{ "name": "Moon", "dark": { "css": "p { }" } }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Assert.Equal("Moon dark only · has css", fixture.NoticeLineText);
+            Assert.True(fixture.Find<Control>("NoticeChipDark").IsEffectivelyVisible);
+            Assert.False(fixture.Find<Control>("NoticeChipLight").IsEffectivelyVisible);
+        });
+
+    [Fact]
+    public Task A_long_name_and_author_keep_has_css_in_the_wrapping_card_line() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            string name = "A very long warm solar theme name for a long winter";
+            string author = "An author whose name is also rather long";
+            fixture.AddImport("long.yamv-theme.json", $$"""{ "name": "{{name}}", "author": "{{author}}", "light": { "css": "p { }" } }""");
+
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            TextBlock line = fixture.Find<TextBlock>("NoticeLine");
+            Assert.Equal(TextWrapping.Wrap, line.TextWrapping);
+            Assert.Equal($"{name} by {author} · light only · has css", fixture.NoticeLineText);
+            Assert.True(line.TextLayout.TextLines.Count > 1, "The card's first line should wrap onto more than one line.");
+        });
+
+    [Fact]
+    public Task A_taken_id_says_what_the_theme_will_be_added_as_and_a_free_id_says_nothing() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("mine.yamv-theme.json", """{ "name": "Mine", "light": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Assert.Contains("Will be added as Mine (2).", VisibleTexts(fixture.Find<Control>("ImportNotice")));
+
+            fixture.Press(Key.Escape);
+
+            fixture.AddImport("solar.yamv-theme.json", """{ "name": "Solar", "light": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Assert.DoesNotContain(
+                VisibleTexts(fixture.Find<Control>("ImportNotice")),
+                text => text.StartsWith("Will be added as", StringComparison.Ordinal)
+            );
+        });
+
+    [Fact]
+    public Task A_warning_shows_in_the_notice() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("sun.yamv-theme.json", """{ "name": "Sun", "light": { "tokens": { "unicorn": "#123456" } } }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Assert.Contains("Unknown token 'unicorn' in light is ignored.", VisibleTexts(fixture.Find<Control>("ImportNotice")));
+        });
+
+    [Fact]
+    public Task The_safe_box_takes_the_apps_code_background_brush() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            ResolvedTheme studio = StudioLight();
+            ThemeBrushes.FillChrome(fixture.Window.Resources, studio);
+            fixture.AddImport("solar.yamv-theme.json", """{ "name": "Solar", "light": {} }""");
+
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            SolidColorBrush brush = Assert.IsType<SolidColorBrush>(fixture.Find<Border>("NoticeSafe").Background);
+            Assert.Equal(Color.FromUInt32(ChromePalette.From(studio).Colors["codeBackground"]), brush.Color);
+        });
+
+    [Fact]
+    public Task Enter_on_the_default_Import_button_imports_the_theme_and_so_does_a_click() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("solar.yamv-theme.json", """{ "name": "Solar", "light": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            fixture.Press(Key.Enter);
+
+            Assert.False(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+            Assert.True(File.Exists(fixture.PathOf("solar")));
+            Assert.Contains(fixture.ViewModel.UserRows, row => row.Id == "solar");
+
+            fixture.AddImport("lunar.yamv-theme.json", """{ "name": "Lunar", "light": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+            fixture.Click(fixture.Find<Button>("NoticeImport"));
+
+            Assert.False(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+            Assert.True(File.Exists(fixture.PathOf("lunar")));
+            Assert.Contains(fixture.ViewModel.UserRows, row => row.Id == "lunar");
+        });
+
+    [Fact]
+    public Task Import_at_the_windows_minimum_height_keeps_the_footer_visible_and_clickable() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            string tokens = string.Join(", ", Enumerable.Range(1, 12).Select(n => $"\"w{n}\": \"#123456\""));
+            fixture.AddImport("many.yamv-theme.json", $$"""{ "name": "Many", "light": { "tokens": { {{tokens}} } } }""");
+            fixture.Window.Height = 480;
+            fixture.Settle();
+
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Assert.True(fixture.Find<Button>("NoticeCancel").IsEffectivelyVisible);
+            Button import = fixture.Find<Button>("NoticeImport");
+            Assert.True(import.IsEffectivelyVisible);
+
+            fixture.Click(import);
+
+            Assert.True(File.Exists(fixture.PathOf("many")));
+            Assert.Contains(fixture.ViewModel.UserRows, row => row.Id == "many");
+        });
+
+    [Fact]
+    public Task Esc_the_close_button_and_Cancel_each_close_the_notice_importing_nothing() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("solar.yamv-theme.json", """{ "name": "Solar", "light": {} }""");
+
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+            fixture.Press(Key.Escape);
+            Assert.False(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+            fixture.Click(fixture.Find<Button>("NoticeClose"));
+            Assert.False(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+            fixture.Click(fixture.Find<Button>("NoticeCancel"));
+            Assert.False(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+
+            Assert.False(File.Exists(fixture.PathOf("solar")));
+            Assert.DoesNotContain(fixture.ViewModel.UserRows, row => row.Id == "solar");
+        });
+
+    [Fact]
+    public Task An_invalid_file_opens_the_notice_with_its_errors_Import_disabled_and_Enter_cancels() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("bad.yamv-theme.json", """{ "light": { "tokens": { "accent": "#12" } } }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Control notice = fixture.Find<Control>("ImportNotice");
+            Assert.True(notice.IsEffectivelyVisible);
+            Assert.Equal("bad.yamv-theme.json", fixture.NoticeLineText);
+            List<string> texts = VisibleTexts(notice);
+            Assert.Contains("The theme has no 'name'.", texts);
+            Assert.Contains(texts, text => text.Contains("is not a colour", StringComparison.Ordinal));
+            Assert.DoesNotContain(texts, text => text.StartsWith("Will be added as", StringComparison.Ordinal));
+            Assert.False(fixture.Find<Button>("NoticeImport").IsEffectivelyEnabled);
+            Assert.False(fixture.Find<Button>("NoticeImport").IsDefault);
+            Button cancel = fixture.Find<Button>("NoticeCancel");
+            Assert.True(cancel.IsDefault);
+            Assert.True(cancel.IsFocused);
+
+            fixture.Press(Key.Enter);
+
+            Assert.False(notice.IsEffectivelyVisible);
+            Assert.False(File.Exists(fixture.PathOf("bad")));
+            Assert.DoesNotContain(fixture.ViewModel.UserRows, row => row.Id == "bad");
+        });
+
+    [Fact]
+    public Task A_theme_with_no_usable_id_shows_its_file_name_and_no_chip() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("con.yamv-theme.json", """{ "name": "Con", "light": { "tokens": { "accent": "#123456" } }, "dark": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Control notice = fixture.Find<Control>("ImportNotice");
+            Assert.Equal("con.yamv-theme.json", fixture.NoticeLineText);
+            Assert.False(fixture.Find<Control>("NoticeChip").IsEffectivelyVisible);
+            Assert.Contains(VisibleTexts(notice), text => text.Contains("no usable theme id", StringComparison.Ordinal));
+            Assert.False(fixture.Find<Button>("NoticeImport").IsEffectivelyEnabled);
+        });
+
+    [Fact]
+    public Task The_notice_disables_the_window_behind_it_until_it_closes() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("solar.yamv-theme.json", """{ "name": "Solar", "light": {} }""");
+            Assert.True(fixture.Find<Control>("WindowContent").IsEnabled);
+
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+
+            Assert.False(fixture.Find<Control>("WindowContent").IsEnabled);
+            Assert.False(fixture.Find<Control>("ThemeList").IsEffectivelyEnabled);
+
+            fixture.Press(Key.Escape);
+
+            Assert.True(fixture.Find<Control>("WindowContent").IsEnabled);
+        });
+
+    [Fact]
+    public Task Closing_the_window_while_the_notice_is_open_is_ignored() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.AddImport("solar.yamv-theme.json", """{ "name": "Solar", "light": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+            bool closed = false;
+            fixture.Window.Closed += (_, _) => closed = true;
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.False(closed);
+            Assert.True(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+
+            fixture.Press(Key.Escape);
+        });
+
+    [Fact]
+    public Task Closing_with_unsaved_edits_while_the_notice_is_open_is_ignored_and_asks_nothing() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+            fixture.AddImport("solar.yamv-theme.json", """{ "name": "Solar", "light": {} }""");
+            fixture.ViewModel.ImportCommand.Execute(null);
+            fixture.Settle();
+            bool closed = false;
+            fixture.Window.Closed += (_, _) => closed = true;
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.False(closed);
+            Assert.True(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+            Assert.False(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+
+            fixture.Press(Key.Escape);
+        });
+
+    [Fact]
+    public Task OnClosed_completes_a_pending_notice_as_Cancel() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            var inspection = new ThemeInspection(
+                "a.yamv-theme.json",
+                @"C:\themes\a.yamv-theme.json",
+                "A",
+                null,
+                true,
+                false,
+                false,
+                [],
+                [],
+                null,
+                null,
+                null
+            );
+            Task<bool> pending = fixture.Window.ConfirmImportAsync(inspection);
+            fixture.Settle();
+
+            ((TestWindow)fixture.Window).RaiseClosed();
+
+            Assert.True(pending.IsCompletedSuccessfully);
+            Assert.False(pending.Result);
+            Assert.False(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+        });
+
+    [Fact]
+    public Task Opening_a_second_notice_while_one_is_open_throws() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            var inspection = new ThemeInspection(
+                "a.yamv-theme.json",
+                @"C:\themes\a.yamv-theme.json",
+                "A",
+                null,
+                true,
+                false,
+                false,
+                [],
+                [],
+                null,
+                null,
+                null
+            );
+            Task<bool> first = fixture.Window.ConfirmImportAsync(inspection);
+            fixture.Settle();
+
+            Task<bool> second = fixture.Window.ConfirmImportAsync(inspection);
+            fixture.Settle();
+
+            Assert.True(second.IsFaulted);
+            Assert.IsType<InvalidOperationException>(second.Exception!.InnerException);
+            Assert.True(fixture.Find<Control>("ImportNotice").IsEffectivelyVisible);
+            Assert.False(fixture.Find<Control>("WindowContent").IsEnabled);
+
+            fixture.Press(Key.Escape);
+
+            Assert.True(first.IsCompletedSuccessfully);
+            Assert.False(first.Result);
+            Assert.True(fixture.Find<Control>("WindowContent").IsEnabled);
+        });
+
+    /// <summary>Studio light, resolved as the app applies it: the theme whose brushes the window's chrome takes.</summary>
+    private static ResolvedTheme StudioLight()
+    {
+        var catalog = new ThemeCatalog(Path.Combine(Path.GetTempPath(), "yamv-studio-only-" + Guid.NewGuid().ToString("N")), new RecordingAppLog());
+        ThemeDefinition studio = catalog.LoadAll().Single(entry => entry.Id == "studio").Result.Theme!;
+        return ThemeResolver.Resolve(studio, Appearance.Light);
+    }
+
     private static List<string> VisibleTexts(Visual root) =>
         [
             .. root.GetVisualDescendants()
@@ -795,6 +1180,8 @@ public sealed class ThemeSettingsWindowTests
     private sealed class Fixture : IDisposable
     {
         private readonly string _folder = Path.Combine(Path.GetTempPath(), "yamv-theme-window-" + Guid.NewGuid().ToString("N"));
+
+        private readonly string _importFolder = Path.Combine(Path.GetTempPath(), "yamv-theme-import-" + Guid.NewGuid().ToString("N"));
 
         public Fixture()
         {
@@ -811,15 +1198,15 @@ public sealed class ThemeSettingsWindowTests
                     OpenAsText = _ => { },
                     ConfirmUnsaved = name => window!.ConfirmUnsavedAsync(name),
                     ConfirmDelete = name => window!.ConfirmDeleteAsync(name),
-                    PickImport = () => Task.FromResult<string?>(null),
+                    PickImport = () => Task.FromResult(ImportPath),
                     PickExport = _ => Task.FromResult<string?>(null),
-                    ConfirmImport = _ => Task.FromResult(false),
+                    ConfirmImport = inspection => window!.ConfirmImportAsync(inspection),
                 },
                 "mine",
                 "light",
                 Log
             );
-            window = new ThemeSettingsWindow(ViewModel, Log);
+            window = new TestWindow(ViewModel, Log);
             Window = window;
             Window.Resources["YamvText"] = Normal;
             Window.Resources["YamvTextMuted"] = Muted;
@@ -844,6 +1231,22 @@ public sealed class ThemeSettingsWindowTests
         public ThemeSettingsWindow Window { get; }
 
         public string PathOf(string id) => Path.Combine(_folder, id + ThemeCatalog.FileSuffix);
+
+        /// <summary>The file the Import pick answers with, or null when the pick is cancelled.</summary>
+        public string? ImportPath { get; set; }
+
+        /// <summary>Writes <paramref name="text"/> to a file named <paramref name="fileName"/> outside the themes folder, and picks it.</summary>
+        public string AddImport(string fileName, string text)
+        {
+            Directory.CreateDirectory(_importFolder);
+            string path = Path.Combine(_importFolder, fileName);
+            File.WriteAllText(path, text);
+            ImportPath = path;
+            return path;
+        }
+
+        /// <summary>The card's first line, as its runs read.</summary>
+        public string NoticeLineText => string.Concat(Find<TextBlock>("NoticeLine").Inlines!.OfType<Run>().Select(run => run.Text));
 
         public T Find<T>(string name)
             where T : Control =>
@@ -971,7 +1374,17 @@ public sealed class ThemeSettingsWindowTests
 
             Window.Close();
             Directory.Delete(_folder, recursive: true);
+            if (Directory.Exists(_importFolder))
+            {
+                Directory.Delete(_importFolder, recursive: true);
+            }
         }
+    }
+
+    /// <summary>A theme settings window whose closed event a test can raise, since an open notice holds the window's close.</summary>
+    private sealed class TestWindow(ThemeSettingsViewModel viewModel, RecordingAppLog log) : ThemeSettingsWindow(viewModel, log)
+    {
+        public void RaiseClosed() => OnClosed(EventArgs.Empty);
     }
 
     /// <summary>Records each path it is given and deletes the file.</summary>

@@ -13,6 +13,7 @@ public sealed record ChromePalette(IReadOnlyDictionary<string, uint> Colors, str
         "chromeBackground",
         "sidebarBackground",
         "pageBackground",
+        "codeBackground",
         "text",
         "textSecondary",
         "textMuted",

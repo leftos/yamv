@@ -2,7 +2,7 @@
 
 - **Activation gate**: holds an `activate` request that arrives before the main window exists and delivers it once the window is shown, coalescing duplicates.
 - **App default**: the content width a document uses when no folder at or above it has its own width; set from the popover's All documents segment ([content-width.md](design/content-width.md)).
-- **Appearance**: Match system, Light or Dark — which variant of the current theme family is shown.
+- **Appearance**: Match system, Light or Dark — which half of the current theme family is shown.
 - **Asset cache**: the versioned folder under the local app-data dir (`YAMV/web/{assembly version id}/`) that the document page's template, CSS, JS, fonts and vendored libraries are extracted to, so the page loads over `file://`.
 - **Chrome**: the app's own UI around the document (title bar, sidebar tree, dialogs), drawn with Avalonia from the theme's chrome tokens, as opposed to the document page.
 - **Document surface**: what the window logic sees of the document page (`IDocumentSurface`, implemented by `DocumentView`); tests substitute a fake.
@@ -11,7 +11,7 @@
 - **Group root**: the folder a document is grouped under in the tree: its git work-tree root, or its parent folder when it is not in a repo.
 - **Half**: the light or dark part of a theme family: its `light` or `dark` object, with that half's tokens and css ([themes.md](design/themes.md)).
 - **Harness window**: the development window (`HarnessWindow`) that hosts a bare `DocumentView` with `--theme`, `--find`, `--scroll` and similar switches; opened instead of the main window when `YAMV_DEV_HARNESS=1`.
-- **Import notice**: the modal an Import shows before copying a theme file, with a card for the file (name, author, halves, whether it has css, its errors and warnings) and the warning about css that loads from the web; the card is read by `ThemeCatalog.Inspect` into a `ThemeInspection` ([themes.md](design/themes.md)).
+- **Import notice**: the modal an Import shows before copying a theme file, with a card for the file (name, author, halves, whether it has css, its path, its errors and warnings) and the warning about css that loads from the web; the card is read by `ThemeCatalog.Inspect` into a `ThemeInspection` ([themes.md](design/themes.md)).
 - **Inherited value**: a token's value in the token editor when the tab sets none: shown grey, taken from Shared or the defaults (on the Shared tab, from the defaults). Setting it, even to the same value, makes it set; ↺ removes a set value.
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.
 - **Link policy**: the Core rule (`LinkPolicy.Decide`) that turns a clicked link, or a dropped file's path, into a `LinkDecision`: open externally, open as a document, open with the default app, ask first, or ignore.
@@ -24,11 +24,10 @@
 - **Reveal**: showing a path in the platform's file manager from a tree menu: a file is shown selected in Explorer or Finder, a folder or group root is opened, and a missing document opens its nearest folder that still exists (`RevealCommand`).
 - **Second launch**: a no-argument `yamv` start while another process holds the main-instance lock; it asks the main instance to come forward and exits 0, brings that window forward itself and exits 1 when the signal fails, or, with no pid file, waits up to 5 s for the lock and starts as the main instance (`SecondLaunch`).
 - **Sidebar**: the pane on the window's right holding the tree of open documents.
-- **Theme family**: one `.yamv-theme.json` file, holding a light variant, a dark variant or both ([themes.md](design/themes.md)).
+- **Theme family**: one `.yamv-theme.json` file, holding a light half, a dark half or both ([themes.md](design/themes.md)).
 - **Token**: a named theme value (a colour, font, size) that drives both the document page (as a `--yamv-*` CSS property) and the app chrome.
 - **Tree order**: the order documents appear in the sidebar tree (groups, then folders before files, case-insensitively), which Close, Ctrl+Tab and Ctrl+Shift+Tab follow; it differs from the order documents were opened.
 - **Unreadable document**: an open document whose file exists but cannot be read (locked by another program, or access denied); the window shows the can't-read pane (`UnreadableDocumentPane`) in place of the page, and the state clears on a successful read, a selection change, or the file going missing.
-- **Variant**: the light or dark half of a theme family.
 - **Viewable type**: a file type on `LinkPolicy.ViewableExtensions` (images, audio, video, PDF, CSV, JSON, XML, YAML, logs) that a link opens in the default app without asking, when both the link's name and its resolved target are on the list; any other type, or a folder, asks first.
 - **Viewer instance**: a YAMV window started with file arguments (or, on macOS, a Finder open); on Windows its own process. It shows only those files and is non-persisting: it never writes `session.json`, has no saved layout, shows the tree only with 2+ documents, closes when its last document closes, and reads the theme from the session file read-only (`SessionStore.LoadReadOnly`).
 - **WebView2 user-data folder**: where WebView2 keeps the document page's browser profile on Windows: `%LOCALAPPDATA%\YAMV\webview2`, shared by every YAMV process, or the folder `WEBVIEW2_USER_DATA_FOLDER` names when set (each hidden run gets its own).

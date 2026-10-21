@@ -25,6 +25,12 @@ public partial class App : Application
     /// </summary>
     public const string ThemeSettingsHarnessVariable = "YAMV_DEV_THEME_SETTINGS";
 
+    /// <summary>
+    /// The environment variable that, beside <see cref="ThemeSettingsHarnessVariable"/>, names a theme file whose Import notice the
+    /// harness opens once the window has shown; empty or white space counts as unset.
+    /// </summary>
+    public const string ImportFileVariable = "YAMV_DEV_IMPORT_FILE";
+
     private MainWindowComposition? _mainWindow;
     private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
@@ -203,7 +209,8 @@ public partial class App : Application
 
     /// <summary>
     /// The theme settings window over the data folder's themes, with Studio applied to follow the system, a trash that deletes
-    /// outright inside a dev data folder, and Edit as text written to the log. It refuses to start without
+    /// outright inside a dev data folder, and Edit as text written to the log. With <see cref="ImportFileVariable"/> set its
+    /// Import pick answers with that file once, and the notice opens as soon as the window has shown. It refuses to start without
     /// <c>YAMV_DATA_DIR</c>, before it touches any folder, so it never writes into the owner's data folder.
     /// </summary>
     /// <exception cref="InvalidOperationException"><c>YAMV_DATA_DIR</c> is not set.</exception>
@@ -221,6 +228,8 @@ public partial class App : Application
         bridge.Apply(ThemeCatalog.DefaultThemeId, "system");
         ThemeSettingsWindow? window = null;
         var fileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess);
+        string? importFile = Environment.GetEnvironmentVariable(ImportFileVariable) is { } given && !string.IsNullOrWhiteSpace(given) ? given : null;
+        string? pendingImport = null;
         var seams = new ThemeSettingsSeams
         {
             Apply = bridge.Apply,
@@ -228,12 +237,35 @@ public partial class App : Application
             OpenAsText = path => log.LogInfo($"Harness: edit as text {path}"),
             ConfirmUnsaved = name => window!.ConfirmUnsavedAsync(name),
             ConfirmDelete = name => window!.ConfirmDeleteAsync(name),
-            PickImport = () => fileActions.PickThemeAsync(window!),
+            PickImport = () =>
+            {
+                if (pendingImport is not { } path)
+                {
+                    return fileActions.PickThemeAsync(window!);
+                }
+
+                pendingImport = null;
+                return Task.FromResult<string?>(path);
+            },
             PickExport = suggested => fileActions.PickThemeDestinationAsync(window!, suggested),
-            ConfirmImport = _ => Task.FromResult(true),
+            ConfirmImport = inspection => window!.ConfirmImportAsync(inspection),
         };
-        window = new ThemeSettingsWindow(new ThemeSettingsViewModel(catalog, seams, ThemeCatalog.DefaultThemeId, "system", log), log);
-        window.Opened += (_, _) => log.LogInfo("Window: shown");
+        var viewModel = new ThemeSettingsViewModel(catalog, seams, ThemeCatalog.DefaultThemeId, "system", log);
+        window = new ThemeSettingsWindow(viewModel, log);
+        window.Opened += (_, _) =>
+        {
+            log.LogInfo("Window: shown");
+            if (importFile is not { } path)
+            {
+                return;
+            }
+
+            importFile = null;
+            pendingImport = path;
+            log.LogInfo($"Harness: import {path}");
+            viewModel.ImportCommand.Execute(null);
+            pendingImport = null;
+        };
         return window;
     }
 
