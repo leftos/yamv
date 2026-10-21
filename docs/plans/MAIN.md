@@ -6,7 +6,7 @@
 
 ### Window and launch (1/4 done)
 - [/] YAMV-5 App shell: document view and main window, built to look.md
-  - [ ] YAMV-7 Main window: tree sidebar, custom title bar, empty and missing states, session restore
+  - [/] YAMV-7 Main window: tree sidebar, custom title bar, empty and missing states, session restore
 - [ ] YAMV-8 Launch modes: main vs viewer, activating the main instance, macOS file activation
 
 ### Features (0/3 done)
@@ -16,19 +16,19 @@
 
 ## Ship v1
 
-- [ ] YAMV-12 Windows --register / --unregister for .md files under HKCU
-- [ ] YAMV-13 Packaging and CI: publish script, make-app.sh, icon, Windows and macOS CI
 - [ ] YAMV-14 Docs: ARCHITECTURE filled in, README usage, CHANGELOG
+- [ ] YAMV-25 Registration: note a replaced foreign ProgID, and guard Unregister's process path
 
 ## Backlog
 
-- [ ] YAMV-15 macOS: put the instance pipe at an absolute path under the data folder
-- [ ] YAMV-16 Windows: hash the account SID into the pipe name instead of the user name
+- [/] YAMV-15 macOS: put the instance pipe at an absolute path under the data folder
+- [/] YAMV-16 Windows: hash the account SID into the pipe name instead of the user name
 - [ ] YAMV-17 Page privacy: fetch remote images through the host behind an opt-in
 - [ ] YAMV-18 macOS: let WKWebView read document images outside the asset cache
 - [ ] YAMV-19 Tests: fold the three fake logs into one thread-safe recorder
 - [ ] YAMV-20 Theme files: cap the read size and share the file while importing
 - [ ] YAMV-21 Theme catalog: list every file with an invalid id as invalid, not only device names
 - [ ] YAMV-22 Document view follow-ups: asset cache pruning, logic into Core, hidden link click, scroll after images
-- [ ] YAMV-23 Instance coordinator hardening: Unix connect spin, pipe-name squatting, concurrent Dispose
+- [/] YAMV-23 Instance coordinator hardening: Unix connect spin, pipe-name squatting, concurrent Dispose
 - [ ] YAMV-24 Window state: regroup only when the document list changes
+- [ ] YAMV-26 Instance coordinator: stale socket unlink on slow exit, elevated vs normal launch
