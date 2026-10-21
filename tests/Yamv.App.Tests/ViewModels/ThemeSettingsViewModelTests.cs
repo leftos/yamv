@@ -442,6 +442,285 @@ public sealed class ThemeSettingsViewModelTests
         Assert.Equal([("mine", "dark")], fixture.Applied);
     }
 
+    [Fact]
+    public void A_tab_lists_every_token_in_order_grouped_with_its_value_whether_set_here_its_label_and_name()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+
+        viewModel.SelectedTab = ThemeTab.Light;
+
+        Assert.Equal(["Page", "Chrome", "Code", "Syntax", "Type", "Layout"], viewModel.TokenGroups.Select(group => group.Name));
+        Assert.Equal(ThemeTokens.All.Select(token => token.Name), Tokens(viewModel).Select(row => row.Name));
+        Assert.All(viewModel.TokenGroups, group => Assert.All(group.Rows, row => Assert.Equal(group.Name, row.Token.Group)));
+        TokenRowViewModel accent = Token(viewModel, "accent");
+        Assert.True(accent.IsSet);
+        Assert.Equal(new ColorValue("#112233"), accent.Value);
+        Assert.Equal("#112233", accent.Text);
+        TokenRowViewModel selection = Token(viewModel, "selectionBackground");
+        Assert.False(selection.IsSet);
+        Assert.Equal("Selected row", selection.Label);
+        Assert.Equal("selectionBackground", selection.Name);
+        Assert.Equal("Selected row\nselectionBackground · --yamv-selection-background", selection.Tooltip);
+        Assert.Equal(new ColorValue("#e3edfa"), selection.Value);
+        Assert.Equal("15.5", Token(viewModel, "bodySize").Text);
+
+        viewModel.SelectedTab = ThemeTab.Dark;
+
+        Assert.True(Token(viewModel, "quote").IsSet);
+        Assert.Equal(new ColorValue("#4493f8"), Token(viewModel, "quote").Value);
+        Assert.False(Token(viewModel, "accent").IsSet);
+        Assert.Equal(new ColorValue("#4493f8"), Token(viewModel, "accent").Value);
+    }
+
+    [Theory]
+    [InlineData(Appearance.Light, "#0969da")]
+    [InlineData(Appearance.Dark, "#4493f8")]
+    public void The_Shared_tab_inherits_the_defaults_of_the_appearance_shown(Appearance shown, string accent)
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Shared;
+
+        viewModel.ShownAppearance = shown;
+
+        Assert.Equal(new ColorValue(accent), Token(viewModel, "accent").Value);
+        Assert.False(Token(viewModel, "accent").IsSet);
+    }
+
+    [Fact]
+    public void Set_then_reset_leaves_the_copy_clean_with_Save_and_Revert_off_and_no_token_dot()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+
+        viewModel.SetToken(ThemeTab.Light, "quote", new ColorValue("#3fb950"));
+        Assert.True(viewModel.IsDirty);
+        Assert.True(Token(viewModel, "quote").IsChanged);
+        Assert.True(Token(viewModel, "quote").CanReset);
+
+        Token(viewModel, "quote").Reset();
+
+        Assert.False(viewModel.IsDirty);
+        Assert.False(viewModel.SaveCommand.CanExecute(null));
+        Assert.False(viewModel.RevertCommand.CanExecute(null));
+        Assert.False(Token(viewModel, "quote").IsChanged);
+        Assert.False(Token(viewModel, "quote").IsSet);
+        Assert.Empty(viewModel.ChangedIn(ThemeTab.Light));
+    }
+
+    [Fact]
+    public void Set_then_set_back_to_the_saved_value_is_not_dirty()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+        TokenRowViewModel accent = Token(viewModel, "accent");
+
+        Assert.True(accent.Commit("#3fb950", fromEnter: true));
+        Assert.True(viewModel.IsDirty);
+        Assert.True(accent.IsChanged);
+
+        Assert.True(accent.Commit("#112233", fromEnter: true));
+
+        Assert.False(viewModel.IsDirty);
+        Assert.False(accent.IsChanged);
+        Assert.Empty(viewModel.ChangedIn(ThemeTab.Light));
+    }
+
+    [Theory]
+    [InlineData("accent", "#12345", "'#12345' is not a colour (#rgb, #rrggbb or #rrggbbaa).")]
+    [InlineData("bodySize", "40", "Token 'bodySize' in light: 40 is out of range (10–32).")]
+    [InlineData("bodySize", "big", "'big' is not a number.")]
+    public void A_bad_value_shows_its_error_on_the_row_and_leaves_the_working_copy(string name, string text, string error)
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+        ThemeDefinition? before = viewModel.WorkingTheme;
+        TokenRowViewModel row = Token(viewModel, name);
+
+        Assert.False(row.Commit(text, fromEnter: true));
+
+        Assert.Equal(error, row.Error);
+        Assert.Same(before, viewModel.WorkingTheme);
+        Assert.False(viewModel.IsDirty);
+
+        row.CancelEdit();
+
+        Assert.Null(row.Error);
+        Assert.Equal(name == "accent" ? "#112233" : "15.5", row.Text);
+    }
+
+    [Fact]
+    public void A_light_only_theme_on_the_Dark_tab_offers_Add_dark_which_makes_its_rows_editable_until_Revert()
+    {
+        using var fixture = new Fixture();
+        File.WriteAllText(fixture.PathOf("lightonly"), """{ "name": "Light Only", "light": { "tokens": { "accent": "#8250df" } } }""");
+        ThemeSettingsViewModel viewModel = fixture.Create(themeId: "lightonly");
+        viewModel.SelectedTab = ThemeTab.Dark;
+
+        Assert.All(Tokens(viewModel), row => Assert.False(row.IsSet));
+        Assert.All(Tokens(viewModel), row => Assert.False(row.IsEditable));
+        Assert.True(viewModel.CanAddDark);
+        Assert.False(viewModel.CanAddLight);
+        Assert.True(viewModel.ShowsMissingHalf);
+        Assert.Equal("This theme has no dark half. In dark mode YAMV shows its light half.", viewModel.MissingHalfNote);
+        Assert.Equal("Add dark", viewModel.AddHalfLabel);
+
+        viewModel.AddHalfCommand.Execute(null);
+
+        Assert.All(Tokens(viewModel), row => Assert.True(row.IsEditable));
+        Assert.All(Tokens(viewModel), row => Assert.False(row.IsSet));
+        Assert.All(Tokens(viewModel), row => Assert.False(row.IsChanged));
+        Assert.True(viewModel.IsDirty);
+        Assert.False(viewModel.CanAddDark);
+        Assert.False(viewModel.ShowsMissingHalf);
+
+        viewModel.RevertCommand.Execute(null);
+
+        Assert.Null(viewModel.WorkingTheme?.Dark);
+        Assert.True(viewModel.CanAddDark);
+        Assert.All(Tokens(viewModel), row => Assert.False(row.IsEditable));
+    }
+
+    [Fact]
+    public void A_dark_only_theme_on_the_Light_tab_offers_Add_light()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create(themeId: "alpha");
+        viewModel.SelectedTab = ThemeTab.Light;
+
+        Assert.True(viewModel.CanAddLight);
+        Assert.Equal("This theme has no light half. In light mode YAMV shows its dark half.", viewModel.MissingHalfNote);
+        Assert.Equal("Add light", viewModel.AddHalfLabel);
+        Assert.All(Tokens(viewModel), row => Assert.False(row.IsEditable));
+
+        viewModel.AddHalfCommand.Execute(null);
+
+        Assert.NotNull(viewModel.WorkingTheme?.Light);
+        Assert.All(Tokens(viewModel), row => Assert.True(row.IsEditable));
+        Assert.True(viewModel.IsDirty);
+    }
+
+    [Fact]
+    public async Task A_built_in_theme_has_no_editable_row_and_no_Add()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        await viewModel.SelectAsync(Row(viewModel, "paper"));
+
+        foreach (ThemeTab tab in Enum.GetValues<ThemeTab>())
+        {
+            viewModel.SelectedTab = tab;
+            Assert.All(Tokens(viewModel), row => Assert.False(row.IsEditable));
+            Assert.All(Tokens(viewModel), row => Assert.False(row.CanReset));
+        }
+
+        Assert.Contains(Tokens(viewModel), row => row.IsSet);
+        Assert.False(viewModel.CanAddDark);
+        Assert.False(viewModel.CanAddLight);
+        Assert.False(viewModel.AddHalfCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void Enter_on_an_inherited_row_sets_the_shown_value_in_the_tab()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+        TokenRowViewModel quote = Token(viewModel, "quote");
+        ThemeValue shown = quote.Value;
+
+        Assert.True(quote.Commit(quote.Text, fromEnter: true));
+
+        Assert.Equal(shown, viewModel.WorkingTheme?.Light?.Tokens["quote"]);
+        Assert.True(quote.IsSet);
+        Assert.True(quote.CanReset);
+        Assert.True(viewModel.IsDirty);
+    }
+
+    [Fact]
+    public void Leaving_an_unchanged_inherited_row_sets_nothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+        ThemeDefinition? before = viewModel.WorkingTheme;
+        TokenRowViewModel quote = Token(viewModel, "quote");
+
+        Assert.True(quote.Commit(quote.Text, fromEnter: false));
+
+        Assert.Same(before, viewModel.WorkingTheme);
+        Assert.False(quote.IsSet);
+        Assert.False(viewModel.IsDirty);
+    }
+
+    [Fact]
+    public void Enter_on_a_set_row_with_its_own_value_changes_nothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+        ThemeDefinition? before = viewModel.WorkingTheme;
+
+        Assert.True(Token(viewModel, "accent").Commit("#112233", fromEnter: true));
+
+        Assert.Same(before, viewModel.WorkingTheme);
+        Assert.False(viewModel.IsDirty);
+    }
+
+    [Fact]
+    public void Typed_text_on_the_Light_tab_survives_a_change_of_the_appearance_shown()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+        viewModel.ShownAppearance = Appearance.Light;
+        TokenRowViewModel quote = Token(viewModel, "quote");
+        quote.Text = "#abcdef";
+
+        viewModel.ShownAppearance = Appearance.Dark;
+
+        Assert.Equal("#abcdef", quote.Text);
+        Assert.False(quote.IsSet);
+    }
+
+    [Fact]
+    public void Save_clears_the_token_dots()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+        viewModel.SetToken(ThemeTab.Light, "quote", new ColorValue("#3fb950"));
+        Assert.True(Token(viewModel, "quote").IsChanged);
+
+        viewModel.SaveCommand.Execute(null);
+
+        Assert.All(Tokens(viewModel), row => Assert.False(row.IsChanged));
+        Assert.Empty(viewModel.ChangedIn(ThemeTab.Light));
+    }
+
+    [Fact]
+    public async Task A_theme_switch_clears_the_token_dots()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+        viewModel.SetToken(ThemeTab.Light, "quote", new ColorValue("#3fb950"));
+        fixture.UnsavedAnswer = UnsavedChoice.Discard;
+
+        await viewModel.SelectAsync(Row(viewModel, "paper"));
+
+        Assert.Equal("paper", viewModel.Selected?.Id);
+        Assert.All(Tokens(viewModel), row => Assert.False(row.IsChanged));
+    }
+
+    private static IEnumerable<TokenRowViewModel> Tokens(ThemeSettingsViewModel viewModel) => viewModel.TokenGroups.SelectMany(group => group.Rows);
+
+    private static TokenRowViewModel Token(ThemeSettingsViewModel viewModel, string name) => Tokens(viewModel).Single(row => row.Name == name);
+
     private static ThemeRowViewModel Row(ThemeSettingsViewModel viewModel, string id) =>
         viewModel.UserRows.Concat(viewModel.BuiltInRows).First(row => row.Id == id);
 

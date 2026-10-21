@@ -35,5 +35,12 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
   - **Middle:** every token, grouped as in the [token table](themes.md#tokens) (Page, Chrome, Code, Syntax, Type, Layout). It has Shared / Light / Dark tabs, colour swatches with hex fields and a picker, and value fields for fonts and sizes.
   - **Right:** a live preview.
 - Unsaved changes are marked with a dot.
+- The **token editor** (the middle column; the approved mock is [theme-editor](mocks/theme-editor/index.html), [screenshot](mocks/theme-editor/index.png)):
+  - One row per token, 38 px and two lines: the token name in mono over the value field. A colour row also has a swatch, which raises a pick request for the colour picker.
+  - A hint line sits above the rows: "Grey values come from Shared or the defaults. ↺ removes a value from this tab." On the Shared tab it reads "Grey values come from the defaults. ↺ removes a value from this tab."
+  - A grey value is inherited, from Shared or the defaults (on the Shared tab, from the defaults). A set value has a ↺ that removes it from the tab. A token with unsaved changes shows a dot.
+  - When a theme has no dark options, the Dark tab shows an **Add dark options** strip above dimmed rows.
+  - Enter in a field commits it, and in an inherited field it sets the shown value in that tab even when it equals the inherited one. Leaving an unchanged field by Tab or a click sets nothing. Esc restores the shown value, and on an inherited token it resets.
+  - A bad number or hex colour shows its error under the field. Text typed but not committed survives flipping the appearance between the Light and Dark tabs.
 - Footer: **Import…**, **Export…**, **Edit as text** (opens the file in the default editor), **Revert**, **Save**. A built-in theme is read-only and has no file, so it shows **Duplicate to edit** in place of Edit as text: editing one starts with a copy in Yours. Edit as text exists only for user themes.
 - Editing a theme file outside the app re-applies it live.

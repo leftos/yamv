@@ -1,0 +1,325 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  x:Class="Yamv.App.Views.ThemeSettings.TokenEditor"
+  x:DataType="vm:ThemeSettingsViewModel"
+  Classes.ro="{Binding IsBuiltIn}"
+>
+  <UserControl.Resources>
+    <!-- The swatch's 8 px checkerboard, under the colour so alpha shows. -->
+    <DrawingBrush x:Key="Checker" TileMode="Tile" DestinationRect="0,0,8,8" Stretch="None">
+      <DrawingBrush.Drawing>
+        <DrawingGroup>
+          <GeometryDrawing Brush="White" Geometry="M0,0 H8 V8 H0 Z" />
+          <GeometryDrawing Brush="#CCCCCC" Geometry="M0,0 H4 V4 H0 Z M4,4 H8 V8 H4 Z" />
+        </DrawingGroup>
+      </DrawingBrush.Drawing>
+    </DrawingBrush>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <Style Selector="Button.btn.sm">
+      <Setter Property="Height" Value="26" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Padding" Value="10,0" />
+    </Style>
+
+    <Style Selector="Border.nohalf">
+      <Setter Property="Margin" Value="0,10,0,2" />
+      <Setter Property="Padding" Value="11,9,10,9" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="Background" Value="{DynamicResource YamvChromeBackground}" />
+    </Style>
+
+    <Style Selector="TextBlock.gh">
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.63" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+      <Setter Property="Margin" Value="0,12,0,3" />
+    </Style>
+
+    <Style Selector="DockPanel.tok">
+      <Setter Property="Height" Value="38" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="DockPanel.tok TextBlock.label">
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextSecondary}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="DockPanel.tok TextBlock.mod">
+      <Setter Property="FontSize" Value="9" />
+      <Setter Property="Margin" Value="4,0,0,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvAccent}" />
+    </Style>
+    <Style Selector="DockPanel.tok TextBlock.name">
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="FontFamily" Value="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="DockPanel.tok TextBlock.unit">
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Margin" Value="5,0,0,0" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+    <Style Selector="TextBlock.err">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="LineHeight" Value="15" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvWarning}" />
+    </Style>
+
+    <!-- The value fields: a 24 px box, a set value in the text colour and an inherited one muted. -->
+    <Style Selector="TextBox.fld">
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="Height" Value="24" />
+      <Setter Property="Padding" Value="7,0" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="FontFamily" Value="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="Background" Value="{DynamicResource YamvPageBackground}" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+      <Setter Property="CaretBrush" Value="{DynamicResource YamvText}" />
+    </Style>
+    <Style Selector="TextBox.fld /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="{DynamicResource YamvPageBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="MinHeight" Value="0" />
+    </Style>
+    <Style Selector="TextBox.fld:focus /template/ Border#PART_BorderElement">
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvAccent}" />
+    </Style>
+    <Style Selector="TextBox.fld.hex">
+      <Setter Property="Width" Value="92" />
+    </Style>
+    <Style Selector="TextBox.fld.font">
+      <Setter Property="Width" Value="140" />
+      <Setter Property="FontFamily" Value="{DynamicResource YamvUiFont}" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="TextBox.fld.num">
+      <Setter Property="Width" Value="58" />
+      <Setter Property="TextAlignment" Value="Right" />
+    </Style>
+    <Style Selector="DockPanel.tok.inh TextBox.fld">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+    <Style Selector="DockPanel.tok.inh TextBox.fld:focus">
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+    </Style>
+    <!-- The 3 px soft accent ring round a focused field, outside its layout box. -->
+    <Style Selector="Border.ring">
+      <Setter Property="Margin" Value="-3" />
+      <Setter Property="BorderThickness" Value="3" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.ring:focus-within">
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvAccentSoft}" />
+    </Style>
+
+    <Style Selector="Button.swatch">
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Height" Value="18" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <ContentPresenter Content="{TemplateBinding Content}" />
+        </ControlTemplate>
+      </Setter>
+    </Style>
+
+    <Style Selector="Button.reset">
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Panel Background="Transparent">
+            <Viewbox Width="12" Height="12">
+              <Canvas Width="16" Height="16">
+                <Path
+                  Data="M3.5,8 A4.5,4.5 0 1 0 4.9,4.7 M4.5,2 L4.5,5 L7.5,5"
+                  Stroke="{DynamicResource YamvTextMuted}"
+                  StrokeThickness="1.5"
+                  StrokeLineCap="Round"
+                  StrokeJoin="Round"
+                />
+              </Canvas>
+            </Viewbox>
+          </Panel>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+
+    <!-- The switch: an accent box with a white tick when on, a bordered empty box when off. -->
+    <Style Selector="CheckBox.check">
+      <Setter Property="Margin" Value="0,0,1,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border
+            Name="box"
+            Width="16"
+            Height="16"
+            CornerRadius="4"
+            BorderThickness="1"
+            BorderBrush="{DynamicResource YamvLine}"
+            Background="{DynamicResource YamvPageBackground}"
+          >
+            <Path
+              Name="tick"
+              Data="M1.5,5.2 L4,7.5 L8.5,2.5"
+              Width="10"
+              Height="10"
+              Stroke="White"
+              StrokeThickness="1.6"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              IsVisible="False"
+            />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="CheckBox.check:checked /template/ Border#box">
+      <Setter Property="Background" Value="{DynamicResource YamvAccent}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvAccent}" />
+    </Style>
+    <Style Selector="CheckBox.check:checked /template/ Path#tick">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <!-- A built-in theme: every part but the label at 0.55, the fields on the chrome fill. -->
+    <Style Selector="UserControl.ro DockPanel.tok > :is(Control).part">
+      <Setter Property="Opacity" Value="0.55" />
+    </Style>
+    <Style Selector="UserControl.ro TextBox.fld /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="{DynamicResource YamvChromeBackground}" />
+    </Style>
+    <!-- A half the theme lacks: every part at 0.5 and the label muted. -->
+    <Style Selector="ItemsControl.dis DockPanel.tok > :is(Control).part">
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
+    <Style Selector="ItemsControl.dis TextBox.fld /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="{DynamicResource YamvChromeBackground}" />
+    </Style>
+    <Style Selector="ItemsControl.dis DockPanel.tok TextBlock.label">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+  </UserControl.Styles>
+
+  <ScrollViewer x:Name="TokenScroll" HorizontalScrollBarVisibility="Disabled" Padding="16,2,16,8">
+    <StackPanel>
+      <Border x:Name="MissingHalfStrip" Classes="nohalf" IsVisible="{Binding ShowsMissingHalf}">
+        <DockPanel>
+          <Button
+            x:Name="AddHalfButton"
+            DockPanel.Dock="Right"
+            Classes="btn sm primary"
+            Margin="10,0,0,0"
+            VerticalAlignment="Center"
+            Content="{Binding AddHalfLabel}"
+            Command="{Binding AddHalfCommand}"
+            IsVisible="{Binding CanAddHalf}"
+          />
+          <TextBlock
+            Text="{Binding MissingHalfNote}"
+            VerticalAlignment="Center"
+            FontSize="11.5"
+            LineHeight="16"
+            TextWrapping="Wrap"
+            Foreground="{DynamicResource YamvTextSecondary}"
+          />
+        </DockPanel>
+      </Border>
+      <ItemsControl x:Name="TokenGroupList" ItemsSource="{Binding TokenGroups}" Classes.dis="{Binding ShowsMissingHalf}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:TokenGroupViewModel">
+            <StackPanel>
+              <TextBlock Classes="gh" Text="{Binding Header}" />
+              <ItemsControl ItemsSource="{Binding Rows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:TokenRowViewModel">
+                    <StackPanel>
+                      <DockPanel Classes="tok" Classes.inh="{Binding IsInherited}" ToolTip.Tip="{Binding Tooltip}">
+                        <Panel DockPanel.Dock="Right" Classes="part" Width="16" Margin="9,0,0,0">
+                          <Button Classes="reset" IsVisible="{Binding CanReset}" Command="{Binding ResetCommand}" AutomationProperties.Name="Reset" />
+                        </Panel>
+                        <TextBlock DockPanel.Dock="Right" Classes="unit part" Text="{Binding Unit}" IsVisible="{Binding IsNumber}" />
+                        <Panel DockPanel.Dock="Right" Classes="part" Margin="9,0,0,0" VerticalAlignment="Center">
+                          <Border Classes="ring" IsVisible="{Binding !IsBool}">
+                            <TextBox
+                              Classes="fld"
+                              Classes.hex="{Binding IsColor}"
+                              Classes.font="{Binding IsFont}"
+                              Classes.num="{Binding IsNumber}"
+                              Text="{Binding Text}"
+                              IsEnabled="{Binding IsEditable}"
+                              AutomationProperties.Name="{Binding Label}"
+                              KeyDown="OnFieldKeyDown"
+                              LostFocus="OnFieldLostFocus"
+                            />
+                          </Border>
+                          <CheckBox
+                            Classes="check"
+                            IsVisible="{Binding IsBool}"
+                            IsChecked="{Binding IsChecked, Mode=OneWay}"
+                            Command="{Binding ToggleCommand}"
+                            IsEnabled="{Binding IsEditable}"
+                            AutomationProperties.Name="{Binding Label}"
+                          />
+                        </Panel>
+                        <Button
+                          DockPanel.Dock="Left"
+                          Classes="swatch part"
+                          Margin="0,0,9,0"
+                          IsVisible="{Binding IsColor}"
+                          IsEnabled="{Binding IsEditable}"
+                          Click="OnSwatchClick"
+                          AutomationProperties.Name="{Binding Label}"
+                        >
+                          <Border CornerRadius="4" ClipToBounds="True" Background="{StaticResource Checker}">
+                            <Border CornerRadius="4" BorderThickness="1" BorderBrush="#597F7F7F">
+                              <Border.Background>
+                                <SolidColorBrush Color="{Binding Swatch}" />
+                              </Border.Background>
+                            </Border>
+                          </Border>
+                        </Button>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                          <StackPanel Orientation="Horizontal">
+                            <TextBlock Classes="label" Text="{Binding Label}" />
+                            <TextBlock Classes="mod" Text="●" IsVisible="{Binding IsChanged}" />
+                          </StackPanel>
+                          <TextBlock Classes="name" Text="{Binding Name}" />
+                        </StackPanel>
+                      </DockPanel>
+                      <TextBlock Classes="err" Text="{Binding Error}" IsVisible="{Binding HasError}" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

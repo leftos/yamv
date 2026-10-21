@@ -13,7 +13,7 @@ public abstract record ThemeValue;
 /// <remarks><c>#rgb</c> expands to <c>#rrggbb</c>. Anything else throws <see cref="ArgumentException"/>.</remarks>
 public sealed record ColorValue(string Hex) : ThemeValue
 {
-    public string Hex { get; } = Normalize(Hex) ?? throw new ArgumentException($"'{Hex}' is not a colour (#rgb, #rrggbb or #rrggbbaa).", nameof(Hex));
+    public string Hex { get; } = Normalize(Hex) ?? throw new ArgumentException(NotAColour(Hex), nameof(Hex));
 
     public byte R => Channel(0);
 
@@ -26,6 +26,9 @@ public sealed record ColorValue(string Hex) : ThemeValue
 
     /// <summary>The colour as <c>0xAARRGGBB</c>.</summary>
     public uint ToArgb() => ((uint)A << 24) | ((uint)R << 16) | ((uint)G << 8) | B;
+
+    /// <summary>The message for <paramref name="text"/> that is not <c>#rgb</c>, <c>#rrggbb</c> or <c>#rrggbbaa</c>.</summary>
+    public static string NotAColour(string text) => $"'{text}' is not a colour (#rgb, #rrggbb or #rrggbbaa).";
 
     private byte Channel(int index) => byte.Parse(Hex.AsSpan(1 + (index * 2), 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
 

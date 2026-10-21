@@ -57,15 +57,25 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         nameof(TitleDetail),
     ];
 
+    private static readonly string[] TabProperties =
+    [
+        nameof(SharedTabOn),
+        nameof(LightTabOn),
+        nameof(DarkTabOn),
+        nameof(ShowsMissingHalf),
+        nameof(MissingHalfNote),
+        nameof(AddHalfLabel),
+        nameof(CanAddHalf),
+        nameof(CanAddDark),
+        nameof(CanAddLight),
+        nameof(ShowsHint),
+        nameof(Hint),
+    ];
+
     private readonly ThemeCatalog _catalog;
     private readonly ThemeSettingsSeams _seams;
     private readonly IAppLog _log;
-    private readonly Dictionary<ThemeTab, HashSet<string>> _changed = new()
-    {
-        [ThemeTab.Shared] = new(StringComparer.Ordinal),
-        [ThemeTab.Light] = new(StringComparer.Ordinal),
-        [ThemeTab.Dark] = new(StringComparer.Ordinal),
-    };
+    private readonly IReadOnlyList<TokenRowViewModel> _tokenRows;
     private readonly bool _ready;
 
     /// <summary>Lists the themes and selects the theme in use, without applying it again.</summary>
@@ -84,6 +94,8 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         _catalog = catalog;
         _seams = seams;
         _log = log;
+        _tokenRows = [.. ThemeTokens.All.Select(token => new TokenRowViewModel(token, this))];
+        TokenGroups = [.. _tokenRows.GroupBy(row => row.Token.Group).Select(group => new TokenGroupViewModel(group.Key, [.. group]))];
         SelectedAppearance = Appearances.FirstOrDefault(choice => choice.Value == appearance) ?? Appearances[0];
         Reload(null);
         ThemeRowViewModel? start = FindValid(themeId);
@@ -132,6 +144,55 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     /// <summary>The half the app shows now, which the window reads from the application.</summary>
     [ObservableProperty]
     public partial Appearance ShownAppearance { get; set; }
+
+    /// <summary>The token editor's open tab.</summary>
+    [ObservableProperty]
+    public partial ThemeTab SelectedTab { get; set; } = ThemeTab.Light;
+
+    /// <summary>The token editor's rows of <see cref="SelectedTab"/>, grouped as <see cref="ThemeTokens.All"/> orders them.</summary>
+    public IReadOnlyList<TokenGroupViewModel> TokenGroups { get; }
+
+    public bool SharedTabOn => SelectedTab == ThemeTab.Shared;
+
+    public bool LightTabOn => SelectedTab == ThemeTab.Light;
+
+    public bool DarkTabOn => SelectedTab == ThemeTab.Dark;
+
+    /// <summary>Whether the open tab is a half the theme lacks, so its rows show inherited and disabled under a note.</summary>
+    public bool ShowsMissingHalf => SelectedTab != ThemeTab.Shared && WorkingTheme is { } working && LayerOf(working, SelectedTab) is null;
+
+    /// <summary>The note over the rows of a missing half.</summary>
+    public string MissingHalfNote =>
+        SelectedTab == ThemeTab.Light
+            ? "This theme has no light half. In light mode YAMV shows its dark half."
+            : "This theme has no dark half. In dark mode YAMV shows its light half.";
+
+    /// <summary>The button that adds the open tab's missing half: <c>Add dark</c> or <c>Add light</c>.</summary>
+    public string AddHalfLabel => SelectedTab == ThemeTab.Light ? "Add light" : "Add dark";
+
+    /// <summary>Whether the selected theme is editable and lacks a dark half.</summary>
+    public bool CanAddDark => IsEditable && WorkingTheme is { Dark: null };
+
+    /// <summary>Whether the selected theme is editable and lacks a light half.</summary>
+    public bool CanAddLight => IsEditable && WorkingTheme is { Light: null };
+
+    /// <summary>Whether the open tab's half can be added.</summary>
+    public bool CanAddHalf =>
+        SelectedTab switch
+        {
+            ThemeTab.Light => CanAddLight,
+            ThemeTab.Dark => CanAddDark,
+            _ => false,
+        };
+
+    /// <summary>Whether the header shows the hint about grey values and the reset arrow: an editable tab of a user theme.</summary>
+    public bool ShowsHint => IsEditable && !ShowsMissingHalf;
+
+    /// <summary>The hint's text: where the open tab's grey values come from.</summary>
+    public string Hint =>
+        SelectedTab == ThemeTab.Shared
+            ? "Grey values come from the defaults. ↺ removes a value from this tab."
+            : "Grey values come from Shared or the defaults. ↺ removes a value from this tab.";
 
     /// <summary>The id of the app's theme.</summary>
     public string InUseId { get; private set; }
@@ -191,8 +252,9 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
 
     private IEnumerable<ThemeRowViewModel> Rows => BuiltInRows.Concat(UserRows);
 
-    /// <summary>The names of the tokens of <paramref name="tab"/> edited since the last save or revert.</summary>
-    public IReadOnlySet<string> ChangedIn(ThemeTab tab) => new HashSet<string>(_changed[tab], StringComparer.Ordinal);
+    /// <summary>The names of the tokens whose value in the layer of <paramref name="tab"/> differs from the saved theme's.</summary>
+    public IReadOnlySet<string> ChangedIn(ThemeTab tab) =>
+        new HashSet<string>(ThemeTokens.All.Select(token => token.Name).Where(name => IsChanged(tab, name)), StringComparer.Ordinal);
 
     /// <summary>
     /// Shows <paramref name="row"/>; a valid theme is also made the app's theme. With unsaved edits, first asks what to do with
@@ -224,15 +286,15 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
 
     /// <summary>Sets a token in the working copy.</summary>
     /// <exception cref="InvalidOperationException">The selected theme is built in or did not load.</exception>
-    public void SetToken(ThemeTab tab, string name, ThemeValue value) => Edit(ThemeEditing.SetToken(RequireEditable(), tab, name, value), tab, name);
+    public void SetToken(ThemeTab tab, string name, ThemeValue value) => Edit(ThemeEditing.SetToken(RequireEditable(), tab, name, value));
 
     /// <summary>Removes a token from a tab of the working copy, so it inherits again.</summary>
     /// <exception cref="InvalidOperationException">The selected theme is built in or did not load.</exception>
-    public void ResetToken(ThemeTab tab, string name) => Edit(ThemeEditing.ResetToken(RequireEditable(), tab, name), tab, name);
+    public void ResetToken(ThemeTab tab, string name) => Edit(ThemeEditing.ResetToken(RequireEditable(), tab, name));
 
     /// <summary>Adds an empty light or dark half to the working copy.</summary>
     /// <exception cref="InvalidOperationException">The selected theme is built in or did not load, or already has the half.</exception>
-    public void AddVariant(Appearance appearance) => Edit(ThemeEditing.AddVariant(RequireEditable(), appearance), null, null);
+    public void AddVariant(Appearance appearance) => Edit(ThemeEditing.AddVariant(RequireEditable(), appearance));
 
     /// <summary>
     /// Writes the working copy; returns whether it was written. A failed write keeps the working copy and sets
@@ -257,7 +319,7 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         }
 
         SavedTheme = working;
-        ClearEdits();
+        IsDirty = false;
         if (ThemeIds.Comparer.Equals(InUseId, working.Id))
         {
             _seams.Apply(working.Id, SelectedAppearance.Value);
@@ -380,9 +442,17 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     {
         WorkingTheme = SavedTheme;
         ErrorLine = null;
-        ClearEdits();
+        IsDirty = false;
         NotifyDerived();
     }
+
+    /// <summary>Adds the open tab's missing half, empty, so every token in it shows inherited until set.</summary>
+    [RelayCommand(CanExecute = nameof(CanAddHalf))]
+    private void AddHalf() => AddVariant(SelectedTab == ThemeTab.Light ? Appearance.Light : Appearance.Dark);
+
+    /// <summary>Opens a tab of the token editor.</summary>
+    [RelayCommand]
+    private void ShowTab(ThemeTab tab) => SelectedTab = tab;
 
     /// <summary>Writes an editable copy of the selected built-in theme into Yours, then selects and applies it.</summary>
     [RelayCommand(CanExecute = nameof(IsBuiltIn))]
@@ -430,7 +500,58 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         }
     }
 
-    partial void OnShownAppearanceChanged(Appearance value) => OnPropertyChanged(nameof(TitleDetail));
+    partial void OnShownAppearanceChanged(Appearance value)
+    {
+        OnPropertyChanged(nameof(TitleDetail));
+        if (SelectedTab == ThemeTab.Shared)
+        {
+            RefreshTokens();
+        }
+    }
+
+    partial void OnSelectedTabChanged(ThemeTab value) => RefreshTokens();
+
+    partial void OnSelectedChanged(ThemeRowViewModel? value) => RefreshTokens();
+
+    partial void OnSavedThemeChanged(ThemeDefinition? value) => RefreshTokens();
+
+    partial void OnWorkingThemeChanged(ThemeDefinition? value) => RefreshTokens();
+
+    /// <summary>The tokens <paramref name="tab"/> edits in <paramref name="theme"/>, or null for a half the theme lacks.</summary>
+    private static IReadOnlyDictionary<string, ThemeValue>? LayerOf(ThemeDefinition theme, ThemeTab tab) =>
+        tab switch
+        {
+            ThemeTab.Shared => theme.SharedTokens,
+            ThemeTab.Light => theme.Light?.Tokens,
+            ThemeTab.Dark => theme.Dark?.Tokens,
+            _ => throw new ArgumentOutOfRangeException(nameof(tab), tab, "Unknown theme tab."),
+        };
+
+    private static ThemeValue? LayerValue(ThemeDefinition? theme, ThemeTab tab, string name) =>
+        theme is null ? null : LayerOf(theme, tab)?.GetValueOrDefault(name);
+
+    private bool IsChanged(ThemeTab tab, string name) => !Equals(LayerValue(WorkingTheme, tab, name), LayerValue(SavedTheme, tab, name));
+
+    /// <summary>Shows the working copy's tokens of the open tab in the rows, and what follows from the tab in the header.</summary>
+    private void RefreshTokens()
+    {
+        if (WorkingTheme is { } working)
+        {
+            bool editable = IsEditable && LayerOf(working, SelectedTab) is not null;
+            IReadOnlyList<ThemeTokenRow> rows = ThemeTokenView.Build(working, SelectedTab, ShownAppearance);
+            for (int index = 0; index < rows.Count; index++)
+            {
+                _tokenRows[index].Update(rows[index], IsChanged(SelectedTab, rows[index].Token.Name), editable);
+            }
+        }
+
+        foreach (string property in TabProperties)
+        {
+            OnPropertyChanged(property);
+        }
+
+        AddHalfCommand.NotifyCanExecuteChanged();
+    }
 
     /// <summary>
     /// Whether <paramref name="exception"/> is a catalog call's failure that the header shows: the file system's, a theme the
@@ -480,7 +601,8 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         );
     }
 
-    private void Edit(ThemeDefinition edited, ThemeTab? tab, string? name)
+    /// <summary>Makes <paramref name="edited"/> the working copy, dirty while its content differs from the saved theme's.</summary>
+    private void Edit(ThemeDefinition edited)
     {
         if (ReferenceEquals(edited, WorkingTheme))
         {
@@ -488,12 +610,7 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         }
 
         WorkingTheme = edited;
-        if (tab is { } changedTab && name is not null)
-        {
-            _changed[changedTab].Add(name);
-        }
-
-        IsDirty = true;
+        IsDirty = SavedTheme is not { } saved || !edited.ContentEquals(saved);
         NotifyDerived();
     }
 
@@ -508,7 +625,7 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         Select(row);
         SavedTheme = row.Theme;
         WorkingTheme = row.Theme;
-        ClearEdits();
+        IsDirty = false;
         ErrorLine = null;
         NotifyDerived();
     }
@@ -548,16 +665,6 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     private ThemeRowViewModel DefaultRow() =>
         FindValid(ThemeCatalog.DefaultThemeId)
         ?? throw new InvalidOperationException($"The theme '{ThemeCatalog.DefaultThemeId}' is not in the catalog.");
-
-    private void ClearEdits()
-    {
-        foreach (HashSet<string> names in _changed.Values)
-        {
-            names.Clear();
-        }
-
-        IsDirty = false;
-    }
 
     private void Fail(string action, string name, Exception exception)
     {

@@ -3,6 +3,7 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:vm="using:Yamv.App.ViewModels"
   xmlns:ts="using:Yamv.App.Views.ThemeSettings"
+  xmlns:core="using:Yamv.Core.Theming"
   xmlns:chrome="using:Avalonia.Controls.Chrome"
   x:Class="Yamv.App.Views.ThemeSettingsWindow"
   x:DataType="vm:ThemeSettingsViewModel"
@@ -135,6 +136,43 @@
     </Style>
     <Style Selector="Border.badge.mute > TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+
+    <!-- The token editor's Shared / Light / Dark segments. -->
+    <Style Selector="Border.seg">
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="Button.tab">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="0,5" />
+      <Setter Property="BorderThickness" Value="0,0,1,0" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextSecondary}" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border
+            Background="{TemplateBinding Background}"
+            BorderBrush="{TemplateBinding BorderBrush}"
+            BorderThickness="{TemplateBinding BorderThickness}"
+            Padding="{TemplateBinding Padding}"
+          >
+            <ContentPresenter Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.tab.last">
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.tab.on">
+      <Setter Property="Background" Value="{DynamicResource YamvSelectionBackground}" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvSelectionText}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
     <Style Selector="ComboBox#AppearanceBox">
@@ -370,6 +408,47 @@
                   Foreground="{DynamicResource YamvTextMuted}"
                   TextTrimming="CharacterEllipsis"
                 />
+                <Border x:Name="TabStrip" Classes="seg" IsVisible="{Binding ShowsEditor}">
+                  <Grid ColumnDefinitions="*,*,*">
+                    <Button
+                      x:Name="SharedTab"
+                      Grid.Column="0"
+                      Classes="tab"
+                      Classes.on="{Binding SharedTabOn}"
+                      Content="Shared"
+                      Command="{Binding ShowTabCommand}"
+                      CommandParameter="{x:Static core:ThemeTab.Shared}"
+                    />
+                    <Button
+                      x:Name="LightTab"
+                      Grid.Column="1"
+                      Classes="tab"
+                      Classes.on="{Binding LightTabOn}"
+                      Content="Light"
+                      Command="{Binding ShowTabCommand}"
+                      CommandParameter="{x:Static core:ThemeTab.Light}"
+                    />
+                    <Button
+                      x:Name="DarkTab"
+                      Grid.Column="2"
+                      Classes="tab last"
+                      Classes.on="{Binding DarkTabOn}"
+                      Content="Dark"
+                      Command="{Binding ShowTabCommand}"
+                      CommandParameter="{x:Static core:ThemeTab.Dark}"
+                    />
+                  </Grid>
+                </Border>
+                <TextBlock
+                  x:Name="Hint"
+                  Text="{Binding Hint}"
+                  IsVisible="{Binding ShowsHint}"
+                  Margin="0,8,0,0"
+                  FontSize="11.5"
+                  LineHeight="16"
+                  TextWrapping="Wrap"
+                  Foreground="{DynamicResource YamvTextMuted}"
+                />
                 <DockPanel x:Name="LockNote" Margin="0,8,0,0" IsVisible="{Binding IsBuiltIn}">
                   <Canvas DockPanel.Dock="Left" Width="13" Height="13" Margin="0,1,7,0" VerticalAlignment="Top">
                     <Canvas.RenderTransform>
@@ -407,7 +486,9 @@
               </StackPanel>
             </Border>
             <Panel>
-              <ContentControl x:Name="EditorHost" IsVisible="{Binding ShowsEditor}" />
+              <ContentControl x:Name="EditorHost" IsVisible="{Binding ShowsEditor}">
+                <ts:TokenEditor x:Name="TokenEditor" />
+              </ContentControl>
               <StackPanel x:Name="InvalidPane" Margin="18,22" IsVisible="{Binding IsInvalid}">
                 <Border
                   Padding="14,12"
