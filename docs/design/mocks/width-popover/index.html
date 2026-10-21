@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV width popover decisions</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1600px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 12px; font-size: 15.5px; max-width: 1480px; line-height: 1.5; }
+p.page code, section > p code { font: 13px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+.anno-key { display: inline-block; width: 22px; height: 12px; border: 2px dashed #ffb27a; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+section { margin: 44px 0 0; padding-top: 28px; border-top: 1px solid rgba(255,255,255,.28); }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > p { color: #eef0f2; margin: 0 0 18px; font-size: 15px; max-width: 1480px; line-height: 1.5; }
+.theme-row { font: 600 11.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin: 22px 0 8px; }
+.lanes { display: flex; gap: 40px; align-items: flex-start; }
+.lane { width: 740px; flex: none; }
+.lane > h3 { font: 600 16.5px "Inter V"; color: #fff; margin: 0 0 3px; }
+.lane > h3 .q { display: inline-block; min-width: 54px; padding: 1px 7px; margin-right: 8px; border-radius: 5px; background: rgba(0,0,0,.28); font-size: 14px; text-align: center; }
+.lane > p.cap { color: #f1f3f5; font-size: 13px; margin: 0 0 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.frames { display: flex; gap: 20px; }
+.frame { width: 493px; flex: none; }
+.frame .fcap { color: #f1f3f5; font-size: 12.5px; margin: 7px 0 0; line-height: 1.35; }
+.zoom { width: max-content; }
+
+/* token legend under a lane: every colour named by its token */
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 18px; margin-top: 10px; font-size: 11.5px; color: #dfe3e7; }
+.legend span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend i { width: 11px; height: 11px; border-radius: 3px; flex: none; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.legend code { font: 11px "JetBrains Mono V"; color: #fff; }
+.legend em { font-style: normal; color: #cfd4d9; }
+
+/* ---------- the app window: every colour is a Studio token ---------- */
+.win { position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 10px; flex: none;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-family: "Inter V", sans-serif; font-size: 13px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; white-space: nowrap; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--yamv-text-muted); margin-right: 6px; flex: none; }
+.wbtn.hover { background: var(--yamv-hover-background); color: var(--yamv-text); }
+.wbtn.open { background: var(--yamv-selection-background); color: var(--yamv-accent); }
+.wbtn.disabled { opacity: .45; }
+.wbtn.focus { box-shadow: 0 0 0 2px var(--yamv-accent); }
+.body { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+.col { margin: 0 auto; padding: 40px 44px 64px; }
+.col.hidden { visibility: hidden; }
+.side { flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 12px 8px; overflow: hidden; }
+
+/* document */
+.md { font-family: "Inter V", sans-serif; font-size: 15.5px; line-height: 1.62; color: var(--yamv-text); }
+.md h1 { font-weight: 700; font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .5em; color: var(--yamv-heading); }
+.md h2 { font-weight: 700; font-size: 1.32em; line-height: 1.25; margin: 1.3em 0 .55em; padding-bottom: .3em; border-bottom: 1px solid var(--yamv-line); color: var(--yamv-heading); }
+.md p { margin: 0 0 1em; }
+.md ul { margin: 0 0 1em; padding-left: 1.5em; }
+.md li { margin-bottom: .2em; }
+.md a { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; }
+.md code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md pre { background: var(--yamv-code-background); border: 1px solid var(--yamv-code-line); border-radius: 8px; padding: 14px 16px; font: 13px/1.6 "JetBrains Mono V"; margin: 0 0 1.2em; white-space: pre; overflow: hidden; }
+.md pre code { background: none; padding: 0; font-size: inherit; }
+.k { color: var(--yamv-syntax-keyword); } .s { color: var(--yamv-syntax-string); } .c { color: var(--yamv-syntax-comment); font-style: italic; } .n { color: var(--yamv-syntax-number); }
+.missing-pane { padding: 70px 40px; text-align: center; color: var(--yamv-text-muted); font-size: 13.5px; line-height: 1.5; }
+.missing-pane h4 { color: var(--yamv-text); font: 600 17px "Inter V"; margin: 0 0 6px; }
+.missing-pane code { font: 12px "JetBrains Mono V"; background: var(--yamv-chrome-background); padding: 2px 6px; border-radius: 4px; color: var(--yamv-text-secondary); }
+.btn { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--yamv-line); border-radius: 6px; background: var(--yamv-page-background); color: var(--yamv-text); font: 550 12.5px "Inter V"; }
+
+/* tree */
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--yamv-text); white-space: nowrap; }
+.grp-h .chev { width: 10px; color: var(--yamv-text-muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.badge.dir { color: var(--yamv-text-muted); border-color: var(--yamv-line); }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; font-size: 13px; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--yamv-text-muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+.row.missing .nm { text-decoration: line-through; color: var(--yamv-text-muted); }
+.tag { margin-left: auto; font: 600 9.5px "Inter V"; text-transform: uppercase; letter-spacing: .05em; color: var(--yamv-warning); background: var(--yamv-warning-background); border: 1px solid var(--yamv-warning-line); border-radius: 4px; padding: 1px 5px; }
+
+/* ---------- the popover (a separate window) ---------- */
+.pop { position: absolute; width: 300px; z-index: 5; background: var(--yamv-page-background); color: var(--yamv-text); padding: 14px 14px 12px; font-size: 12.5px; }
+.pop.a { top: 41px; right: 144px; border-radius: 8px; filter: drop-shadow(0 10px 22px var(--pop-shadow)) drop-shadow(0 1px 3px var(--pop-shadow-near)); }
+.pop.b { top: 38px; right: 144px; border-radius: 0 0 8px 8px; border: 1px solid var(--yamv-line); border-top: 0; }
+.pop .arrow { position: absolute; top: -7px; right: 7px; width: 14px; height: 7px; background: var(--yamv-page-background); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.pop .hd { display: flex; align-items: center; justify-content: space-between; }
+.pop .hd b { font-size: 13px; font-weight: 600; }
+.pop .val { font-variant-numeric: tabular-nums; color: var(--yamv-accent); font-weight: 600; font-size: 13px; }
+.track { position: relative; height: 4px; background: var(--yamv-line); border-radius: 2px; margin: 15px 8px 8px; }
+.track .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--yamv-accent); border-radius: 2px; }
+.track .thumb { position: absolute; top: -6px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--yamv-page-background); border: 2px solid var(--yamv-accent); }
+.track.off { opacity: .45; }
+.ticks { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--yamv-text-muted); margin: 0 2px 11px; }
+.ticks.why { justify-content: flex-start; font-size: 11.5px; }
+.scope { font-size: 12px; color: var(--yamv-text-muted); border-top: 1px solid var(--yamv-line); padding-top: 10px; }
+.seg { display: flex; border: 1px solid var(--yamv-line); border-radius: 6px; overflow: hidden; margin: 6px 0 8px; }
+.seg span { flex: 1; text-align: center; padding: 5px 0; font-size: 11.5px; color: var(--yamv-text); border-right: 1px solid var(--yamv-line); white-space: nowrap; }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 600; }
+.inh { font-size: 12px; color: var(--yamv-text-muted); margin: -2px 0 8px; }
+.inh code { font: 11px "JetBrains Mono V"; background: var(--yamv-code-background); padding: 1px 5px; border-radius: 3px; color: var(--yamv-text); }
+.links { display: flex; gap: 16px; font-size: 12px; color: var(--yamv-accent); }
+.pfoot { display: flex; align-items: center; gap: 7px; margin: 11px -14px -12px; padding: 8px 14px; background: var(--yamv-warning-background); border-top: 1px solid var(--yamv-warning-line);
+         font-size: 12px; color: var(--yamv-text); border-radius: 0 0 8px 8px; }
+.pfoot svg { color: var(--yamv-warning); flex: none; }
+
+/* ---------- annotations: not UI ---------- */
+.ov { position: absolute; inset: 0; pointer-events: none; }
+.hatch { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, var(--anno-soft) 0 3px, transparent 3px 9px); }
+.edge { position: absolute; top: 0; bottom: 0; border-left: 1.5px dashed var(--anno); }
+.band { position: absolute; left: 0; right: 0; bottom: 0; height: 128px; background: var(--anno-band); border-top: 1px solid var(--anno-soft); }
+.dim { position: absolute; height: 0; border-top: 2px solid var(--anno); }
+.dim::before, .dim::after { content: ""; position: absolute; top: -10px; height: 18px; border-left: 2px solid var(--anno); }
+.dim::before { left: 0; } .dim::after { right: 0; }
+.dim > b { position: absolute; left: 50%; top: -15px; transform: translateX(-50%); background: var(--anno); color: var(--anno-ink); font: 700 19px "Inter V"; padding: 3px 12px; border-radius: 6px; white-space: nowrap; }
+.dim.minor { border-top-width: 1.5px; border-top-style: dashed; }
+.dim.minor > b { background: var(--yamv-page-background); color: var(--anno); border: 1.5px solid var(--anno); font-size: 16px; padding: 1px 10px; top: -13px; }
+.ring { position: absolute; border: 2px dashed var(--anno); border-radius: 8px; }
+.note { position: absolute; color: var(--anno); font: 650 13px "Inter V"; white-space: nowrap; }
+.ghost { position: absolute; top: -6px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; border: 2px dashed var(--anno); }
+.back { position: absolute; top: -13px; height: 0; border-top: 1.5px dashed var(--anno); }
+.back::before { content: ""; position: absolute; left: -2px; top: -5px; border: 4.5px solid transparent; border-right: 7px solid var(--anno); border-left: 0; }
+.was { position: absolute; top: 10px; bottom: 10px; border: 3px dashed var(--anno); border-radius: 6px; }
+.center-note { position: absolute; left: 0; right: 0; top: 42%; text-align: center; color: var(--anno); font: 650 30px "Inter V"; }
+
+/* button-state strip */
+.cells { display: flex; gap: 16px; }
+.cell { width: 292px; flex: none; }
+.cell .win { border-radius: 8px; }
+.cell h4 { font: 600 13.5px "Inter V"; color: #fff; margin: 8px 0 2px; }
+.cell .legend { grid-template-columns: 1fr; margin-top: 3px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: the content-width popover, five open questions</h1>
+<p class="page">Each lane is a Studio main window drawn at its real pixel size and scaled down; the popover is drawn at its real 300 px width inside it. Every UI colour is a Studio token (light or dark row), named in the muted captions. <span class="anno-key"></span>Orange marks are annotations, not UI.</p>
+<p class="page">Spec: <code>docs/design/content-width.md</code>. Page column: <code>.yamv-content { max-width: var(--yamv-content-width, 800px); padding: 40px 44px 64px }</code> with <code>box-sizing: border-box</code> (<code>yamv.css:58,75</code>).</p>
+
+<template id="ctl"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<section>
+  <h2>Q1 · What a stored width measures</h2>
+  <p>The same 1240 × 780 window (tree 280 px, pane 960 px, shown at 60%), with the popover reading 760 px. Hatching is the column's 44 px side padding; the solid ruler is the 760.</p>
+  <div class="theme-row">Studio light</div><div class="lanes" data-q="q1" data-theme="light"></div>
+  <div class="theme-row">Studio dark</div><div class="lanes" data-q="q1" data-theme="dark"></div>
+</section>
+
+<section>
+  <h2>Q2 · The popover's chrome</h2>
+  <p>A separate window, so it can sit over the WebView. Its contents are settled; only the chrome around them differs. Window 925 × 520 (pane 645 px, so the readout is 600 px), shown at 80%.</p>
+  <div class="theme-row">Studio light</div><div class="lanes" data-q="q2" data-theme="light"></div>
+  <div class="theme-row">Studio dark</div><div class="lanes" data-q="q2" data-theme="dark"></div>
+  <div class="theme-row" style="margin-top:34px">Q2 · The ⟷ button's states, for both lanes (shown at 160%; the glyph is a 16 px vector path) · Studio light</div><div class="cells" data-strip="light"></div>
+  <div class="theme-row">Q2 · The ⟷ button's states · Studio dark</div><div class="cells" data-strip="dark"></div>
+</section>
+
+<section>
+  <h2>Q3 · Edge states, in the lane A chrome</h2>
+  <p>Windows 860 × 400 (tree 240 px unless noted), shown at 86%. Light on the left, dark on the right.</p>
+  <div data-q3></div>
+</section>
+
+<section>
+  <h2>Q4 · First paint of a document with a stored width</h2>
+  <p>A document in a folder that stores 560 px, opened in a 1200 × 560 window (pane 920 px), shown at 41%. Three frames each, left to right in time.</p>
+  <div data-q4></div>
+</section>
+
+<section>
+  <h2>Q5 · A width inherited from a folder that is no segment</h2>
+  <p><code>docs/plans/v1-build.md</code> in the repo group <code>yamv</code>; its 720 px comes from <code>docs</code>, which is neither the document's folder nor the group root. Window 1000 × 520 (tree 240 px, pane 760 px), shown at 74%, in the lane A chrome.</p>
+  <div class="theme-row">Studio light</div><div class="lanes" data-q="q5" data-theme="light"></div>
+  <div class="theme-row">Studio dark</div><div class="lanes" data-q="q5" data-theme="dark"></div>
+</section>
+
+<script>
+const LIGHT = { pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  warning: "#9a6700", warningBackground: "#fff8c5", warningLine: "#e5d17b", codeBackground: "#f6f8fa", codeLine: "#e4e8ec",
+  syntaxKeyword: "#cf222e", syntaxString: "#0a3069", syntaxComment: "#6e7781", syntaxNumber: "#0550ae" };
+const DARK = { pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  warning: "#d29922", warningBackground: "#bb800926", warningLine: "#9e6a03", codeBackground: "#161b22", codeLine: "#262c34",
+  syntaxKeyword: "#ff7b72", syntaxString: "#a5d6ff", syntaxComment: "#8b949e", syntaxNumber: "#79c0ff" };
+/* not tokens: the popover's shadow (lane A) and the annotation colours */
+const EXTRA = {
+  light: "--pop-shadow:rgba(31,35,40,.26);--pop-shadow-near:rgba(31,35,40,.16);--anno:#d9480f;--anno-ink:#fff;--anno-soft:rgba(217,72,15,.22);--anno-band:rgba(255,255,255,.93)",
+  dark: "--pop-shadow:rgba(0,0,0,.7);--pop-shadow-near:rgba(0,0,0,.55);--anno:#ff922b;--anno-ink:#1a0f00;--anno-soft:rgba(255,146,43,.24);--anno-band:rgba(15,19,24,.93)",
+};
+const T = { light: LIGHT, dark: DARK };
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (th) => Object.entries(T[th]).map(([k, v]) => `${kebab(k)}:${v}`).join(";") + ";" + EXTRA[th];
+
+const CTL = document.getElementById("ctl").innerHTML;
+const GLYPH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICO = `<svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+const WARN = `<svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1.6 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12.1" r=".9" fill="currentColor"/></svg>`;
+
+/* ---------- documents ---------- */
+const DOCS = {
+  plan: `<h1>YAMV plan</h1>
+<p>The viewer opens Markdown files from any folder and keeps them in a tree beside the page. This file is a snapshot of the <a>Linear issues</a>; change the issues, not this file.</p>
+<h2>Now</h2>
+<ul><li>Content width per folder, with the ⟷ popover and <code>Ctrl+[</code> / <code>Ctrl+]</code></li><li>Theme settings: live preview and the colour picker</li><li>Viewer windows share widths with the main window</li></ul>
+<h2>Next</h2>
+<p>Live reload when a file changes on disk, and a find bar that counts its matches. Both need the page to keep its scroll position across a re-render.</p>
+<pre><code><span class="c">// widths.json, beside session.json</span>
+{ <span class="s">"default"</span>: <span class="n">800</span>, <span class="s">"folders"</span>: { <span class="s">"X:\\dev\\yamv\\docs"</span>: <span class="n">720</span> } }</code></pre>
+<p>Printing and export stay in the backlog until someone asks for them.</p>`,
+  readme: `<h1>YAMV</h1>
+<p>Yet Another Markdown Viewer: a quiet reader for the Markdown files you keep open while you work, on Windows and macOS.</p>
+<h2>Build</h2>
+<pre><code>dotnet build Yamv.slnx -c Release</code></pre>
+<p>Read <a>docs/ARCHITECTURE.md</a> before changing anything; it maps every task to the files it touches.</p>`,
+  notes: `<h1>Reading notes</h1>
+<p>Notes from the week's papers. The second one argues that measure matters more than font size for long reading, and that most people settle between 60 and 75 characters a line.</p>
+<h2>To follow up</h2>
+<ul><li>Find the original study the second paper cites</li><li>Try a narrower column for a week and see if it sticks</li></ul>`,
+  v1: `<h1>v1 build</h1>
+<p>What the first public build needs before it ships: a signed executable on Windows, a notarised bundle on macOS, and a changelog a stranger can read.</p>
+<h2>Packaging</h2>
+<ul><li>Single-file publish for <code>win-x64</code> and <code>win-arm64</code></li><li>Universal app bundle, signed and notarised</li><li>Bundled fonts checked on both platforms</li></ul>
+<h2>Release notes</h2>
+<p>Written from the changelog, one sentence per change, in the product's own words.</p>`,
+  missing: `<div class="missing-pane"><h4>This file is no longer there</h4><p>It was moved or deleted:<br><br><code>X:\\dev\\yamv\\docs\\plans\\v1-build.md</code></p><p style="margin-top:18px"><span class="btn">Locate…</span>&nbsp;&nbsp;<span class="btn">Remove from list</span></p><p style="font-size:12px">YAMV keeps watching, and reopens it if it comes back.</p></div>`,
+};
+
+/* ---------- tree ---------- */
+const row = (name, cls = "", extra = "") => `<div class="row ${cls}">${ICO}<span class="nm">${name}</span>${extra}</div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+const head = (name, badge) => `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge ${badge === "dir" ? "dir" : ""}">${badge}</span></div>`;
+function tree(kind) {
+  const sel = (n) => (kind === "readme" && n === "README.md") || (kind === "plan" && n === "MAIN.md") || (kind === "v1" && n === "v1-build.md") ? "sel" : "";
+  let yamv = head("yamv", "git") + row("README.md", sel("README.md")) + folder("docs/plans") + row("MAIN.md", "in " + sel("MAIN.md"));
+  yamv += kind === "missing" ? row("v1-build.md", "in missing sel", '<span class="tag">missing</span>') : row("v1-build.md", "in " + sel("v1-build.md"));
+  const yaat = head("yaat", "git") + folder("docs") + row("ARCHITECTURE.md", "in") + row("glossary.md", "in");
+  const dl = head("~\\Downloads", "dir") + row("notes.md");
+  return `<div class="grp">${yamv}</div><div class="grp">${yaat}</div><div class="grp">${dl}</div>`;
+}
+
+/* ---------- popover ---------- */
+function pop(p) {
+  const pct = p.pct ?? 50;
+  const track = `<div class="track ${p.off ? "off" : ""}" style="${p.ghost != null ? "margin-top:26px" : ""}"><div class="fill" style="width:${pct}%"></div><div class="thumb" style="left:${pct}%"></div>${p.ghost != null
+    ? `<span class="ghost" style="left:${p.ghost}%"></span><span class="back" style="left:${pct + 4}%;width:${p.ghost - pct - 8}%"></span>` : ""}</div>`;
+  const ticks = p.why ? `<div class="ticks why">${p.why}</div>` : `<div class="ticks"><span>480</span><span>Full</span></div>`;
+  const seg = p.segs.map((s, i) => `<span class="${i === p.sel ? "on" : ""}" style="${p.segs.length > 3 ? "flex:auto;padding:5px 6px" : ""}">${s}</span>`).join("");
+  const inh = p.inherited ? `<div class="inh">Inherited from <code>${p.inherited}</code></div>` : "";
+  const foot = p.error ? `<div class="pfoot">${WARN}Could not save the width; see the log.</div>` : "";
+  return `<div class="pop ${p.chrome}">${p.chrome === "a" ? '<span class="arrow"></span>' : ""}
+    <div class="hd"><b>Content width</b><span class="val">${p.readout}</span></div>${track}${ticks}
+    <div class="scope">Saved for<div class="seg">${seg}</div>${inh}<div class="links"><span>Reset to inherited</span><span>Clear all overrides here</span></div></div>${foot}</div>`;
+}
+
+/* ---------- window ---------- */
+function win(o) {
+  const treeW = o.tree ? (o.treeW ?? 280) : 0;
+  const col = o.col != null ? `<div class="col md ${o.hidden ? "hidden" : ""}" style="max-width:${o.col}px">${DOCS[o.doc]}</div>` : DOCS[o.doc];
+  const side = o.tree ? `<div class="side" style="width:${treeW}px">${tree(o.tree)}</div>` : "";
+  return `<div class="win" style="width:${o.w}px;height:${o.h}px;${vars(o.theme)}">
+    <div class="titlebar"><span class="name">${o.title}</span><span>${o.loc}</span><span class="spacer"></span><span class="wbtn ${o.btn ?? ""}">${GLYPH}</span>${CTL}</div>
+    <div class="body"><div class="pane">${col}${o.overlay ?? ""}</div>${side}</div>${o.pop ?? ""}${o.extra ?? ""}</div>`;
+}
+const zoom = (z, html) => `<div class="zoom" style="zoom:${z}">${html}</div>`;
+const lane = (q, title, cap, inner, after = "") => `<div class="lane"><h3><span class="q">${q}</span>${title}</h3><p class="cap">${cap}</p>${inner}${after}</div>`;
+function legend(th, items) {
+  return `<div class="legend">${items.map(([tok, use]) => {
+    const v = T[th][tok];
+    return v ? `<span><i style="background:${v}"></i><code>${tok}</code><em>${use} · ${v}</em></span>` : `<span><i style="background:transparent;box-shadow:none"></i><code>${tok}</code><em>${use}</em></span>`;
+  }).join("")}</div>`;
+}
+
+/* ---------- Q1 ---------- */
+function rulerOverlay(paneW, paneH, outer, mode) {
+  const L = (paneW - outer) / 2, R = L + outer, tl = L + 44, tr = R - 44;
+  const dim = (a, b, y, label, minor) => `<div class="dim ${minor ? "minor" : ""}" style="left:${a}px;width:${b - a}px;top:${y}px"><b>${label}</b></div>`;
+  const main = mode === "outer" ? dim(L, R, paneH - 82, "760 px  (the stored width)") : dim(tl, tr, paneH - 82, "760 px  (the stored width)");
+  const minor = mode === "outer" ? dim(tl, tr, paneH - 34, "text 672 px", true) : dim(L, R, paneH - 34, "column 848 px", true);
+  return `<div class="ov"><div class="hatch" style="left:${L}px;width:44px"></div><div class="hatch" style="left:${tr}px;width:44px"></div>
+    <div class="edge" style="left:${L}px"></div><div class="edge" style="left:${R}px"></div><div class="edge" style="left:${tl}px;opacity:.55"></div><div class="edge" style="left:${tr}px;opacity:.55"></div>
+    <div class="band"></div>${main}${minor}</div>`;
+}
+function q1(th) {
+  const base = { theme: th, w: 1240, h: 780, tree: "plan", title: "MAIN.md", loc: "yamv / docs / plans", btn: "open", doc: "plan" };
+  const p = pop({ chrome: "a", readout: "760 px", pct: 58, segs: ["docs/plans", "yamv (repo)", "All documents"], sel: 0 });
+  const a = win({ ...base, col: 760, pop: p, overlay: rulerOverlay(960, 742, 760, "outer") });
+  const b = win({ ...base, col: 848, pop: p, overlay: rulerOverlay(960, 742, 848, "text") });
+  return lane("Q1 · A", "760 px is the column's outer width", "The column box is 760 px; the text inside its 44 px paddings is 672 px. Today's yamv.css, no page change.", zoom(0.597, a))
+    + lane("Q1 · B", "760 px is the text measure", "The text is 760 px; the column box grows to 848 px with its paddings. The page adds 88 px.", zoom(0.597, b));
+}
+
+/* ---------- Q2 ---------- */
+const POP_TOKENS = [["pageBackground", "fill"], ["text", "labels"], ["textMuted", "captions, ticks"], ["accent", "readout, fill, thumb, links"],
+  ["line", "track, divider, segments"], ["selectionBackground", "chosen segment"], ["selectionText", "chosen segment text"]];
+function q2(th) {
+  const base = { theme: th, w: 925, h: 520, tree: "plan", title: "MAIN.md", loc: "yamv / docs / plans", btn: "open", doc: "plan", col: 760 };
+  const args = { readout: "600 px", pct: 73, segs: ["docs/plans", "yamv (repo)", "All documents"], sel: 0 };
+  const a = win({ ...base, pop: pop({ ...args, chrome: "a" }) });
+  const b = win({ ...base, pop: pop({ ...args, chrome: "b" }) });
+  const shadow = th === "light" ? "0 10px 22px rgba(31,35,40,.26)" : "0 10px 22px rgba(0,0,0,.7)";
+  return lane("Q2 · A", "Floating, with an arrow and a shadow", "Borderless, 8 px radius, shadow, arrow under ⟷. Esc, a click outside or ⟷ again closes it.", zoom(0.8, a),
+      legend(th, [...POP_TOKENS.slice(0, 1).map(([t]) => [t, "fill and arrow"]), ...POP_TOKENS.slice(1), ["shadow", `not a token: ${shadow}`]]))
+    + lane("Q2 · B", "Flush, with a border", "No arrow, a 1 px border, no shadow; hangs flush from the title bar's bottom edge, top corners square.", zoom(0.8, b),
+      legend(th, [...POP_TOKENS.slice(0, 4), ["line", "track, divider, segments, 1 px border"], ...POP_TOKENS.slice(5)]));
+}
+function strip(th) {
+  const states = [
+    ["Rest", "", [["textMuted", "glyph"], ["chromeBackground", "fill (the bar's)"]]],
+    ["Hover", "hover", [["hoverBackground", "fill"], ["text", "glyph"]]],
+    ["Pressed / open", "open", [["selectionBackground", "fill"], ["accent", "glyph"]]],
+    ["Disabled", "disabled", [["textMuted", "glyph, at 45% opacity"], ["chromeBackground", "fill (the bar's)"]]],
+    ["Keyboard focus", "focus", [["accent", "2 px ring"], ["textMuted", "glyph"]]],
+  ];
+  return states.map(([name, cls, toks]) => {
+    const w = win({ theme: th, w: 182, h: 54, tree: null, title: "", loc: "", btn: cls, doc: "notes", col: 9999,
+      extra: cls === "open" ? `<div style="position:absolute;right:144px;top:41px;width:150px;height:30px;background:var(--yamv-page-background);border-radius:8px 8px 0 0;filter:drop-shadow(0 4px 8px var(--pop-shadow))"><span style="position:absolute;top:-7px;right:7px;width:14px;height:7px;background:var(--yamv-page-background);clip-path:polygon(50% 0,100% 100%,0 100%)"></span></div>` : "" });
+    return `<div class="cell">${zoom(1.6, w.replace('class="win"', 'class="win" data-cell'))}<h4>${name}</h4>${legend(th, toks)}</div>`;
+  }).join("");
+}
+
+/* ---------- Q3 ---------- */
+const SEG3 = ["docs/plans", "yamv (repo)", "All documents"];
+const Q3 = [
+  ["(a)", "A viewer window", "No tree. Saved for has the file's folder and All documents only (the folder is its own group root).",
+    (th) => win({ theme: th, w: 860, h: 400, tree: null, title: "notes.md", loc: "~\\Downloads", btn: "open", doc: "notes", col: 760,
+      pop: pop({ chrome: "a", readout: "800 px", pct: 84, segs: ["Downloads", "All documents"], sel: 1 }) })],
+  ["(b)", "A document in the group root", "README.md sits directly in yamv, so the middle (group root) segment is hidden.",
+    (th) => win({ theme: th, w: 860, h: 400, tree: "readme", treeW: 240, title: "README.md", loc: "yamv", btn: "open", doc: "readme", col: 560,
+      pop: pop({ chrome: "a", readout: "560 px", pct: 57, segs: ["yamv (repo)", "All documents"], sel: 0 }) })],
+  ["(c)", "No document shown", "Empty, missing or unreadable: ⟷ is disabled and opens nothing (missing shown).",
+    (th) => win({ theme: th, w: 860, h: 400, tree: "missing", treeW: 240, title: "v1-build.md", loc: "yamv / docs / plans", btn: "disabled", doc: "missing",
+      extra: `<div class="ring" style="top:3px;right:141px;width:34px;height:32px"></div><div class="note" style="top:11px;right:184px">disabled</div>` })],
+  ["(d)", "A pane narrower than 480 px", "Tree dragged to 440 px leaves a 420 px pane: the slider is disabled and says why.",
+    (th) => win({ theme: th, w: 860, h: 400, tree: "plan", treeW: 440, title: "MAIN.md", loc: "yamv / docs / plans", btn: "open", doc: "plan", col: 760,
+      pop: pop({ chrome: "a", readout: "760 px", pct: 0, off: true, why: "The window is narrower than 480 px", segs: SEG3, sel: 0 }) })],
+  ["(e)", "A write that failed", "The thumb springs back to the saved 560 px; the foot shows the message for 4 s.",
+    (th) => win({ theme: th, w: 860, h: 400, tree: "plan", treeW: 240, title: "MAIN.md", loc: "yamv / docs / plans", btn: "open", doc: "plan", col: 560,
+      pop: pop({ chrome: "a", readout: "560 px", pct: 57, ghost: 90, error: true, segs: SEG3, sel: 0 }) })],
+  ["(f)", "An inherited width", "docs/plans has no width of its own; it comes from docs, named under Saved for.",
+    (th) => win({ theme: th, w: 860, h: 400, tree: "plan", treeW: 240, title: "MAIN.md", loc: "yamv / docs / plans", btn: "open", doc: "plan", col: 520,
+      pop: pop({ chrome: "a", readout: "520 px", pct: 29, inherited: "docs", segs: SEG3, sel: 0 }) })],
+];
+function q3() {
+  return Q3.map(([k, title, cap, f]) => `<div class="lanes" style="margin-top:22px">${lane("Q3 " + k, title + " · light", cap, zoom(0.86, f("light")))}${lane("Q3 " + k, title + " · dark", cap, zoom(0.86, f("dark")))}</div>`).join("");
+}
+
+/* ---------- Q4 ---------- */
+function q4frame(th, step, lane) {
+  const base = { theme: th, w: 1200, h: 560, tree: "plan", title: "MAIN.md", loc: "yamv / docs / plans", btn: "", doc: "plan" };
+  if (step === 1 || (lane === "a" && step === 2)) {
+    const msg = lane === "a" ? (step === 1 ? "page hidden" : "page hidden · 560 px received") : "page loading";
+    return win({ ...base, col: 560, hidden: true, overlay: `<div class="ov"><div class="center-note">${msg}</div></div>` });
+  }
+  if (lane === "a") return win({ ...base, col: 560 });
+  if (step === 2) return win({ ...base, col: 800 });
+  return win({ ...base, col: 560, overlay: `<div class="ov"><div class="was" style="left:60px;width:800px"></div><div class="note" style="top:24px;left:74px;font-size:26px">was 800 px</div><div class="note" style="top:48%;left:84px;font-size:56px;line-height:1">→</div><div class="note" style="top:48%;left:770px;font-size:56px;line-height:1">←</div></div>` });
+}
+const Q4CAP = {
+  a: ["1 · Window and tree drawn; the page stays hidden while the host reads widths.json.", "2 · The host sends 560 px ahead of the render; still hidden.", "3 · The page shows once, at 560 px. Nothing moves."],
+  b: ["1 · Window and tree drawn; the page is still loading.", "2 · The page shows at the 800 px default.", "3 · The stored 560 px arrives; the column jumps in (dashed: where it was)."],
+};
+function q4() {
+  const rows = [["a", "Q4 · A", "The page waits for the width, then shows", "Hidden until the width arrives, then shown once at the stored width: a later first paint, no jump."],
+                ["b", "Q4 · B", "The page shows at 800 px, then jumps", "Shown at once at the 800 px default, then reflowed when the stored width arrives: a visible jump."]];
+  let html = "";
+  for (const [k, q, title, cap] of rows) for (const th of ["light", "dark"]) {
+    const frames = [1, 2, 3].map((s) => `<div class="frame">${zoom(0.41, q4frame(th, s, k))}<p class="fcap">${Q4CAP[k][s - 1]}</p></div>`).join("");
+    html += `<div class="lane" style="width:auto;margin-top:22px"><h3><span class="q">${q}</span>${title} · ${th}</h3><p class="cap">${cap}</p><div class="frames">${frames}</div></div>`;
+  }
+  return html;
+}
+
+/* ---------- Q5 ---------- */
+function q5(th) {
+  const base = { theme: th, w: 1000, h: 520, tree: "v1", treeW: 240, title: "v1-build.md", loc: "yamv / docs / plans", btn: "open", doc: "v1", col: 720 };
+  const args = { chrome: "a", readout: "720 px", pct: 86 };
+  const a = win({ ...base, pop: pop({ ...args, segs: ["plans", "yamv (repo)", "All documents"], sel: 0, inherited: "docs" }) });
+  const b = win({ ...base, pop: pop({ ...args, segs: ["plans", "docs", "yamv (repo)", "All documents"], sel: 1 }) });
+  return lane("Q5 · A", "Three segments, the source named below", "The slider writes a new width for plans.", zoom(0.74, a))
+    + lane("Q5 · B", "A fourth segment for the source", "The slider edits docs; click plans to override there.", zoom(0.74, b));
+}
+
+const QS = { q1, q2, q5 };
+for (const el of document.querySelectorAll("[data-q]")) el.innerHTML = QS[el.dataset.q](el.dataset.theme);
+for (const el of document.querySelectorAll("[data-strip]")) el.innerHTML = strip(el.dataset.strip);
+document.querySelector("[data-q3]").innerHTML = q3();
+document.querySelector("[data-q4]").innerHTML = q4();
+</script>
+</body>
+</html>
