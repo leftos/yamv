@@ -25,7 +25,7 @@ The user wants a cross-platform (Windows + macOS) C# markdown viewer:
 
 - `Avalonia` **12.1.4** (MIT, net10.0). `Avalonia.Controls.WebView` **12.1.1** (MIT). It provides `NavigateToString(html, baseUri)`, page → host messages (`invokeCSharpAction` → `WebMessageReceived`), `InvokeScript`, and `NavigationStarted` with `Cancel`, plus `WebResourceRequested`.
 - `Markdig` **1.4.2** (BSD-2).
-- Single instance: a **lock file** (a `FileStream` with `FileShare.None` in the per-user app-data dir, held for the process lifetime). A named mutex is avoided because its behaviour differs on macOS. Pipe: a `NamedPipeServerStream` with a short name and `CurrentUserOnly`, in byte mode with length-prefixed UTF-8 messages, since the macOS socket path is limited to about 104 bytes. A secondary no-arg launch retries the connect briefly.
+- Single instance: a **lock file** (a `FileStream` with `FileShare.None` in the per-user app-data dir, held for the process lifetime). A named mutex is avoided because its behaviour differs on macOS. Pipe: a `NamedPipeServerStream` with `CurrentUserOnly`, in byte mode with length-prefixed UTF-8 messages, its endpoint derived from the lock path (`main.sock` beside the lock on Unix, a hashed name on Windows). A secondary no-arg launch retries the connect briefly.
 - Git root: walk up from the file to the first `.git`, which may be a dir or a file (worktree/submodule). Cache results per directory. No LibGit2Sharp.
 - Re-check every version at implementation time (language-conventions rule).
 
@@ -67,7 +67,7 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
 - `SessionStore`: JSON at `%APPDATA%\YAMV\session.json` or `~/Library/Application Support/YAMV/session.json`. It holds the open paths, the selected doc, per-doc scroll fraction, window bounds, sidebar width, collapsed groups and theme. Saves are debounced and written atomically (temp file + replace). A corrupt file is logged and moved to `session.json.bad`, never silently replaced by defaults. Uses System.Text.Json source generation (AOT/trim-safe).
 - `InstanceCoordinator`:
   - `TryAcquireMainLock()` takes the lock file;
-  - on failure, the static `SignalAsync(pipeName, "activate", timeout, log)` sends the message over the pipe and the process exits;
+  - on failure, the static `SignalAsync(lockFilePath, "activate", timeout, log)` sends the message over the pipe and the process exits;
   - the main instance runs the pipe server with `StartServer(onMessage)`.
   - Viewer launches (with file args) skip the coordinator entirely.
   - Tests run two coordinators in-process with unique names.

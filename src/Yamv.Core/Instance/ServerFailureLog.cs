@@ -34,6 +34,20 @@ internal sealed class ServerFailureLog(IAppLog log, string subject)
     }
 
     /// <summary>
+    /// Records a failure of the loop whose cause is known, logged as an error with <paramref name="description"/> and the stack
+    /// trace unless it repeats the last one, and returns the delay before the retry.
+    /// </summary>
+    public TimeSpan RecordKnownCause(Exception exception, string description)
+    {
+        if (IsNewFailure(exception, out string repeats))
+        {
+            log.LogError($"{description}{repeats}", exception);
+        }
+
+        return NextDelay();
+    }
+
+    /// <summary>
     /// Records a client lost before it was accepted (for example one that closed before the server took the connection), logged as
     /// a warning without a stack trace unless it repeats the last failure. Null when the loop should retry at once: the first such
     /// failure since the last success; from the second in a row, the delay before the retry, as <see cref="Record"/> paces it.

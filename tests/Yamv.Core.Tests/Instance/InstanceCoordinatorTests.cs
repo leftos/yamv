@@ -1,9 +1,11 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Instance;
+using ThreadState = System.Threading.ThreadState;
 
 namespace Yamv.Core.Tests.Instance;
 
@@ -18,16 +20,14 @@ public sealed class InstanceCoordinatorTests : IDisposable
         int.TryParse(Environment.GetEnvironmentVariable("YAMV_TEST_HANG_GUARD_SECONDS"), out int seconds) && seconds > 0 ? seconds : 300
     );
 
-    private static readonly string TestsRoot = Path.Combine(Path.GetTempPath(), "yamv-tests");
-
-    private readonly string _stateRoot = Path.Combine(TestsRoot, Guid.NewGuid().ToString("N"));
+    /// <summary>A folder of its own per case, kept short so the <c>main.sock</c> beside its lock fits macOS's 104-byte limit.</summary>
+    private readonly string _stateRoot = Path.Combine(Path.GetTempPath(), "yt-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4)));
     private readonly string _lockPath;
-    private readonly string _pipeName = "yt" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4));
     private readonly RecordingLog _log = new();
 
     public InstanceCoordinatorTests()
     {
-        _lockPath = Path.Combine(_stateRoot, "nested", "main.lock");
+        _lockPath = Path.Combine(_stateRoot, "main.lock");
     }
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -38,18 +38,13 @@ public sealed class InstanceCoordinatorTests : IDisposable
         {
             Directory.Delete(_stateRoot, recursive: true);
         }
-
-        if (Directory.Exists(TestsRoot) && !Directory.EnumerateFileSystemEntries(TestsRoot).Any())
-        {
-            Directory.Delete(TestsRoot);
-        }
     }
 
     [Fact]
     public void TryAcquireMainLock_SecondCoordinatorOnSamePath_FailsUntilFirstIsDisposed()
     {
-        using InstanceCoordinator second = new(_lockPath, _pipeName, _log);
-        using (InstanceCoordinator first = new(_lockPath, _pipeName, _log))
+        using InstanceCoordinator second = new(_lockPath, _log);
+        using (InstanceCoordinator first = new(_lockPath, _log))
         {
             Assert.True(first.TryAcquireMainLock());
             Assert.False(second.TryAcquireMainLock());
@@ -64,7 +59,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
     {
         using InstanceCoordinator main = StartMain(out TaskCompletionSource<string> received);
 
-        bool sent = await InstanceCoordinator.SignalAsync(_pipeName, InstanceMessages.Activate, HangGuard, _log, Token);
+        bool sent = await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token);
 
         Assert.True(sent);
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
@@ -73,11 +68,11 @@ public sealed class InstanceCoordinatorTests : IDisposable
     [Fact]
     public async Task SignalAsync_SentBeforeServerStarts_IsDelivered()
     {
-        using InstanceCoordinator main = new(_lockPath, _pipeName, _log);
+        using InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
         TaskCompletionSource<string> received = NewSource<string>();
 
-        Task<bool> signal = InstanceCoordinator.SignalAsync(_pipeName, InstanceMessages.Activate, HangGuard, _log, Token);
+        Task<bool> signal = InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token);
         await Task.Delay(TimeSpan.FromMilliseconds(200), Token);
         Assert.False(signal.IsCompleted);
         main.StartServer(message => received.TrySetResult(message));
@@ -89,20 +84,57 @@ public sealed class InstanceCoordinatorTests : IDisposable
     [Fact]
     public async Task SignalAsync_NoServer_ReturnsFalseAndLogsOneWarning()
     {
-        bool sent = await InstanceCoordinator.SignalAsync(_pipeName, InstanceMessages.Activate, TimeSpan.FromMilliseconds(300), _log, Token);
+        bool sent = await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, TimeSpan.FromMilliseconds(300), _log, Token);
 
         Assert.False(sent);
         Assert.Single(_log.Warnings);
     }
 
     [Fact]
+    public async Task SignalAsync_NoServer_PacesConnectAttempts()
+    {
+        ConcurrentQueue<int> attemptTimeouts = new();
+        InstanceCoordinator.ConnectAttempted.Value = attemptTimeout => attemptTimeouts.Enqueue(attemptTimeout);
+        var timeout = TimeSpan.FromMilliseconds(400);
+        long start = Stopwatch.GetTimestamp();
+
+        bool sent = await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, timeout, _log, Token);
+
+        TimeSpan elapsed = Stopwatch.GetElapsedTime(start);
+        Assert.False(sent);
+        Assert.True(elapsed >= timeout, $"The signal gave up after {elapsed.TotalMilliseconds:0} ms, before its {timeout.TotalMilliseconds:0} ms.");
+        // One attempt per 50 ms pause is about 8 in 400 ms; a busy machine only lengthens the pauses, so it makes fewer.
+        Assert.InRange(attemptTimeouts.Count, 1, 15);
+        // A connect timeout of 0 tries once; a longer one makes the runtime retry in a spin until it runs out.
+        Assert.All(attemptTimeouts, attemptTimeout => Assert.Equal(0, attemptTimeout));
+    }
+
+    [Theory]
+    [InlineData(-5d, 1d)]
+    [InlineData(0d, 1d)]
+    [InlineData(0.4d, 1d)]
+    [InlineData(30.2d, 31d)]
+    [InlineData(50d, 50d)]
+    [InlineData(400d, 50d)]
+    public void ConnectRetryPause_IsWholeMillisecondsAtLeastOneAndAtMostFifty(double remainingMilliseconds, double expectedMilliseconds)
+    {
+        TimeSpan pause = InstanceCoordinator.ConnectRetryPause(TimeSpan.FromMilliseconds(remainingMilliseconds));
+
+        Assert.Equal(TimeSpan.FromMilliseconds(expectedMilliseconds), pause);
+    }
+
+    [Fact]
+    public void ConnectRetryPause_InfiniteTimeout_IsFiftyMilliseconds() =>
+        Assert.Equal(TimeSpan.FromMilliseconds(50), InstanceCoordinator.ConnectRetryPause(Timeout.InfiniteTimeSpan));
+
+    [Fact]
     public async Task Server_OversizeFrame_IsLoggedAndALaterFrameStillArrives()
     {
         using InstanceCoordinator main = StartMain(out TaskCompletionSource<string> received);
 
-        await SendRawAsync(Header(1_000_000));
+        await SendRawAsync(main, Header(1_000_000));
 
-        Assert.True(await InstanceCoordinator.SignalAsync(_pipeName, InstanceMessages.Activate, HangGuard, _log, Token));
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
 
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
         (string Message, Exception? Exception) warning = Assert.Single(_log.Warnings);
@@ -114,9 +146,9 @@ public sealed class InstanceCoordinatorTests : IDisposable
     {
         using InstanceCoordinator main = StartMain(out TaskCompletionSource<string> received);
 
-        await SendRawAsync([.. Header(10), (byte)'a', (byte)'b', (byte)'c']);
+        await SendRawAsync(main, [.. Header(10), (byte)'a', (byte)'b', (byte)'c']);
 
-        Assert.True(await InstanceCoordinator.SignalAsync(_pipeName, InstanceMessages.Activate, HangGuard, _log, Token));
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
 
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
         (string Message, Exception? Exception) warning = Assert.Single(_log.Warnings);
@@ -128,7 +160,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
     {
         const string Poison = "poison";
         TaskCompletionSource<string> received = NewSource<string>();
-        using InstanceCoordinator main = new(_lockPath, _pipeName, _log);
+        using InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
         main.StartServer(message =>
         {
@@ -140,8 +172,8 @@ public sealed class InstanceCoordinatorTests : IDisposable
             received.TrySetResult(message);
         });
 
-        Assert.True(await InstanceCoordinator.SignalAsync(_pipeName, Poison, HangGuard, _log, Token));
-        Assert.True(await InstanceCoordinator.SignalAsync(_pipeName, InstanceMessages.Activate, HangGuard, _log, Token));
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, Poison, HangGuard, _log, Token));
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
 
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
         (string Message, Exception? Exception) error = Assert.Single(_log.Errors);
@@ -153,7 +185,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
     {
         ConcurrentQueue<string> arrived = new();
         TaskCompletionSource bothArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        using InstanceCoordinator main = new(_lockPath, _pipeName, _log) { FrameReadDeadline = HangGuard };
+        using InstanceCoordinator main = new(_lockPath, _log) { FrameReadDeadline = HangGuard };
         Assert.True(main.TryAcquireMainLock());
         main.StartServer(message =>
         {
@@ -164,7 +196,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
             }
         });
 
-        NamedPipeClientStream rawA = NewRawClient();
+        NamedPipeClientStream rawA = NewRawClient(main);
         await using (rawA)
         {
             await rawA.ConnectAsync(HangGuard, Token);
@@ -173,7 +205,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
             await rawA.WriteAsync(headerAndTwoBytes, Token);
             await rawA.FlushAsync(Token);
 
-            NamedPipeClientStream rawB = NewRawClient();
+            NamedPipeClientStream rawB = NewRawClient(main);
             await using (rawB)
             {
                 // Connects only if a listener exists while A's frame is still being read.
@@ -200,11 +232,11 @@ public sealed class InstanceCoordinatorTests : IDisposable
             "On Unix the kernel send buffer takes the frame at once, so the write never waits on a busy server."
         );
         TaskCompletionSource<string> received = NewSource<string>();
-        using InstanceCoordinator main = new(_lockPath, _pipeName, _log) { FrameReadDeadline = HangGuard };
+        using InstanceCoordinator main = new(_lockPath, _log) { FrameReadDeadline = HangGuard };
         Assert.True(main.TryAcquireMainLock());
         main.StartServer(message => received.TrySetResult(message));
 
-        NamedPipeClientStream rawA = NewRawClient();
+        NamedPipeClientStream rawA = NewRawClient(main);
         await using (rawA)
         {
             await rawA.ConnectAsync(HangGuard, Token);
@@ -213,14 +245,14 @@ public sealed class InstanceCoordinatorTests : IDisposable
             await rawA.WriteAsync(headerAndTwoBytes, Token);
             await rawA.FlushAsync(Token);
 
-            bool sent = await InstanceCoordinator.SignalAsync(_pipeName, "unread", TimeSpan.FromSeconds(1), _log, Token);
+            bool sent = await InstanceCoordinator.SignalAsync(_lockPath, "unread", TimeSpan.FromSeconds(1), _log, Token);
 
             Assert.False(sent);
             Assert.Contains(_log.Warnings, warning => warning.Message.Contains("did not read", StringComparison.Ordinal));
         }
 
         // The listener the timed-out client connected to has been served and replaced, so a later signal still arrives.
-        Assert.True(await InstanceCoordinator.SignalAsync(_pipeName, InstanceMessages.Activate, HangGuard, _log, Token));
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
     }
 
@@ -230,7 +262,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
         using InstanceCoordinator main = StartMain(out TaskCompletionSource<string> received);
 
         bool sent = await InstanceCoordinator
-            .SignalAsync(_pipeName, InstanceMessages.Activate, Timeout.InfiniteTimeSpan, _log, Token)
+            .SignalAsync(_lockPath, InstanceMessages.Activate, Timeout.InfiniteTimeSpan, _log, Token)
             .WaitAsync(HangGuard, Token);
 
         Assert.True(sent);
@@ -244,7 +276,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
     public async Task SignalAsync_TimeoutNotPositiveOrOverIntMaxMilliseconds_Throws(double milliseconds)
     {
         Task<bool> signal = InstanceCoordinator.SignalAsync(
-            _pipeName,
+            _lockPath,
             InstanceMessages.Activate,
             TimeSpan.FromMilliseconds(milliseconds),
             _log,
@@ -254,23 +286,13 @@ public sealed class InstanceCoordinatorTests : IDisposable
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => signal.WaitAsync(HangGuard, Token));
     }
 
-    [Theory]
-    [InlineData("yt/ab")]
-    [InlineData("yt.ab")]
-    public async Task SignalAsync_NameWithACharacterOutsideLettersDigitsDashUnderscore_Throws(string name)
-    {
-        Task<bool> signal = InstanceCoordinator.SignalAsync(name, InstanceMessages.Activate, HangGuard, _log, Token);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => signal.WaitAsync(HangGuard, Token));
-    }
-
     [Fact]
     public async Task SignalAsync_ThreeConcurrentSignals_AllArrive()
     {
         string[] messages = ["one", "two", "three"];
         ConcurrentQueue<string> arrived = new();
         TaskCompletionSource allArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        using InstanceCoordinator main = new(_lockPath, _pipeName, _log);
+        using InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
         main.StartServer(message =>
         {
@@ -281,7 +303,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
             }
         });
 
-        bool[] sent = await Task.WhenAll(messages.Select(message => InstanceCoordinator.SignalAsync(_pipeName, message, HangGuard, _log, Token)));
+        bool[] sent = await Task.WhenAll(messages.Select(message => InstanceCoordinator.SignalAsync(_lockPath, message, HangGuard, _log, Token)));
         await allArrived.Task.WaitAsync(HangGuard, Token);
 
         Assert.All(sent, Assert.True);
@@ -294,7 +316,17 @@ public sealed class InstanceCoordinatorTests : IDisposable
         TaskCompletionSource firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource threeQueued = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        InstanceCoordinator main = new(_lockPath, _pipeName, _log);
+
+        // Dispose's bounds become the hang guard, and the handler is released once the count is logged, so Dispose returns as soon
+        // as the handler does instead of waiting out a fixed bound.
+        InstanceCoordinator main = new(_lockPath, _log) { DisposeWait = HangGuard };
+        _log.WarningLogged = message =>
+        {
+            if (message.StartsWith("Dropped ", StringComparison.Ordinal))
+            {
+                release.TrySetResult();
+            }
+        };
         Assert.True(main.TryAcquireMainLock());
         main.FrameQueued = total =>
         {
@@ -314,10 +346,10 @@ public sealed class InstanceCoordinatorTests : IDisposable
 
         try
         {
-            Assert.True(await InstanceCoordinator.SignalAsync(_pipeName, "first", HangGuard, _log, Token));
+            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "first", HangGuard, _log, Token));
             await firstEntered.Task.WaitAsync(HangGuard, Token);
-            Assert.True(await InstanceCoordinator.SignalAsync(_pipeName, "second", HangGuard, _log, Token));
-            Assert.True(await InstanceCoordinator.SignalAsync(_pipeName, "third", HangGuard, _log, Token));
+            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "second", HangGuard, _log, Token));
+            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "third", HangGuard, _log, Token));
 
             // On Unix a signal returns once its frame is in the socket buffer; wait until the server has queued all three.
             await threeQueued.Task.WaitAsync(HangGuard, Token);
@@ -326,7 +358,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
         {
             try
             {
-                // The handler stays blocked through Dispose, so the two queued messages are still queued when it counts them.
+                // The handler stays blocked until Dispose has counted, so the two queued messages are still queued then.
                 main.Dispose();
             }
             finally
@@ -348,20 +380,195 @@ public sealed class InstanceCoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void StartServer_WithoutLock_Throws()
+    public async Task Dispose_ConcurrentSecondCaller_ReturnsOnlyAfterLockReleased()
     {
-        using InstanceCoordinator main = new(_lockPath, _pipeName, _log);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        InstanceCoordinator main = await StartMainWithBlockedHandlerAsync(_ => release.Task.Wait(HangGuard, Token));
+        TaskCompletionSource firstCallerCountedQueue = WhenWarningLogged("Dropped 1 instance message(s)");
+        using InstanceCoordinator probe = new(_lockPath, _log);
+        bool? acquiredRightAfterSecondDispose = null;
 
-        Assert.Throws<InvalidOperationException>(() => main.StartServer(_ => { }));
+        Thread first = new(main.Dispose) { IsBackground = true };
+        Thread second = new(() =>
+        {
+            main.Dispose();
+            acquiredRightAfterSecondDispose = probe.TryAcquireMainLock();
+        })
+        {
+            IsBackground = true,
+        };
+        try
+        {
+            first.Start();
+            // The first caller logs the drop count after the accept loop stops and before it waits on the blocked handler.
+            await firstCallerCountedQueue.Task.WaitAsync(HangGuard, Token);
+            second.Start();
+            await WaitUntilBlockedOrEndedAsync(second);
+
+            Assert.True(second.IsAlive, "The second Dispose returned while the first still held the lock.");
+            Assert.Null(acquiredRightAfterSecondDispose);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        Assert.True(second.Join(HangGuard), "The second Dispose did not return after the first released the lock.");
+        Assert.True(first.Join(HangGuard), "The first Dispose did not return after the handler was released.");
+        Assert.True(acquiredRightAfterSecondDispose);
     }
 
     [Fact]
-    public void DefaultPipeName_IsShortAndPrefixed()
+    public async Task Dispose_FromInsideHandler_ReturnsAtOnce()
     {
-        string name = InstanceCoordinator.DefaultPipeName;
+        TaskCompletionSource firstCallerCountedQueue = WhenWarningLogged("Dropped 1 instance message(s)");
+        using InstanceCoordinator probe = new(_lockPath, _log);
+        bool? acquiredRightAfterHandlerDispose = null;
+        InstanceCoordinator? main = null;
+        main = await StartMainWithBlockedHandlerAsync(_ =>
+        {
+            firstCallerCountedQueue.Task.Wait(HangGuard, Token);
+            main!.Dispose();
+            acquiredRightAfterHandlerDispose = probe.TryAcquireMainLock();
+        });
 
-        Assert.StartsWith("yamv-", name, StringComparison.Ordinal);
-        Assert.True(name.Length <= 16, $"'{name}' is {name.Length} characters; the macOS socket path needs at most 16.");
+        Thread first = new(main.Dispose) { IsBackground = true };
+        first.Start();
+
+        Assert.True(first.Join(HangGuard), "The first Dispose did not return after the handler returned.");
+        // The handler's own Dispose returned while the first caller was still waiting on it, so the lock was still held.
+        Assert.False(acquiredRightAfterHandlerDispose);
+        Assert.DoesNotContain(_log.Warnings, warning => warning.Message.Contains("did not stop", StringComparison.Ordinal));
+        Assert.True(probe.TryAcquireMainLock());
+    }
+
+    [Fact]
+    public async Task StartServer_SquattedPipeName_LogsHeldByAnotherAccount_AndSignalFailsFast()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only a Windows pipe name lives in a namespace another process can take first.");
+        TaskCompletionSource heldLogged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _log.ErrorLogged = message =>
+        {
+            if (message.Contains("held by another account", StringComparison.Ordinal))
+            {
+                heldLogged.TrySetResult();
+            }
+        };
+        TaskCompletionSource<string> received = NewSource<string>();
+        using InstanceCoordinator main = new(_lockPath, _log);
+
+        // The squatter takes the name first, without CurrentUserOnly. Its input buffer lets a client's write complete unread.
+        using NamedPipeServerStream squatter = new(
+            main.Endpoint,
+            PipeDirection.In,
+            NamedPipeServerStream.MaxAllowedServerInstances,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous,
+            inBufferSize: 4096,
+            outBufferSize: 0
+        );
+        Assert.True(main.TryAcquireMainLock());
+        main.StartServer(message => received.TrySetResult(message));
+        await heldLogged.Task.WaitAsync(HangGuard, Token);
+
+        Task squatterConnected = squatter.WaitForConnectionAsync(Token);
+        bool sent = await InstanceCoordinator.SignalAsync(_lockPath, "squatted", HangGuard, _log, Token).WaitAsync(HangGuard, Token);
+        await squatterConnected.WaitAsync(HangGuard, Token);
+        string atSquatter = await InstanceFrame.ReadAsync(squatter, Token).WaitAsync(HangGuard, Token);
+
+        // A same-account squatter passes the client's owner check, so the signal reaches it; it never waits out its timeout.
+        Assert.True(sent);
+        Assert.Equal("squatted", atSquatter);
+        // Our server never listened, so its handler cannot have received anything.
+        Assert.False(received.Task.IsCompleted);
+        Assert.Single(_log.Errors, error => error.Message.Contains("held by another account", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Dispose_FromInsideHandler_AsFirstCaller_ReleasesLockAtOnce()
+    {
+        TaskCompletionSource<bool> acquiredRightAfterHandlerDispose = NewSource<bool>();
+        using InstanceCoordinator probe = new(_lockPath, _log);
+        InstanceCoordinator main = new(_lockPath, _log);
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+            main.StartServer(_ =>
+            {
+                main.Dispose();
+                acquiredRightAfterHandlerDispose.TrySetResult(probe.TryAcquireMainLock());
+            });
+
+            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
+
+            // The handler's Dispose did not wait on the handler it runs in, so the lock was free before the handler returned.
+            Assert.True(await acquiredRightAfterHandlerDispose.Task.WaitAsync(HangGuard, Token));
+            Assert.DoesNotContain(_log.Warnings, warning => warning.Message.Contains("probably blocked", StringComparison.Ordinal));
+        }
+        finally
+        {
+            // Releases the lock before the fixture deletes its folder when the handler never ran; a second Dispose is safe.
+            main.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task StartServer_FollowOnListenerFails_NextListenerIsNotCreatedAsFirstInstance()
+    {
+        ConcurrentQueue<bool> creations = new();
+        TaskCompletionSource<bool> createdAfterFailure = NewSource<bool>();
+        bool failed = false;
+        using InstanceCoordinator main = new(_lockPath, _log);
+        main.ListenerCreating = firstInstance =>
+        {
+            creations.Enqueue(firstInstance);
+            if (failed)
+            {
+                createdAfterFailure.TrySetResult(firstInstance);
+            }
+            else if (!firstInstance)
+            {
+                // The follow-on listener created once a client connects fails, so the next pass has no listener at all.
+                failed = true;
+                throw new IOException("listener creation failure under test");
+            }
+        };
+        Assert.True(main.TryAcquireMainLock());
+        main.StartServer(_ => { });
+
+        // On Windows the frame is lost with its connection and the signal retries; on Unix it is in the socket buffer at once.
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
+
+        Assert.False(
+            await createdAfterFailure.Task.WaitAsync(HangGuard, Token),
+            $"Listener creations (first instance?): {string.Join(", ", creations)}"
+        );
+        Assert.DoesNotContain(_log.Errors, error => error.Message.Contains("held by another account", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StartServer_StaleSocketFileBesideTheLock_StillListens()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Only a Unix endpoint is a file a crashed main can leave behind.");
+        TaskCompletionSource<string> received = NewSource<string>();
+        using InstanceCoordinator main = new(_lockPath, _log);
+        Assert.True(main.TryAcquireMainLock());
+
+        // A crashed main's leftover: the server must unlink it before binding, which it skips under FirstPipeInstance.
+        File.WriteAllBytes(main.Endpoint, []);
+        main.StartServer(message => received.TrySetResult(message));
+
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
+        Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
+        Assert.Empty(_log.Errors);
+    }
+
+    [Fact]
+    public void StartServer_WithoutLock_Throws()
+    {
+        using InstanceCoordinator main = new(_lockPath, _log);
+
+        Assert.Throws<InvalidOperationException>(() => main.StartServer(_ => { }));
     }
 
     private static TaskCompletionSource<T> NewSource<T>() => new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -373,12 +580,13 @@ public sealed class InstanceCoordinatorTests : IDisposable
         return header;
     }
 
-    private NamedPipeClientStream NewRawClient() => new(".", _pipeName, PipeDirection.Out, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+    private static NamedPipeClientStream NewRawClient(InstanceCoordinator main) =>
+        new(".", main.Endpoint, PipeDirection.Out, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
-    /// <summary>Connects to the server, writes <paramref name="bytes"/> as they are and closes.</summary>
-    private async Task SendRawAsync(byte[] bytes)
+    /// <summary>Connects to <paramref name="main"/>'s server, writes <paramref name="bytes"/> as they are and closes.</summary>
+    private static async Task SendRawAsync(InstanceCoordinator main, byte[] bytes)
     {
-        NamedPipeClientStream raw = NewRawClient();
+        NamedPipeClientStream raw = NewRawClient(main);
         await using (raw)
         {
             await raw.ConnectAsync(HangGuard, Token);
@@ -389,12 +597,71 @@ public sealed class InstanceCoordinatorTests : IDisposable
 
     private InstanceCoordinator StartMain(out TaskCompletionSource<string> received)
     {
-        InstanceCoordinator main = new(_lockPath, _pipeName, _log);
+        InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
         TaskCompletionSource<string> source = NewSource<string>();
         main.StartServer(message => source.TrySetResult(message));
         received = source;
         return main;
+    }
+
+    /// <summary>
+    /// Starts a main whose handler runs <paramref name="onFirst"/> for the message "first", and returns once that handler has
+    /// started and a second message is queued behind it.
+    /// </summary>
+    private async Task<InstanceCoordinator> StartMainWithBlockedHandlerAsync(Action<string> onFirst)
+    {
+        TaskCompletionSource firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource twoQueued = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Dispose's own bounds become the hang guard, so a Dispose that waits wrongly hangs to the guard instead of racing 5 s.
+        InstanceCoordinator main = new(_lockPath, _log) { DisposeWait = HangGuard };
+        Assert.True(main.TryAcquireMainLock());
+        main.FrameQueued = total =>
+        {
+            if (total == 2)
+            {
+                twoQueued.TrySetResult();
+            }
+        };
+        main.StartServer(message =>
+        {
+            if (message == "first")
+            {
+                firstEntered.TrySetResult();
+                onFirst(message);
+            }
+        });
+
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "first", HangGuard, _log, Token));
+        await firstEntered.Task.WaitAsync(HangGuard, Token);
+        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, "second", HangGuard, _log, Token));
+        await twoQueued.Task.WaitAsync(HangGuard, Token);
+        return main;
+    }
+
+    private TaskCompletionSource WhenWarningLogged(string prefix)
+    {
+        TaskCompletionSource logged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _log.WarningLogged = message =>
+        {
+            if (message.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                logged.TrySetResult();
+            }
+        };
+        return logged;
+    }
+
+    /// <summary>Waits until <paramref name="thread"/> is blocked in a wait or has ended, polling with a sleep, never a spin.</summary>
+    private static async Task WaitUntilBlockedOrEndedAsync(Thread thread)
+    {
+        long start = Stopwatch.GetTimestamp();
+        while (thread.IsAlive && (thread.ThreadState & ThreadState.WaitSleepJoin) == 0)
+        {
+            Assert.True(Stopwatch.GetElapsedTime(start) < HangGuard, "The thread neither blocked nor ended.");
+            await Task.Delay(TimeSpan.FromMilliseconds(10), Token);
+        }
     }
 
     private sealed class RecordingLog : IAppLog
@@ -406,10 +673,24 @@ public sealed class InstanceCoordinatorTests : IDisposable
 
         public IReadOnlyCollection<(string Message, Exception? Exception)> Errors => _errors;
 
+        /// <summary>Called with each warning after it is recorded.</summary>
+        public Action<string>? WarningLogged { get; set; }
+
+        /// <summary>Called with each error after it is recorded.</summary>
+        public Action<string>? ErrorLogged { get; set; }
+
         public void LogInfo(string message) { }
 
-        public void LogWarning(string message, Exception? exception = null) => _warnings.Enqueue((message, exception));
+        public void LogWarning(string message, Exception? exception = null)
+        {
+            _warnings.Enqueue((message, exception));
+            WarningLogged?.Invoke(message);
+        }
 
-        public void LogError(string message, Exception? exception = null) => _errors.Enqueue((message, exception));
+        public void LogError(string message, Exception? exception = null)
+        {
+            _errors.Enqueue((message, exception));
+            ErrorLogged?.Invoke(message);
+        }
     }
 }

@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Net.Sockets;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
 using Yamv.Core.Diagnostics;
@@ -10,37 +9,36 @@ namespace Yamv.Core.Instance;
 
 /// <summary>
 /// Keeps YAMV to one main instance per user: the main instance holds an exclusive lock on <paramref name="lockFilePath"/>
-/// and listens on the per-user pipe <paramref name="pipeName"/>; a later no-arg launch fails to take the lock and signals it.
-/// On Unix the lock is an advisory <c>flock</c>, which .NET turns off silently when <c>System.IO.DisableFileLocking</c> is set
+/// and listens on the pipe <see cref="Endpoint"/> derived from that path; a later no-arg launch fails to take the lock and signals
+/// it. On Unix the lock is an advisory <c>flock</c>, which .NET turns off silently when <c>System.IO.DisableFileLocking</c> is set
 /// or the file system does not support it (NFS, SMB).
 /// </summary>
 /// <param name="lockFilePath">The lock file, normally <see cref="AppPaths.MainLockFile"/>. Its folder is created on demand.</param>
-/// <param name="pipeName">
-/// The pipe name, normally <see cref="DefaultPipeName"/>; at most <see cref="MaxPipeNameLength"/> characters so the macOS socket path fits.
-/// </param>
 /// <param name="log">Where every caught exception is reported.</param>
-/// <exception cref="ArgumentException">
-/// <paramref name="pipeName"/> is empty, longer than <see cref="MaxPipeNameLength"/>, or holds a character other than an ASCII
-/// letter, digit, <c>-</c> or <c>_</c>.
-/// </exception>
-public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IAppLog log) : IDisposable
+/// <exception cref="ArgumentException"><paramref name="lockFilePath"/> is empty or not a valid path.</exception>
+public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDisposable
 {
-    /// <summary>The longest pipe name accepted: on macOS the socket path <c>$TMPDIR/CoreFxPipe_&lt;name&gt;</c> is limited to about 104 bytes.</summary>
-    public const int MaxPipeNameLength = 16;
+    /// <summary>The pause between connect attempts while no server answers.</summary>
+    private static readonly TimeSpan ConnectRetryDelay = TimeSpan.FromMilliseconds(50);
 
-    private const int ConnectAttemptMilliseconds = 250;
+    /// <summary>A connect timeout of 0 makes one attempt; a longer one makes the runtime retry in a spin while no server exists.</summary>
+    private const int ConnectAttemptTimeoutMilliseconds = 0;
 
     private const PipeOptions SharedPipeOptions = PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly;
 
-    private static readonly TimeSpan DisposeWait = TimeSpan.FromSeconds(5);
+    /// <summary>The coordinator whose message handler is running on this thread, if any.</summary>
+    [ThreadStatic]
+    private static InstanceCoordinator? t_handlerRunningFor;
 
-    private readonly string _pipeName = ValidatePipeName(pipeName, nameof(pipeName));
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
 
     /// <summary>Messages read from clients, waiting for the handler loop: the accept loop never waits on a busy handler.</summary>
     /// <remarks>Default options: the single-reader unbounded channel cannot report <c>Count</c>, which Dispose needs.</remarks>
     private readonly Channel<string> _queue = Channel.CreateUnbounded<string>();
+
+    /// <summary>Completed once the first <see cref="Dispose"/> has released the lock; later callers wait on it.</summary>
+    private readonly TaskCompletionSource _lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private FileStream? _lockStream;
 
@@ -58,10 +56,20 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
     private int _framesQueued;
 
     /// <summary>
-    /// <c>yamv-</c> plus the first 8 lower-case hex characters of SHA-256 of the user name: unique per user, 13 characters long.
+    /// True once the server's first listener exists; touched only by the accept loop. Only that first one asks for
+    /// <see cref="PipeOptions.FirstPipeInstance"/>: a later listener created while no other exists is still this server's own.
     /// </summary>
-    public static string DefaultPipeName { get; } =
-        "yamv-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Environment.UserName)))[..8];
+    private bool _firstListenerCreated;
+
+    /// <summary>The lock file's full path, computed once, and the <see cref="Endpoint"/> derived from it.</summary>
+    private readonly (string FullLockPath, string Endpoint) _paths = ResolvePaths(lockFilePath, log);
+
+    /// <summary>
+    /// The pipe this coordinator's server listens on, derived from the lock file's path so a launch that shares the lock reaches it:
+    /// on Windows <c>yamv-</c> plus a hash of the account SID and the full lock path; on macOS and Linux the socket path
+    /// <c>main.sock</c> beside the lock, or a logged fallback when that path is too long for the platform.
+    /// </summary>
+    public string Endpoint => _paths.Endpoint;
 
     /// <summary>
     /// Called on the accept loop after each frame is queued, with the number queued since the server started; set it before
@@ -74,6 +82,24 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
     /// <see cref="StartServer"/>. Lets tests hold a client mid-frame through a stall on a loaded machine.
     /// </summary>
     internal TimeSpan FrameReadDeadline { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long <see cref="Dispose"/> waits for the accept loop, and then for a running handler, before it goes on; 5 s each.
+    /// Lets tests turn a wrong wait into a hang their guard catches instead of a race with these bounds.
+    /// </summary>
+    internal TimeSpan DisposeWait { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Called on the accept loop before each listener is created, with whether it is created as the server's first instance; set
+    /// it before <see cref="StartServer"/>. An exception it throws fails that creation, so tests can stage a failed listener.
+    /// </summary>
+    internal Action<bool>? ListenerCreating { get; set; }
+
+    /// <summary>
+    /// Called before each connect attempt <see cref="SignalAsync"/> makes, with the connect timeout in milliseconds, in the async
+    /// flow that set it. Lets tests check how a signal paces its attempts without measuring CPU time.
+    /// </summary>
+    internal static AsyncLocal<Action<int>?> ConnectAttempted { get; } = new();
 
     /// <summary>
     /// Takes the main-instance lock, held until <see cref="Dispose"/> or the process ends. True when this process now holds it
@@ -91,23 +117,25 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
 
             try
             {
-                string? directory = Path.GetDirectoryName(Path.GetFullPath(lockFilePath));
+                string? directory = Path.GetDirectoryName(_paths.FullLockPath);
                 if (!string.IsNullOrEmpty(directory))
                 {
                     Directory.CreateDirectory(directory);
                 }
 
-                _lockStream = new FileStream(lockFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                _lockStream = new FileStream(_paths.FullLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                 return true;
             }
             catch (IOException ex) when (IsShareViolation(ex))
             {
-                log.LogInfo($"Another process holds the main-instance lock {lockFilePath}, so this one is not the main instance: {ex.Message}");
+                log.LogInfo(
+                    $"Another process holds the main-instance lock {_paths.FullLockPath}, so this one is not the main instance: {ex.Message}"
+                );
                 return false;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                log.LogError($"Could not open the main-instance lock {lockFilePath}; check that its folder is writable.", ex);
+                log.LogError($"Could not open the main-instance lock {_paths.FullLockPath}; check that its folder is writable.", ex);
                 return false;
             }
         }
@@ -118,7 +146,9 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
     /// connects, before that client's frame is read. Each frame is read at once and queued; <paramref name="onMessage"/> drains the
     /// queue on a thread-pool thread, one message at a time, and an exception it throws is logged while the server keeps serving.
     /// <see cref="Dispose"/> waits for a running <paramref name="onMessage"/>, so it must post work to the thread that disposes this
-    /// coordinator, never block on it. Calling <see cref="Dispose"/> from inside <paramref name="onMessage"/> waits out its own 5 s bound.
+    /// coordinator, never block on it. Calling <see cref="Dispose"/> from inside <paramref name="onMessage"/> returns at once: as the
+    /// first call it releases the lock without waiting on the handler it runs in, and as a later call it leaves the release to the
+    /// first.
     /// </summary>
     /// <exception cref="InvalidOperationException">This coordinator does not hold the lock, or the server is already running.</exception>
     public void StartServer(Action<string> onMessage)
@@ -148,8 +178,9 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
     }
 
     /// <summary>
-    /// Sends <paramref name="message"/> to the main instance listening on <paramref name="pipeName"/>, retrying the connect so a
-    /// main instance that is still starting gets it; <paramref name="timeout"/> bounds the whole wait, the write included, and
+    /// Sends <paramref name="message"/> to the main instance holding the lock at <paramref name="lockFilePath"/>, on the pipe
+    /// derived from that path (see <see cref="Endpoint"/>), retrying the connect every 50 ms so a main instance that is still
+    /// starting gets it; <paramref name="timeout"/> bounds the whole wait, the write included, and
     /// <see cref="Timeout.InfiniteTimeSpan"/> waits without a bound.
     /// Returns true once the frame was delivered: on Windows the server has read it; on Unix it is in the connected socket's send
     /// buffer, so a main instance that exits before reading it loses it. Either way it may not have been handled yet. False (logged
@@ -157,26 +188,25 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
     /// or opening or connecting the pipe failed in a way a retry cannot fix.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <paramref name="pipeName"/> is empty, longer than <see cref="MaxPipeNameLength"/> or holds a character other than an ASCII
-    /// letter, digit, <c>-</c> or <c>_</c>; or the message encodes to more than 64 KiB.
+    /// <paramref name="lockFilePath"/> is empty or not a valid path, or the message encodes to more than 64 KiB.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="timeout"/> is neither <see cref="Timeout.InfiniteTimeSpan"/> nor positive and at most <see cref="int.MaxValue"/> ms.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static async Task<bool> SignalAsync(
-        string pipeName,
+        string lockFilePath,
         string message,
         TimeSpan timeout,
         IAppLog log,
         CancellationToken cancellationToken = default
     )
     {
-        ValidatePipeName(pipeName, nameof(pipeName));
         ValidateTimeout(timeout);
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(log);
         byte[] frame = InstanceFrame.Encode(message);
+        string pipeName = InstanceEndpoint.Resolve(lockFilePath, EndpointEnvironment.ForCurrentProcess(), log);
 
         long start = Stopwatch.GetTimestamp();
         Exception? lastFailure = null;
@@ -205,6 +235,7 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
             catch (Exception ex) when (IsRetryableConnectFailure(ex))
             {
                 lastFailure = ex;
+                await PauseBeforeRetryAsync(Remaining(timeout, start), cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or SocketException)
             {
@@ -216,75 +247,109 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
 
     /// <summary>
     /// Stops the server: waits up to 5 s for the accept loop, logs how many queued messages were dropped, waits up to 5 s for a
-    /// running handler (logging a warning when either wait runs out) and releases the lock. Safe to call more than once.
+    /// running handler (logging a warning when either wait runs out) and releases the lock. Safe to call more than once and from
+    /// several threads: a later call returns once the first has released the lock. A call from inside this coordinator's message
+    /// handler returns at once: as the first call it skips the wait on its own handler, and as a later one the first call is
+    /// waiting on that handler.
     /// </summary>
     public void Dispose()
     {
         Task? acceptLoop;
         Task? handlerLoop;
+        bool alreadyDisposing;
         lock (_gate)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
+            alreadyDisposing = _disposed;
             _disposed = true;
             acceptLoop = _acceptLoop;
             handlerLoop = _handlerLoop;
         }
 
+        if (alreadyDisposing)
+        {
+            WaitForFirstDispose();
+            return;
+        }
+
         try
         {
-            // The queue is never completed: a frame read just before the cancel is still queued, so the count below includes it.
-            _shutdown.Cancel();
-
-            // The accept loop never runs user code, so it stops on its own; once it has, no frame joins the queue being counted.
-            bool acceptStopped =
-                acceptLoop is null
-                || WaitForLoop(
-                    acceptLoop,
-                    $"The instance server's accept loop on pipe '{_pipeName}' did not stop within {DisposeWait.TotalSeconds:0} s; the dropped-message count may be short."
-                );
-            LogDroppedMessages();
-            bool handlerStopped =
-                handlerLoop is null
-                || WaitForLoop(
-                    handlerLoop,
-                    $"The instance server on pipe '{_pipeName}' did not stop within {DisposeWait.TotalSeconds:0} s; "
-                        + "a message handler is probably blocked. Releasing the lock anyway."
-                );
-            if (acceptStopped && handlerStopped)
-            {
-                _shutdown.Dispose();
-            }
+            StopServer(acceptLoop, handlerLoop);
         }
         finally
         {
-            _lockStream?.Dispose();
+            ReleaseLock();
         }
     }
 
-    private static string ValidatePipeName(string name, string paramName)
+    /// <summary>True on the thread running this coordinator's message handler, inside the handler.</summary>
+    private bool IsOnOwnHandlerThread => ReferenceEquals(t_handlerRunningFor, this);
+
+    /// <summary>
+    /// Waits until the first <see cref="Dispose"/> has released the lock. A caller inside this coordinator's handler returns at
+    /// once: the first caller is waiting on that handler.
+    /// </summary>
+    private void WaitForFirstDispose()
     {
-        ArgumentException.ThrowIfNullOrEmpty(name, paramName);
-        if (name.Length > MaxPipeNameLength)
+        if (!IsOnOwnHandlerThread)
         {
-            throw new ArgumentException(
-                $"A pipe name is at most {MaxPipeNameLength} characters so the macOS socket path fits; '{name}' has {name.Length}.",
-                paramName
+            _lockReleased.Task.Wait();
+        }
+    }
+
+    /// <summary>
+    /// Cancels both loops, waits for the accept loop, logs the dropped-message count and waits for the handler loop, unless the
+    /// caller is that handler: the loop it runs in ends once it returns.
+    /// </summary>
+    private void StopServer(Task? acceptLoop, Task? handlerLoop)
+    {
+        // The queue is never completed: a frame read just before the cancel is still queued, so the count below includes it.
+        _shutdown.Cancel();
+
+        // The accept loop never runs user code, so it stops on its own; once it has, no frame joins the queue being counted.
+        bool acceptStopped =
+            acceptLoop is null
+            || WaitForLoop(
+                acceptLoop,
+                $"The instance server's accept loop on pipe '{Endpoint}' did not stop within {DisposeWait.TotalSeconds:0} s; "
+                    + "the dropped-message count may be short."
             );
+        LogDroppedMessages();
+        if (IsOnOwnHandlerThread)
+        {
+            return;
         }
 
-        if (!name.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
-        {
-            throw new ArgumentException(
-                $"A pipe name holds only ASCII letters, digits, '-' and '_', so it is a valid file name on every platform; '{name}' does not.",
-                paramName
+        bool handlerStopped =
+            handlerLoop is null
+            || WaitForLoop(
+                handlerLoop,
+                $"The instance server on pipe '{Endpoint}' did not stop within {DisposeWait.TotalSeconds:0} s; "
+                    + "a message handler is probably blocked. Releasing the lock anyway."
             );
+        if (acceptStopped && handlerStopped)
+        {
+            _shutdown.Dispose();
         }
+    }
 
-        return name;
+    /// <summary>Releases the lock, then lets every later <see cref="Dispose"/> caller return.</summary>
+    private void ReleaseLock()
+    {
+        try
+        {
+            _lockStream?.Dispose();
+        }
+        finally
+        {
+            _lockReleased.TrySetResult();
+        }
+    }
+
+    /// <summary>The lock file's full path and the endpoint derived from it.</summary>
+    private static (string FullLockPath, string Endpoint) ResolvePaths(string lockFilePath, IAppLog log)
+    {
+        string fullLockPath = Path.GetFullPath(lockFilePath);
+        return (fullLockPath, InstanceEndpoint.Resolve(fullLockPath, EndpointEnvironment.ForCurrentProcess(), log));
     }
 
     private static void ValidateTimeout(TimeSpan timeout)
@@ -304,18 +369,32 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
         timeout == Timeout.InfiniteTimeSpan ? Timeout.InfiniteTimeSpan : timeout - Stopwatch.GetElapsedTime(start);
 
     /// <summary>
-    /// Connects within <paramref name="remaining"/> (one attempt of at most 250 ms) and writes <paramref name="frame"/> in what is
-    /// left of it. False (logged) when the pipe cannot be opened at all; an <see cref="OperationCanceledException"/> while
-    /// <paramref name="cancellationToken"/> is not cancelled means the write ran out of time.
+    /// The pause before the next connect attempt: <see cref="ConnectRetryDelay"/>, or what is left of the timeout when that is
+    /// shorter, rounded up to whole milliseconds and at least 1 ms, so every retry waits on a timer and a launch with no server to
+    /// reach never spins. <see cref="Task.Delay(TimeSpan)"/> counts whole milliseconds, so a shorter pause would not wait at all.
+    /// </summary>
+    internal static TimeSpan ConnectRetryPause(TimeSpan remaining)
+    {
+        if (remaining == Timeout.InfiniteTimeSpan || remaining >= ConnectRetryDelay)
+        {
+            return ConnectRetryDelay;
+        }
+
+        return TimeSpan.FromMilliseconds(Math.Max(1, Math.Ceiling(remaining.TotalMilliseconds)));
+    }
+
+    private static Task PauseBeforeRetryAsync(TimeSpan remaining, CancellationToken cancellationToken) =>
+        Task.Delay(ConnectRetryPause(remaining), cancellationToken);
+
+    /// <summary>
+    /// Makes one connect attempt and writes <paramref name="frame"/> within <paramref name="remaining"/>. False (logged) when the
+    /// pipe cannot be opened at all; an <see cref="OperationCanceledException"/> while <paramref name="cancellationToken"/> is not
+    /// cancelled means the write ran out of time.
     /// </summary>
     private static async Task<bool> SendOnceAsync(string pipeName, byte[] frame, TimeSpan remaining, IAppLog log, CancellationToken cancellationToken)
     {
         long attemptStart = Stopwatch.GetTimestamp();
-        int attemptMilliseconds =
-            remaining == Timeout.InfiniteTimeSpan
-                ? ConnectAttemptMilliseconds
-                : (int)Math.Clamp(Math.Ceiling(remaining.TotalMilliseconds), 1, ConnectAttemptMilliseconds);
-        NamedPipeClientStream? client = await ConnectClientAsync(pipeName, attemptMilliseconds, log, cancellationToken).ConfigureAwait(false);
+        NamedPipeClientStream? client = await ConnectClientAsync(pipeName, log, cancellationToken).ConfigureAwait(false);
         if (client is null)
         {
             return false;
@@ -334,28 +413,27 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
     }
 
     /// <summary>
-    /// Opens the pipe and makes one connect attempt. Null (logged) when the pipe cannot be opened at all: on Unix, a socket path
-    /// longer than the platform allows; .NET reports both that and a reserved name as <see cref="ArgumentOutOfRangeException"/>.
+    /// Opens the pipe and makes one connect attempt that does not wait for a server to appear: a timeout of 0 tries once, where a
+    /// longer one makes the runtime retry in a spin while the pipe does not exist, on Windows as on Unix. Null (logged) when the
+    /// pipe cannot be opened at all: on Unix, a socket path longer than the platform allows; .NET reports both that and a reserved
+    /// name as <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
-    private static async Task<NamedPipeClientStream?> ConnectClientAsync(
-        string pipeName,
-        int attemptMilliseconds,
-        IAppLog log,
-        CancellationToken cancellationToken
-    )
+    private static async Task<NamedPipeClientStream?> ConnectClientAsync(string pipeName, IAppLog log, CancellationToken cancellationToken)
     {
         NamedPipeClientStream? client = null;
         bool connected = false;
         try
         {
             client = new NamedPipeClientStream(".", pipeName, PipeDirection.Out, SharedPipeOptions);
-            await client.ConnectAsync(attemptMilliseconds, cancellationToken).ConfigureAwait(false);
+            int attemptTimeoutMilliseconds = ConnectAttemptTimeoutMilliseconds;
+            ConnectAttempted.Value?.Invoke(attemptTimeoutMilliseconds);
+            await client.ConnectAsync(attemptTimeoutMilliseconds, cancellationToken).ConfigureAwait(false);
             connected = true;
             return client;
         }
         catch (ArgumentOutOfRangeException ex)
         {
-            log.LogWarning($"Could not open pipe '{pipeName}'{DescribeSocketPath(pipeName)}; a retry cannot fix this.", ex);
+            log.LogWarning($"Could not open pipe '{pipeName}'; a retry cannot fix this.", ex);
             return null;
         }
         finally
@@ -378,18 +456,6 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
             ? $"Could not connect to pipe '{pipeName}' ({socketException.SocketErrorCode}); a retry cannot fix this."
             : $"Pipe '{pipeName}' belongs to another user; not signalling it.";
 
-    /// <summary>On Unix, the length of the socket path .NET builds for the pipe, which the platform limits to about 104 bytes.</summary>
-    private static string DescribeSocketPath(string pipeName)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return "";
-        }
-
-        string socketPath = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + pipeName);
-        return $" (its socket path {socketPath} is {socketPath.Length} characters; a shorter TMPDIR fixes this)";
-    }
-
     private static bool IsShareViolation(IOException exception)
     {
         if (OperatingSystem.IsWindows())
@@ -410,7 +476,7 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
         int dropped = _queue.Reader.Count;
         if (dropped > 0)
         {
-            log.LogWarning($"Dropped {dropped} instance message(s) still queued on pipe '{_pipeName}' at shutdown.");
+            log.LogWarning($"Dropped {dropped} instance message(s) still queued on pipe '{Endpoint}' at shutdown.");
         }
     }
 
@@ -440,7 +506,7 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
     private void LogIfFaulted(Task loop, string loopName, string consequence) =>
         _ = loop.ContinueWith(
             faulted =>
-                log.LogError($"The instance server's {loopName} on pipe '{_pipeName}' stopped with an error; {consequence}.", faulted.Exception),
+                log.LogError($"The instance server's {loopName} on pipe '{Endpoint}' stopped with an error; {consequence}.", faulted.Exception),
             CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default
@@ -448,7 +514,7 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
 
     private async Task RunServerLoopAsync(CancellationToken cancellationToken)
     {
-        ServerFailureLog failures = new(log, $"The instance server on pipe '{_pipeName}'");
+        ServerFailureLog failures = new(log, $"The instance server on pipe '{Endpoint}'");
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -460,6 +526,16 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    return;
+                }
+                catch (ArgumentOutOfRangeException ex) when (_listener is null)
+                {
+                    // Only a listener's creation runs while no listener is waiting. The runtime rejects the endpoint itself (on Unix,
+                    // a socket path too long for the platform): a retry cannot fix it.
+                    log.LogError(
+                        $"The instance server cannot listen on '{Endpoint}' and has stopped; second launches will open their own window.",
+                        ex
+                    );
                     return;
                 }
                 catch (Exception ex)
@@ -484,7 +560,24 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
     /// <summary>Accepts one client and reads its frame. Returns the delay before the next pass, or null to go on at once.</summary>
     private async Task<TimeSpan?> ServeOneClientAsync(ServerFailureLog failures, CancellationToken cancellationToken)
     {
-        _listener ??= CreateListener();
+        if (_listener is null)
+        {
+            try
+            {
+                _listener = CreateListener(firstInstance: !_firstListenerCreated);
+                _firstListenerCreated = true;
+            }
+            catch (UnauthorizedAccessException ex) when (OperatingSystem.IsWindows() && !_firstListenerCreated)
+            {
+                // The first listener's FirstPipeInstance flag fails when any other process already holds the name.
+                return failures.RecordKnownCause(
+                    ex,
+                    $"The instance pipe {Endpoint} is held by another account or a previous YAMV that is still exiting; "
+                        + "second launches will open their own window until it is free."
+                );
+            }
+        }
+
         NamedPipeServerStream connected = _listener;
         try
         {
@@ -503,7 +596,7 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
         {
             // On Unix every instance shares one listening socket, closed with the last instance. The next listener must exist
             // before this one is read or disposed, or the clients already queued in the socket's backlog are dropped.
-            _listener = CreateListener();
+            _listener = CreateListener(firstInstance: false);
             await ReadIntoQueueAsync(connected, cancellationToken).ConfigureAwait(false);
         }
 
@@ -520,7 +613,7 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
         _listener = null;
         try
         {
-            _listener = CreateListener();
+            _listener = CreateListener(firstInstance: false);
         }
         finally
         {
@@ -530,10 +623,16 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
 
     /// <summary>
     /// A server instance with the default zero-size input buffer: a Windows client's write then completes only once the server has
-    /// read it, so a client cannot close before its frame is read and lose it.
+    /// read it, so a client cannot close before its frame is read and lose it. On Windows the first instance (the server holds no
+    /// other) is created with <see cref="PipeOptions.FirstPipeInstance"/>, so a name another process already holds fails loudly
+    /// instead of sharing it. Never on Unix: there the flag skips the unlink of a crashed main's stale socket file.
     /// </summary>
-    private NamedPipeServerStream CreateListener() =>
-        new(_pipeName, PipeDirection.In, NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, SharedPipeOptions);
+    private NamedPipeServerStream CreateListener(bool firstInstance)
+    {
+        ListenerCreating?.Invoke(firstInstance);
+        PipeOptions options = firstInstance && OperatingSystem.IsWindows() ? SharedPipeOptions | PipeOptions.FirstPipeInstance : SharedPipeOptions;
+        return new(Endpoint, PipeDirection.In, NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, options);
+    }
 
     private async Task DisposeListenerAsync()
     {
@@ -557,14 +656,14 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             log.LogWarning(
-                $"Dropped a malformed instance message on pipe '{_pipeName}': no complete frame within {FrameReadDeadline.TotalSeconds:0} s.",
+                $"Dropped a malformed instance message on pipe '{Endpoint}': no complete frame within {FrameReadDeadline.TotalSeconds:0} s.",
                 ex
             );
             return;
         }
         catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or DecoderFallbackException or IOException)
         {
-            log.LogWarning($"Dropped a malformed instance message on pipe '{_pipeName}'.", ex);
+            log.LogWarning($"Dropped a malformed instance message on pipe '{Endpoint}'.", ex);
             return;
         }
 
@@ -597,6 +696,8 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
 
     private void InvokeHandler(Action<string> onMessage, string message)
     {
+        InstanceCoordinator? outer = t_handlerRunningFor;
+        t_handlerRunningFor = this;
         try
         {
             onMessage(message);
@@ -604,6 +705,10 @@ public sealed class InstanceCoordinator(string lockFilePath, string pipeName, IA
         catch (Exception ex)
         {
             log.LogError($"The handler for instance message '{message}' threw; the server keeps serving.", ex);
+        }
+        finally
+        {
+            t_handlerRunningFor = outer;
         }
     }
 

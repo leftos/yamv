@@ -82,6 +82,19 @@ public sealed class ServerFailureLogTests
     }
 
     [Fact]
+    public void RecordKnownCause_LogsTheDescriptionOnceWithTheExceptionAndBacksOff()
+    {
+        TimeSpan first = _failures.RecordKnownCause(FailureA, "The pipe under test is held.");
+        TimeSpan second = _failures.RecordKnownCause(FailureA, "The pipe under test is held.");
+
+        (string Message, Exception? Exception) error = Assert.Single(_log.Errors);
+        Assert.Equal("The pipe under test is held.", error.Message);
+        Assert.IsType<IOException>(error.Exception);
+        Assert.Equal(TimeSpan.FromMilliseconds(100), first);
+        Assert.Equal(TimeSpan.FromMilliseconds(200), second);
+    }
+
+    [Fact]
     public void RecordConnectFailure_FirstInARowRetriesAtOnceAndLaterOnesBackOff()
     {
         TimeSpan? first = _failures.RecordConnectFailure(FailureA);
