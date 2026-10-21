@@ -23,7 +23,24 @@ public partial class App : Application
     public const string ThemeSettingsHarnessVariable = "YAMV_DEV_THEME_SETTINGS";
 
     private MainWindowComposition? _mainWindow;
+    private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
+    private IAppLog? _log;
+
+    /// <summary>The files a viewer launch opens: empty for a main launch. Set before Avalonia starts.</summary>
+    internal static IReadOnlyList<string> ViewerFiles { get; set; } = [];
+
+    /// <summary>The one theme bridge the app applies through; null before the first window is built and after it is released.</summary>
+    internal ThemeBridge? Bridge => _bridge;
+
+    /// <summary>The process's one log, made when the first window is built.</summary>
+    private IAppLog Log => _log ??= new FileAppLog(AppPaths.LogFile);
+
+    /// <summary>
+    /// Forgets the process's log, so the next window makes one where the data folder is then. A test that changes
+    /// <c>YAMV_DATA_DIR</c> between windows calls this; production keeps one log for the process.
+    /// </summary>
+    internal void ResetLog() => _log = null;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -40,7 +57,8 @@ public partial class App : Application
 
     /// <summary>
     /// The window a start shows: with <c>YAMV_DEV_HARNESS</c> at <c>1</c>, the theme settings window when
-    /// <c>YAMV_DEV_THEME_SETTINGS</c> is <c>1</c> too, else the dev harness; otherwise the main window.
+    /// <c>YAMV_DEV_THEME_SETTINGS</c> is <c>1</c> too, else the dev harness; otherwise the main window, or a viewer window
+    /// over <see cref="ViewerFiles"/> when the launch named files.
     /// </summary>
     internal Window CreateStartWindow()
     {
@@ -50,15 +68,21 @@ public partial class App : Application
             return Environment.GetEnvironmentVariable(ThemeSettingsHarnessVariable) == "1" ? CreateThemeSettingsHarness() : new HarnessWindow();
         }
 
-        _mainWindow = MainWindowFactory.Create(this);
+        IAppLog log = Log;
+        ThemeBridge bridge = MainWindowFactory.CreateBridge(this, log);
+        _bridge = bridge;
+        _mainWindow =
+            ViewerFiles.Count == 0 ? MainWindowFactory.Create(this, bridge, log) : MainWindowFactory.CreateViewer(this, bridge, ViewerFiles, log);
         return _mainWindow.Window;
     }
 
-    /// <summary>Disposes what the start window owns, once the app exits.</summary>
+    /// <summary>Disposes what the start window owns, and the bridge the app owns, once the app exits.</summary>
     internal void ReleaseMainWindow()
     {
         _mainWindow?.Dispose();
         _mainWindow = null;
+        _bridge?.Dispose();
+        _bridge = null;
         _harnessBridge?.Dispose();
         _harnessBridge = null;
     }

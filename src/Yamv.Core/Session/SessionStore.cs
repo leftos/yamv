@@ -20,7 +20,16 @@ public sealed class SessionStore(string filePath, IAppLog log)
     /// <summary>
     /// Loads the stored state with out-of-range scroll positions clamped and entries for files that are not open dropped.
     /// </summary>
-    public SessionState Load()
+    public SessionState Load() => Read(moveCorruptFileAside: true);
+
+    /// <summary>
+    /// Loads the stored state like <see cref="Load"/>, but never writes or moves the file: a corrupt or unreadable file is
+    /// logged and left exactly where it is, and yields <see cref="SessionState.Empty"/>. A viewer window reads the theme this
+    /// way, so it never changes the main window's session.
+    /// </summary>
+    public SessionState LoadReadOnly() => Read(moveCorruptFileAside: false);
+
+    private SessionState Read(bool moveCorruptFileAside)
     {
         string json;
         try
@@ -52,8 +61,16 @@ public sealed class SessionStore(string filePath, IAppLog log)
         }
         catch (JsonException exception)
         {
-            log.LogWarning($"The session file {FilePath} is unreadable; moving it to {FilePath}.bad.", exception);
-            MoveCorruptFileAside();
+            if (moveCorruptFileAside)
+            {
+                log.LogWarning($"The session file {FilePath} is unreadable; moving it to {FilePath}.bad.", exception);
+                MoveCorruptFileAside();
+            }
+            else
+            {
+                log.LogWarning($"The session file {FilePath} is unreadable; leaving it in place.", exception);
+            }
+
             return SessionState.Empty;
         }
 

@@ -17,7 +17,7 @@ internal static class Program
             return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
 
-        LaunchRequest request = LaunchOptions.Parse(args, Environment.CurrentDirectory, File.Exists);
+        LaunchRequest request = LaunchOptions.Parse(args, Environment.CurrentDirectory, Directory.Exists);
         return CarryOut(StartupPlan.Decide(request, OperatingSystem.IsWindows()), args);
     }
 
@@ -33,9 +33,16 @@ internal static class Program
             PrintAndExit print => Finish(print.Text, print.Stream, print.ExitCode, notifyShell: false),
             RegisterStartup => RunRegistration(register: true),
             UnregisterStartup => RunRegistration(register: false),
-            StartApplication => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args),
+            StartApplication start => Start(start.Files, args),
             _ => throw new InvalidOperationException($"Unknown startup action: {action}."),
         };
+
+    /// <summary>Hands the launch's files to the app, then starts Avalonia; no files means a main launch.</summary>
+    private static int Start(IReadOnlyList<string> files, string[] args)
+    {
+        App.ViewerFiles = files;
+        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
     /// <summary>Writes the text to the console, notifies the shell when asked, and returns the exit code.</summary>
     private static int Finish(string message, StartupOutput stream, int exitCode, bool notifyShell)

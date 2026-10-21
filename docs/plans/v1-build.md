@@ -72,7 +72,7 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
   - the main instance also writes its pid and start time to a sibling file (`main.lock` → `main.pid`), not into the locked file, and `TryReadMainPid(lockFilePath, log)` gives a second launch the pid only when that process is running and its start time matches.
   - Viewer launches (with file args) skip the coordinator entirely.
   - Tests run two coordinators in-process with unique names.
-- `LaunchOptions.Parse(args)` → `Main` | `Viewer(files)` | `Register` | `Unregister`. Missing or non-file args produce a clear error. Relative paths are resolved against the cwd.
+- `LaunchOptions.Parse(args)` → `Main` | `Viewer(files)` | `Register` | `Unregister`. A folder argument is refused ("Not a file: {full path}", exit 2); a path that does not exist is kept and opens as a missing document. Relative paths are resolved against the cwd.
 - `MarkdownRenderer.Render(text)` → an HTML body string:
   - Markdig with `UseAdvancedExtensions()` (tables, task lists, footnotes, autolinks, emphasis extras), plus front matter (hidden), `UseMathematics`, and diagram blocks;
   - heading ids for anchors;

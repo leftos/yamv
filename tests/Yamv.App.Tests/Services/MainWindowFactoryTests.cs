@@ -1,9 +1,17 @@
+using Avalonia;
+using Avalonia.Controls;
 using Yamv.App.Services;
+using Yamv.App.Tests.Fakes;
+using Yamv.App.ViewModels;
 using Yamv.App.Views;
+using Yamv.Core;
 using Yamv.Core.Session;
+using Yamv.Core.Theming;
 
 namespace Yamv.App.Tests.Services;
 
+/// <summary>Builds viewer windows over a temp data folder, so each test has its own session file and themes.</summary>
+[Collection(nameof(EnvironmentVariables))]
 public sealed class MainWindowFactoryTests
 {
     [Fact]
@@ -16,4 +24,168 @@ public sealed class MainWindowFactoryTests
 
             Assert.Equal(360, window.SidebarWidth);
         });
+
+    [Fact]
+    public Task Viewer_with_one_missing_file_selects_it_and_hides_the_tree() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture();
+
+            viewer.Build(viewer.PathOf("gone.md"));
+
+            Assert.False(viewer.ViewModel.IsEmpty);
+            Assert.False(viewer.ViewModel.ShowTree);
+            Assert.True(viewer.ViewModel.SelectedIsMissing);
+            Assert.Equal(viewer.PathOf("gone.md"), viewer.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Viewer_with_an_existing_and_a_missing_file_shows_both_and_selects_the_existing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture();
+            string existing = viewer.Write("plan.md");
+            string missing = viewer.PathOf("gone.md");
+
+            viewer.Build(missing, existing);
+
+            Assert.True(viewer.ViewModel.ShowTree);
+            Assert.Equal(existing, viewer.ViewModel.SelectedPath);
+            Assert.False(viewer.ViewModel.SelectedIsMissing);
+            Assert.IsType<DocumentItemViewModel>(viewer.ViewModel.SelectedItem);
+            List<DocumentItemViewModel> rows = viewer.DocumentRows();
+            Assert.Equal(2, rows.Count);
+            Assert.Contains(rows, row => row.Path == existing && !row.IsMissing);
+            Assert.Contains(rows, row => row.Path == missing && row.IsMissing);
+        });
+
+    [Fact]
+    public Task Viewer_takes_its_theme_from_the_session_and_leaves_the_file_alone() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture();
+            viewer.WriteSession("""{ "themeId": "ink", "appearance": "dark" }""");
+            byte[] before = File.ReadAllBytes(viewer.SessionFile);
+
+            viewer.Build(viewer.PathOf("gone.md"));
+
+            Assert.Equal("ink", viewer.Bridge.RequestedThemeId);
+            Assert.Equal("dark", viewer.Bridge.RequestedAppearance);
+            Assert.Equal(before, File.ReadAllBytes(viewer.SessionFile));
+        });
+
+    [Fact]
+    public Task Viewer_leaves_a_corrupt_session_file_in_place() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture();
+            viewer.WriteSession("{ not json");
+
+            viewer.Build(viewer.PathOf("gone.md"));
+
+            Assert.Equal("{ not json", File.ReadAllText(viewer.SessionFile));
+            Assert.False(File.Exists(viewer.SessionFile + ".bad"));
+            Assert.Equal(ThemeCatalog.DefaultThemeId, viewer.Bridge.RequestedThemeId);
+        });
+
+    /// <summary>
+    /// Builds viewer windows over a temp data folder whose session file a test may seed, drawing their pages on a
+    /// <see cref="FakeDocumentSurface"/> that completes its renders, so the fixture can wait for every render before it
+    /// deletes the documents a render reads.
+    /// </summary>
+    private sealed class ViewerFixture : IAsyncDisposable
+    {
+        private readonly string _root = Path.Combine(Path.GetTempPath(), "yamv-viewer-" + Guid.NewGuid().ToString("N"));
+        private readonly string? _dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
+
+        public ViewerFixture()
+        {
+            Documents = Path.Combine(_root, "docs");
+            DataFolder = Path.Combine(_root, "data");
+            Directory.CreateDirectory(Documents);
+            Directory.CreateDirectory(DataFolder);
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, DataFolder);
+            Bridge = new ThemeBridge(new ThemeCatalog(AppPaths.ThemesDirectory, Log), Application.Current!, Log);
+        }
+
+        public string Documents { get; }
+
+        public string DataFolder { get; }
+
+        public string SessionFile => Path.Combine(DataFolder, "session.json");
+
+        public RecordingAppLog Log { get; } = new();
+
+        public FakeDocumentSurface Surface { get; } = new();
+
+        public ThemeBridge Bridge { get; }
+
+        /// <summary>The window the test built; null until <see cref="Build"/>.</summary>
+        public MainWindowComposition Composition { get; private set; } = null!;
+
+        public DocumentWindowViewModel ViewModel => Composition.ViewModel;
+
+        /// <summary>Creates a viewer window over <paramref name="files"/>, drawn on <see cref="Surface"/>.</summary>
+        /// <param name="files">The full paths the viewer shows.</param>
+        public void Build(params string[] files) =>
+            Composition = MainWindowFactory.CreateViewer(Application.Current!, Bridge, files, Log, new Border(), Surface);
+
+        /// <summary>The full path of a file in the documents folder; it is not created.</summary>
+        /// <param name="name">The file's name.</param>
+        public string PathOf(string name) => Path.Combine(Documents, name);
+
+        /// <summary>Writes a document into the documents folder and returns its full path.</summary>
+        /// <param name="name">The file's name.</param>
+        public string Write(string name)
+        {
+            string path = PathOf(name);
+            File.WriteAllText(path, "# " + name);
+            return path;
+        }
+
+        /// <summary>Writes the session file the viewer reads.</summary>
+        /// <param name="json">The session JSON.</param>
+        public void WriteSession(string json) => File.WriteAllText(SessionFile, json);
+
+        /// <summary>The viewer's document rows, wherever the grouper placed them in the tree.</summary>
+        public List<DocumentItemViewModel> DocumentRows() => Rows(ViewModel.Items);
+
+        public async ValueTask DisposeAsync()
+        {
+            Composition?.Dispose();
+            Bridge.Dispose();
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, _dataBefore);
+            if (Composition is not null)
+            {
+                await Composition.ViewModel.WhenRendersSettled();
+            }
+
+            if (Directory.Exists(_root))
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+        }
+
+        private static List<DocumentItemViewModel> Rows(IReadOnlyList<TreeItemViewModel> items)
+        {
+            List<DocumentItemViewModel> rows = [];
+            foreach (TreeItemViewModel item in items)
+            {
+                switch (item)
+                {
+                    case DocumentItemViewModel document:
+                        rows.Add(document);
+                        break;
+                    case GroupItemViewModel group:
+                        rows.AddRange(Rows(group.Children));
+                        break;
+                    case FolderItemViewModel folder:
+                        rows.AddRange(Rows(folder.Children));
+                        break;
+                }
+            }
+
+            return rows;
+        }
+    }
 }

@@ -15,7 +15,7 @@
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.
 - **Main instance**: the one YAMV process started with no file arguments. It remembers its open documents between runs; a second no-arg launch brings it to the front and exits.
 - **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted on a clean exit.
-- **Missing document**: an open document whose file no longer exists; it stays in the tree, greyed, until removed or until the file comes back.
+- **Missing document**: an open document whose file no longer exists, or a path a viewer launch named that does not exist; it stays in the tree, greyed, until removed or until the file comes back.
 - **Open with registration**: what `yamv --register` writes on Windows so YAMV appears in Explorer's Open with for `.md` and `.markdown`: the `YAMV.Markdown` ProgID, an `OpenWithProgids` entry per extension and the `Applications\yamv.exe` key, all under the current user. It never sets the default handler.
 - **Persist**: a window's flag saying its documents, selection and layout are saved to the session file; true only for the main instance's window.
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.
@@ -26,6 +26,6 @@
 - **Tree order**: the order documents appear in the sidebar tree (groups, then folders before files, case-insensitively), which Close, Ctrl+Tab and Ctrl+Shift+Tab follow; it differs from the order documents were opened.
 - **Unreadable document**: an open document whose file exists but cannot be read (locked by another program, or access denied); the window shows the can't-read pane (`UnreadableDocumentPane`) in place of the page, and the state clears on a successful read, a selection change, or the file going missing.
 - **Variant**: the light or dark half of a theme family.
-- **Viewer instance**: a YAMV window started with file arguments (or, on macOS, a Finder open). It shows only those files and remembers nothing.
+- **Viewer instance**: a YAMV window started with file arguments (or, on macOS, a Finder open); on Windows its own process. It shows only those files and is non-persisting: it never writes `session.json`, has no saved layout, shows the tree only with 2+ documents, closes when its last document closes, and reads the theme from the session file read-only (`SessionStore.LoadReadOnly`).
 - **WebView2 user-data folder**: where WebView2 keeps the document page's browser profile on Windows: `%LOCALAPPDATA%\YAMV\webview2`, shared by every YAMV process, or the folder `WEBVIEW2_USER_DATA_FOLDER` names when set (each hidden run gets its own).
 - **Yours**: the user-themes section of the theme list in the theme settings window, below Built-in.

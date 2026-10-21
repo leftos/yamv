@@ -23,7 +23,8 @@ public static class StartupPlan
             RegisterLaunch when isWindows => new RegisterStartup(),
             UnregisterLaunch when isWindows => new UnregisterStartup(),
             RegisterLaunch or UnregisterLaunch => new PrintAndExit(MacRegistrationMessage, StartupOutput.StandardError, ExitCode: 2),
-            MainLaunch or ViewerLaunch => new StartApplication(),
+            MainLaunch => new StartApplication([]),
+            ViewerLaunch viewer => new StartApplication(viewer.Files),
             _ => throw new ArgumentOutOfRangeException(nameof(request), request, "Unknown launch request."),
         };
     }
@@ -82,7 +83,8 @@ public sealed record RegisterStartup : StartupAction;
 public sealed record UnregisterStartup : StartupAction;
 
 /// <summary>Start the app, as YAMV always did.</summary>
-public sealed record StartApplication : StartupAction;
+/// <param name="Files">The files a viewer window opens; empty for a main launch.</param>
+public sealed record StartApplication(IReadOnlyList<string> Files) : StartupAction;
 
 /// <summary>The console stream a startup message goes to.</summary>
 public enum StartupOutput

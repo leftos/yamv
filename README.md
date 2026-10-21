@@ -3,7 +3,8 @@
 A quiet markdown viewer for Windows and macOS.
 
 - `yamv` opens the main window with the documents you had open last time, grouped on the right by git repo or folder.
-- `yamv a.md b.md` opens a separate viewer window with just those files. It remembers nothing.
+- `yamv a.md b.md` opens a separate viewer window with just those files. It remembers nothing: it saves no session, opens at the default size and place, shows the tree only with 2+ documents, closes when its last document closes, and takes its theme from the saved session without changing it.
+- A file that does not exist opens as a missing document (**Locate…**, **Remove from list**) instead of failing; `yamv a.md gone.md` opens one viewer with `a.md` selected and `gone.md` as a missing row.
 - Ctrl+O (Cmd+O on macOS), or the empty window's **Open files…** button, picks one or more markdown or text files and opens them; a file that is already open is selected instead of added twice.
 - Right-click a document, folder or group in the tree for Reveal in Explorer (Finder on macOS), Copy path, and for documents and groups, Close and Close group.
 - A missing document's **Locate…** picks the file that replaces it, in the same place in the tree.
@@ -12,7 +13,8 @@ A quiet markdown viewer for Windows and macOS.
 ## Command line
 
 - `yamv --help`, `-h` or `/?` prints the usage to standard output and exits 0.
-- An unknown option, an option combined with other arguments, or a file that does not exist prints its message to standard error and exits 2.
+- An unknown option, an option combined with other arguments, or an argument that names a folder (`yamv .`, `yamv docs\`) prints its message to standard error and exits 2. A folder prints `Not a file: <full path>`, one line per folder argument.
+- A path that does not exist is not an error: the viewer window shows it as a missing document.
 - `yamv --register` (Windows) adds YAMV to Explorer's Open with for `.md` and `.markdown`, for the `yamv.exe` you run it from, and never takes over the default handler. It prints `Registered YAMV for .md and .markdown in Open with (<path>).`, or `YAMV is already registered for .md and .markdown (<path>).` when nothing changed, and exits 0. Run from a program that is not `yamv.exe`, it prints `Not registering: <path> is not yamv.exe. Run --register from the installed yamv.exe.` and exits 1.
 - `yamv --unregister` removes the entries that point at the `yamv.exe` you run it from and leaves any that point at another program. It prints `Removed YAMV from Open with for .md and .markdown.`, or `Nothing to remove.`, and exits 0, with a note after the line when it left an entry in place. A registry failure prints `Could not register: <message>` or `Could not unregister: <message>` to standard error and exits 1.
 - On macOS, `--register` and `--unregister` print a note to standard error and exit 2: Finder's Open With lists YAMV from its app bundle.

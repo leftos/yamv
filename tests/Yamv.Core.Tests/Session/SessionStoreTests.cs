@@ -331,4 +331,53 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     private SessionStore CreateStore() => new(SessionFile, _log);
+
+    [Fact]
+    public void LoadReadOnly_CorruptFile_LeavesItInPlaceAndLogsOneWarning()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SessionFile, "{ not json");
+
+        Assert.Same(SessionState.Empty, CreateStore().LoadReadOnly());
+
+        Assert.Equal("{ not json", File.ReadAllText(SessionFile));
+        Assert.False(File.Exists(SessionFile + ".bad"));
+        LogEntry warning = Assert.Single(_log.Entries);
+        Assert.Equal("warning", warning.Level);
+        Assert.Contains(SessionFile, warning.Message);
+        Assert.NotNull(warning.Exception);
+    }
+
+    [Fact]
+    public void LoadReadOnly_MissingFile_ReturnsEmptyAndCreatesNothing()
+    {
+        Assert.Same(SessionState.Empty, CreateStore().LoadReadOnly());
+
+        Assert.False(Directory.Exists(_directory));
+        Assert.Empty(_log.Entries);
+    }
+
+    [Fact]
+    public void LoadReadOnly_SavedState_ReturnsTheThemeItHolds()
+    {
+        CreateStore().Save(new SessionState { ThemeId = "ink", Appearance = "dark" });
+
+        SessionState loaded = CreateStore().LoadReadOnly();
+
+        Assert.Equal("ink", loaded.ThemeId);
+        Assert.Equal("dark", loaded.Appearance);
+    }
+
+    [Fact]
+    public void LoadReadOnly_NormalizesTheStateItReads()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SessionFile, "{}");
+
+        SessionState loaded = CreateStore().LoadReadOnly();
+
+        Assert.Equal(280, loaded.SidebarWidth);
+        Assert.Equal("studio", loaded.ThemeId);
+        Assert.Equal("system", loaded.Appearance);
+    }
 }

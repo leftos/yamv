@@ -55,13 +55,22 @@ public sealed class StartupPlanTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void Decide_Main_StartsTheApp(bool isWindows) => Assert.IsType<StartApplication>(StartupPlan.Decide(new MainLaunch(), isWindows));
+    public void Decide_Main_StartsTheAppWithNoFiles(bool isWindows)
+    {
+        StartApplication start = Assert.IsType<StartApplication>(StartupPlan.Decide(new MainLaunch(), isWindows));
+
+        Assert.Empty(start.Files);
+    }
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void Decide_ViewerWithFiles_StartsTheApp(bool isWindows) =>
-        Assert.IsType<StartApplication>(StartupPlan.Decide(new ViewerLaunch([@"C:\work\a.md"]), isWindows));
+    public void Decide_ViewerWithFiles_StartsTheAppWithThoseFiles(bool isWindows)
+    {
+        StartApplication start = Assert.IsType<StartApplication>(StartupPlan.Decide(new ViewerLaunch([@"C:\work\a.md"]), isWindows));
+
+        Assert.Equal([@"C:\work\a.md"], start.Files);
+    }
 
     [Fact]
     public void FromResult_SucceededWithChange_PrintsToStdoutNotifiesAndExitsZero()

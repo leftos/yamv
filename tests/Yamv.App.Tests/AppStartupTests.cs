@@ -1,9 +1,16 @@
+using System.Reflection;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Themes.Fluent;
+using Microsoft.Extensions.Time.Testing;
+using Yamv.App.Services;
+using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.App.Views;
 using Yamv.Core;
+using Yamv.Core.Documents;
+using Yamv.Core.Grouping;
+using Yamv.Core.Theming;
 
 namespace Yamv.App.Tests;
 
@@ -46,6 +53,7 @@ public sealed class AppStartupTests
             finally
             {
                 app.ReleaseMainWindow();
+                app.ResetLog();
                 Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
                 Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
                 if (Directory.Exists(dataFolder))
@@ -79,6 +87,7 @@ public sealed class AppStartupTests
             finally
             {
                 app.ReleaseMainWindow();
+                app.ResetLog();
                 Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
                 Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
                 Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, settingsBefore);
@@ -109,9 +118,133 @@ public sealed class AppStartupTests
             finally
             {
                 app.ReleaseMainWindow();
+                app.ResetLog();
                 Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
                 Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
                 Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, settingsBefore);
             }
         });
+
+    [Fact]
+    public Task Start_window_with_viewer_files_is_a_viewer_window_that_writes_no_session() =>
+        Headless.Run(() =>
+        {
+            string dataFolder = Path.Combine(Path.GetTempPath(), "yamv-app-start-" + Guid.NewGuid().ToString("N"));
+            string missing = Path.Combine(dataFolder, "gone.md");
+            string? dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
+            string? harnessBefore = Environment.GetEnvironmentVariable(App.HarnessVariable);
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataFolder);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, null);
+            App.ViewerFiles = [missing];
+            App app = Assert.IsType<App>(Application.Current);
+            try
+            {
+                Window window = app.CreateStartWindow();
+
+                MainWindow main = Assert.IsType<MainWindow>(window);
+                DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(main.DataContext);
+                Assert.False(viewModel.IsEmpty);
+                Assert.False(viewModel.ShowTree);
+                Assert.True(viewModel.SelectedIsMissing);
+
+                viewModel.ToggleSidebar();
+
+                app.ReleaseMainWindow();
+                app.ResetLog();
+
+                Assert.False(File.Exists(Path.Combine(dataFolder, "session.json")));
+            }
+            finally
+            {
+                app.ReleaseMainWindow();
+                app.ResetLog();
+                App.ViewerFiles = [];
+                Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
+                Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
+                if (Directory.Exists(dataFolder))
+                {
+                    Directory.Delete(dataFolder, recursive: true);
+                }
+            }
+        });
+
+    [Fact]
+    public Task Releasing_the_app_disposes_the_bridge_it_created() =>
+        Headless.Run(() =>
+        {
+            string dataFolder = Path.Combine(Path.GetTempPath(), "yamv-app-start-" + Guid.NewGuid().ToString("N"));
+            string? dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
+            string? harnessBefore = Environment.GetEnvironmentVariable(App.HarnessVariable);
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataFolder);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, null);
+            App.ViewerFiles = [];
+            App app = Assert.IsType<App>(Application.Current);
+            ThemeBridge? bridge = null;
+            try
+            {
+                app.CreateStartWindow();
+                bridge = app.Bridge;
+                Assert.NotNull(bridge);
+
+                app.ReleaseMainWindow();
+                app.ResetLog();
+
+                Assert.Null(app.Bridge);
+                Assert.True(IsBridgeDisposed(bridge!));
+            }
+            finally
+            {
+                app.ReleaseMainWindow();
+                app.ResetLog();
+                App.ViewerFiles = [];
+                Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
+                Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
+                if (Directory.Exists(dataFolder))
+                {
+                    Directory.Delete(dataFolder, recursive: true);
+                }
+            }
+        });
+
+    [Fact]
+    public Task Disposing_a_window_composition_unregisters_its_surface_and_leaves_the_bridge() =>
+        Headless.Run(() =>
+        {
+            string themes = Path.Combine(Path.GetTempPath(), "yamv-themes-" + Guid.NewGuid().ToString("N"));
+            var log = new RecordingAppLog();
+            var bridge = new ThemeBridge(new ThemeCatalog(themes, log), Application.Current!, log);
+            var surface = new FakeDocumentSurface();
+            var state = new DocumentWindowState(false, _ => null, _ => true, new GroupingOptions(null, StringComparison.OrdinalIgnoreCase));
+            var viewModel = new DocumentWindowViewModel(state, surface, _ => "", new FakeTimeProvider(), log);
+            var window = new MainWindow(viewModel, new Border(), surface, log);
+            var composition = new MainWindowComposition(window, viewModel, bridge, surface, session: null);
+            try
+            {
+                bridge.Apply("studio", "light");
+                bridge.Register(surface);
+                Assert.Single(surface.ThemeCss);
+
+                composition.Dispose();
+
+                bridge.Apply("studio", "dark");
+                Assert.Single(surface.ThemeCss);
+                Assert.False(IsBridgeDisposed(bridge));
+            }
+            finally
+            {
+                if (window.IsVisible)
+                {
+                    window.Close();
+                }
+
+                bridge.Dispose();
+                if (Directory.Exists(themes))
+                {
+                    Directory.Delete(themes, recursive: true);
+                }
+            }
+        });
+
+    private static bool IsBridgeDisposed(ThemeBridge bridge) =>
+        (bool)typeof(ThemeBridge).GetField("_disposed", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge)!;
 }

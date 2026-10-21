@@ -16,16 +16,18 @@ public static class LaunchOptions
 
     /// <summary>
     /// Turns <paramref name="args"/> into what this launch should do. File arguments are resolved against
-    /// <paramref name="currentDirectory"/>, de-duplicated in first-seen order, and checked with <paramref name="fileExists"/>.
+    /// <paramref name="currentDirectory"/> and de-duplicated in first-seen order; a path that does not exist is kept like any
+    /// other, and the viewer window opens it as a missing document. A path that is a directory is not something a viewer can
+    /// open, so it is refused.
     /// </summary>
     /// <param name="args">The command-line arguments, without the program name.</param>
     /// <param name="currentDirectory">The folder a relative file argument is resolved against.</param>
-    /// <param name="fileExists">Reports whether a file argument exists.</param>
-    public static LaunchRequest Parse(IReadOnlyList<string> args, string currentDirectory, Func<string, bool> fileExists)
+    /// <param name="directoryExists">Reports whether a file argument resolves to an existing directory.</param>
+    public static LaunchRequest Parse(IReadOnlyList<string> args, string currentDirectory, Func<string, bool> directoryExists)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(currentDirectory);
-        ArgumentNullException.ThrowIfNull(fileExists);
+        ArgumentNullException.ThrowIfNull(directoryExists);
 
         List<string> arguments = [.. args.Where(argument => !argument.StartsWith(ProcessSerialNumberPrefix, StringComparison.Ordinal))];
         if (arguments.Count == 0)
@@ -56,8 +58,8 @@ public static class LaunchOptions
         }
 
         List<string> files = [];
+        List<string> folders = [];
         HashSet<string> seen = new(StringComparer.FromComparison(AppPaths.PathComparison));
-        List<string> missing = [];
         foreach (string argument in arguments)
         {
             string fullPath = Path.GetFullPath(argument, currentDirectory);
@@ -66,16 +68,19 @@ public static class LaunchOptions
                 continue;
             }
 
-            files.Add(fullPath);
-            if (!fileExists(fullPath))
+            if (directoryExists(fullPath))
             {
-                missing.Add(fullPath);
+                folders.Add(fullPath);
+            }
+            else
+            {
+                files.Add(fullPath);
             }
         }
 
-        if (missing.Count > 0)
+        if (folders.Count > 0)
         {
-            return new InvalidLaunch(string.Join("\n", missing.Select(path => $"File not found: {path}")));
+            return new InvalidLaunch(string.Join("\n", folders.Select(path => $"Not a file: {path}")));
         }
 
         return new ViewerLaunch(files);
