@@ -39,11 +39,18 @@
 
 ### No milestone
 - [/] YAMV-53 Settings file: app-wide settings in one shared, watched settings.json
-- [ ] YAMV-54 Single instance: every window in one process; file launches open viewer windows in it
 - [ ] YAMV-55 ThemeFolderWatcher: ObjectDisposedException escapes Start after a concurrent Dispose
 - [ ] YAMV-56 Width popover: preview an unreachable width on an example document, with a toast
 - [ ] YAMV-58 Document watcher follow-ups: vanished folder, symlinked documents, Debouncer reuse, shared folder-event types
 - [ ] YAMV-59 Width and settings stores: cross-process lock; settings store id and appearance checks
+- [ ] YAMV-60 Theme settings: disk-change edge cases (broken in-use theme not held, Appearance dropped, Revert vs bar)
+- [ ] YAMV-63 Content width popover: stale cached width, store exceptions, Reset-before-EndDrag segment
+- [ ] YAMV-64 Document file watcher follow-ups: error loop after healthy ticks, unstarted source, spin helper, dead-share threads
+
+## Single instance
+
+- [ ] YAMV-54 Single instance: every window in one process; file launches open viewer windows in it
+  - [/] YAMV-62 54-A: open message with confirmation over a duplex instance channel (Core)
 
 ## Ship v1
 
@@ -62,3 +69,4 @@
 - [!] YAMV-51 Adopt the shared Avalonia driver (agents drive the real window; queued file picks)
 - [ ] YAMV-52 Shared driver: drive the real OS file dialog
 - [ ] YAMV-57 Core: one shared atomic-file helper for the five temp-then-replace stores
+- [ ] YAMV-61 csharpier formats .axaml and breaks inline Runs: settle XAML formatting and the format command
