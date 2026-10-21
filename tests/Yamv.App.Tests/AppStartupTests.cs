@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Themes.Fluent;
@@ -27,6 +28,13 @@ public sealed class EnvironmentVariables;
 [Collection(nameof(EnvironmentVariables))]
 public sealed class AppStartupTests
 {
+    private const string PaperLight = """{ "themeId": "paper", "appearance": "light" }""";
+    private const string InkDark = """{ "themeId": "ink", "appearance": "dark" }""";
+    private const string MintDark = """{ "themeId": "mint", "appearance": "dark" }""";
+
+    /// <summary>A hang guard: a passing run never waits it out.</summary>
+    private static readonly TimeSpan HangGuard = TimeSpan.FromMinutes(2);
+
     [Fact]
     public Task App_starts_headless_with_fluent_theme() =>
         Headless.Run(() =>
@@ -564,6 +572,177 @@ public sealed class AppStartupTests
             Assert.Null(start.App.Bridge);
         });
 
+    [Fact]
+    public Task Settings_file_edited_while_running_is_applied_to_the_bridge() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            start.WriteSettings(PaperLight);
+            start.App.CreateStartWindow();
+            Assert.Equal("paper", start.App.Bridge!.RequestedThemeId);
+
+            EditUntilApplied(start, InkDark, "ink", () => Dispatcher.UIThread.RunJobs());
+
+            Assert.Equal("ink", start.App.Bridge.RequestedThemeId);
+            Assert.Equal("dark", start.App.Bridge.RequestedAppearance);
+        });
+
+    [Fact]
+    public Task Applied_file_change_writes_nothing_back() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            start.WriteSettings(PaperLight);
+            start.App.CreateStartWindow();
+            SettingsWriter writer = start.App.SettingsWriter!;
+            Lock storeGate = StoreGate(writer);
+            bool saveAsked = false;
+
+            EditUntilApplied(
+                start,
+                InkDark,
+                "ink",
+                () =>
+                {
+                    // Holding the store keeps a save the posted work asks for from finishing before the writer is looked at.
+                    using (storeGate.EnterScope())
+                    {
+                        Dispatcher.UIThread.RunJobs();
+                        saveAsked |= !writer.WhenIdle().IsCompleted;
+                    }
+                }
+            );
+            Assert.True(writer.WhenIdle().Wait(HangGuard, TestContext.Current.CancellationToken), "The writer never went idle.");
+
+            Assert.False(saveAsked, "Applying the settings file's change asked the writer to save it back.");
+            Assert.Equal(Encoding.UTF8.GetBytes(InkDark), File.ReadAllBytes(start.SettingsFile));
+        });
+
+    [Fact]
+    public Task A_stale_settings_report_is_applied_without_writing_over_a_newer_file() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            start.WriteSettings(PaperLight);
+            start.App.CreateStartWindow();
+            start.WriteSettings(MintDark);
+
+            start.App.OnSettingsFileChanged(start.App.SettingsWatcher, new AppSettings("ink", "dark"));
+            Dispatcher.UIThread.RunJobs();
+            Assert.NotEqual("paper", start.App.Bridge!.RequestedThemeId);
+            Assert.True(start.App.SettingsWriter!.WhenIdle().Wait(HangGuard, TestContext.Current.CancellationToken), "The writer never went idle.");
+
+            Assert.Equal(Encoding.UTF8.GetBytes(MintDark), File.ReadAllBytes(start.SettingsFile));
+        });
+
+    [Fact]
+    public Task A_settings_change_posted_by_an_earlier_start_does_nothing_to_the_next() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            start.App.CreateStartWindow();
+            start.App.OnSettingsFileChanged(start.App.SettingsWatcher, new AppSettings("ink", "dark"));
+
+            start.App.CreateStartWindow();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal("studio", start.App.Bridge!.RequestedThemeId);
+            Assert.Equal("system", start.App.Bridge.RequestedAppearance);
+        });
+
+    [Fact]
+    public Task Release_disposes_the_settings_watcher_before_the_writer_and_the_bridge() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            using var watchers = new SettingsWatcherRecorder(start.App);
+            start.App.CreateStartWindow();
+            Assert.Equal(1, watchers.Created);
+            Assert.NotNull(start.App.SettingsWatcher);
+
+            start.App.ReleaseMainWindow();
+
+            Assert.Equal([(false, false)], watchers.WriterAndBridgeDisposedAtEachDispose);
+            Assert.Null(start.App.SettingsWatcher);
+        });
+
+    [Fact]
+    public Task A_settings_change_posted_after_release_does_nothing() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            start.App.CreateStartWindow();
+            ThemeBridge bridge = start.App.Bridge!;
+            start.App.OnSettingsFileChanged(start.App.SettingsWatcher, new AppSettings("ink", "dark"));
+
+            start.App.ReleaseMainWindow();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal("studio", bridge.RequestedThemeId);
+            Assert.Equal("system", bridge.RequestedAppearance);
+            Assert.False(File.Exists(start.SettingsFile));
+        });
+
+    [Fact]
+    public Task Harness_starts_create_no_settings_watcher() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            using var watchers = new SettingsWatcherRecorder(start.App);
+            string? settingsBefore = Environment.GetEnvironmentVariable(App.ThemeSettingsHarnessVariable);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, "1");
+            try
+            {
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, "1");
+                Assert.IsType<ThemeSettingsWindow>(start.App.CreateStartWindow());
+                Assert.Null(start.App.SettingsWatcher);
+
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, null);
+                Assert.IsType<HarnessWindow>(start.App.CreateStartWindow());
+                Assert.Null(start.App.SettingsWatcher);
+
+                Assert.Equal(0, watchers.Created);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, settingsBefore);
+            }
+        });
+
+    /// <summary>
+    /// Writes <paramref name="json"/> to the settings file until the bridge asks for <paramref name="themeId"/>, running the UI
+    /// thread's posted work meanwhile. The watcher arms its folder on a thread-pool thread, so an edit made before that is not
+    /// seen; the file is written again each second until one is. <paramref name="runJobs"/> runs the posted work.
+    /// </summary>
+    private static void EditUntilApplied(SettingsStart start, string json, string themeId, Action runJobs)
+    {
+        DateTime deadline = DateTime.UtcNow + HangGuard;
+        DateTime nextWrite = DateTime.MinValue;
+        while (start.App.Bridge!.RequestedThemeId != themeId)
+        {
+            Assert.True(DateTime.UtcNow < deadline, $"The settings file edit to '{themeId}' was never applied.");
+            if (DateTime.UtcNow >= nextWrite)
+            {
+                start.WriteSettings(json);
+                nextWrite = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+            }
+
+            runJobs();
+            Thread.Sleep(10);
+        }
+    }
+
+    /// <summary>The lock <paramref name="writer"/>'s store holds through each read and save of the file.</summary>
+    private static Lock StoreGate(SettingsWriter writer)
+    {
+        const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+        object store = typeof(SettingsWriter).GetField("store", Private)!.GetValue(writer)!;
+        return (Lock)typeof(SettingsStore).GetField("gate", Private)!.GetValue(store)!;
+    }
+
+    private static bool IsWriterDisposed(SettingsWriter writer) =>
+        (bool)typeof(SettingsWriter).GetField("disposed", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(writer)!;
+
     /// <summary>Records the stop and changes what the session stores, so a later flush is the only way that change reaches disk.</summary>
     private static void StopAnsweringAndHideSidebar(Window main, List<string> order)
     {
@@ -601,6 +780,66 @@ public sealed class AppStartupTests
             {
                 disposals.Add(IsBridgeDisposed(bridge));
                 inner.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Has the app make each settings watcher with a clock whose timers record, when the first of them is disposed, whether the
+    /// app's settings writer and bridge were already disposed; disposing it restores <see cref="App.CreateSettingsWatcher"/>.
+    /// </summary>
+    private sealed class SettingsWatcherRecorder : IDisposable
+    {
+        private readonly Func<SettingsStore, SettingsWriter, IAppLog, SettingsWatcher> _before = App.CreateSettingsWatcher;
+
+        public SettingsWatcherRecorder(App app) =>
+            App.CreateSettingsWatcher = (store, writer, log) =>
+            {
+                Created++;
+                ThemeBridge bridge = app.Bridge!;
+                var clock = new DisposeRecordingClock(() =>
+                    WriterAndBridgeDisposedAtEachDispose.Add((IsWriterDisposed(writer), IsBridgeDisposed(bridge)))
+                );
+                return new SettingsWatcher(store, writer, clock, log);
+            };
+
+        public int Created { get; private set; }
+
+        public List<(bool Writer, bool Bridge)> WriterAndBridgeDisposedAtEachDispose { get; } = [];
+
+        public void Dispose() => App.CreateSettingsWatcher = _before;
+    }
+
+    /// <summary>The system clock, whose timers run <paramref name="onFirstDispose"/> when the first of them is disposed.</summary>
+    private sealed class DisposeRecordingClock(Action onFirstDispose) : TimeProvider
+    {
+        private int _disposed;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+            new RecordingTimer(System.CreateTimer(callback, state, dueTime, period), this);
+
+        private void OnDispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                onFirstDispose();
+            }
+        }
+
+        private sealed class RecordingTimer(ITimer inner, DisposeRecordingClock clock) : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => inner.Change(dueTime, period);
+
+            public void Dispose()
+            {
+                clock.OnDispose();
+                inner.Dispose();
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                clock.OnDispose();
+                return inner.DisposeAsync();
             }
         }
     }

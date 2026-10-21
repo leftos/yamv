@@ -50,6 +50,7 @@ public partial class App : Application
     private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
     private SettingsWriter? _settingsWriter;
+    private SettingsWatcher? _settingsWatcher;
     private IDisposable? _themesSync;
     private IAppLog? _log;
     private ActivationGate? _connectedGate;
@@ -87,6 +88,16 @@ public partial class App : Application
     /// </summary>
     internal static Func<ThemeBridge, IAppLog, IDisposable> CreateThemesSync { get; set; } =
         (bridge, log) => new ThemeFolderSync(bridge, AppPaths.ThemesDirectory, TimeProvider.System, log);
+
+    /// <summary>
+    /// Makes the watcher of <c>settings.json</c> over the app's settings store and writer, for a main or viewer start; a test
+    /// wraps it to see when the app creates and disposes it.
+    /// </summary>
+    internal static Func<SettingsStore, SettingsWriter, IAppLog, SettingsWatcher> CreateSettingsWatcher { get; set; } =
+        (store, writer, log) => new SettingsWatcher(store, writer, TimeProvider.System, log);
+
+    /// <summary>What <see cref="CreateSettingsWatcher"/> made for the current start; null for a harness start and after it is released.</summary>
+    internal SettingsWatcher? SettingsWatcher => _settingsWatcher;
 
     /// <summary>What <see cref="CreateThemesSync"/> made for the current start; null for a harness start and after it is released.</summary>
     internal IDisposable? ThemesSync => _themesSync;
@@ -143,6 +154,8 @@ public partial class App : Application
         AppSettings saved = settings.Load();
         bridge.Apply(saved.ThemeId, saved.Appearance);
         _settingsWriter = new SettingsWriter(settings, log);
+        _settingsWatcher = CreateSettingsWatcher(settings, _settingsWriter, log);
+        _settingsWatcher.Changed += OnSettingsFileChanged;
         bridge.RequestChanged += OnThemeRequestChanged;
         var widths = new WidthStore(AppPaths.WidthsFile, log);
         _mainWindow =
@@ -245,8 +258,8 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Disposes what the start window owns, then the themes folder watcher, then the settings writer, waiting up to 2 s for the
-    /// theme picks still being saved, then the bridge the app owns, once the app exits.
+    /// Disposes what the start window owns, then the themes folder watcher, then the settings file watcher, then the settings
+    /// writer, waiting up to 2 s for the theme picks still being saved, then the bridge the app owns, once the app exits.
     /// </summary>
     internal void ReleaseMainWindow()
     {
@@ -261,6 +274,7 @@ public partial class App : Application
         _mainWindowClosed = null;
         _themesSync?.Dispose();
         _themesSync = null;
+        ReleaseSettingsWatcher();
         _bridge?.RequestChanged -= OnThemeRequestChanged;
         _settingsWriter?.Dispose();
         _settingsWriter = null;
@@ -268,6 +282,71 @@ public partial class App : Application
         _bridge = null;
         _harnessBridge?.Dispose();
         _harnessBridge = null;
+    }
+
+    /// <summary>Stops watching <c>settings.json</c>, waiting for a report already running; a failure to stop is logged.</summary>
+    private void ReleaseSettingsWatcher()
+    {
+        SettingsWatcher? watcher = _settingsWatcher;
+        _settingsWatcher = null;
+        if (watcher is null)
+        {
+            return;
+        }
+
+        watcher.Changed -= OnSettingsFileChanged;
+        try
+        {
+            watcher.Dispose();
+        }
+        // A watcher that fails to stop must not stop the app's exit from disposing the rest.
+        catch (Exception exception)
+        {
+            Log.LogError("Cannot stop watching the settings file.", exception);
+        }
+    }
+
+    /// <summary>
+    /// Runs on a thread-pool thread with what <c>settings.json</c> holds after a change; the work moves to the UI thread and
+    /// never blocks the watcher, whose dispose waits for this.
+    /// </summary>
+    internal void OnSettingsFileChanged(object? sender, AppSettings settings) => Dispatcher.UIThread.Post(() => ApplySettingsFile(sender, settings));
+
+    /// <summary>
+    /// Applies the settings file's theme and Appearance when they differ from what the bridge was asked for, unless the start
+    /// that watched the file is released or a pick is still being saved: that save changes the file again, and its report
+    /// carries the final state. A change applied from the file is never saved back, so a stale report cannot overwrite a newer
+    /// edit.
+    /// </summary>
+    private void ApplySettingsFile(object? watcher, AppSettings settings)
+    {
+        if (!ReferenceEquals(watcher, _settingsWatcher) || _bridge is not { } bridge || _settingsWriter is not { } writer)
+        {
+            return;
+        }
+
+        if (!writer.WhenIdle().IsCompleted)
+        {
+            return;
+        }
+
+        if (
+            string.Equals(bridge.RequestedThemeId, settings.ThemeId, StringComparison.Ordinal)
+            && string.Equals(bridge.RequestedAppearance, settings.Appearance, StringComparison.Ordinal)
+        )
+        {
+            return;
+        }
+
+        bridge.RequestChanged -= OnThemeRequestChanged;
+        try
+        {
+            bridge.Apply(settings.ThemeId, settings.Appearance);
+        }
+        finally
+        {
+            bridge.RequestChanged += OnThemeRequestChanged;
+        }
     }
 
     /// <summary>Saves the theme the bridge was just asked for; the writer does the file IO off this thread.</summary>
