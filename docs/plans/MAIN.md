@@ -11,8 +11,11 @@
 
 ### Features (0/3 done)
 - [ ] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
-- [ ] YAMV-10 Content width: per-folder slider (480 px to Full) in a title-bar popover
-- [ ] YAMV-11 Theme settings window, Import notice and a watcher on the user themes folder
+- [/] YAMV-10 Content width: per-folder slider (480 px to Full) in a title-bar popover
+- [/] YAMV-11 Theme settings window, Import notice and a watcher on the user themes folder
+
+### No milestone
+- [ ] YAMV-27 Embed JetBrains Mono for the window chrome's monospace text
 
 ## Ship v1
 
@@ -21,14 +24,11 @@
 
 ## Backlog
 
-- [/] YAMV-15 macOS: put the instance pipe at an absolute path under the data folder
-- [/] YAMV-16 Windows: hash the account SID into the pipe name instead of the user name
 - [ ] YAMV-17 Page privacy: fetch remote images through the host behind an opt-in
 - [ ] YAMV-18 macOS: let WKWebView read document images outside the asset cache
 - [ ] YAMV-19 Tests: fold the three fake logs into one thread-safe recorder
 - [ ] YAMV-20 Theme files: cap the read size and share the file while importing
 - [ ] YAMV-21 Theme catalog: list every file with an invalid id as invalid, not only device names
 - [ ] YAMV-22 Document view follow-ups: asset cache pruning, logic into Core, hidden link click, scroll after images
-- [/] YAMV-23 Instance coordinator hardening: Unix connect spin, pipe-name squatting, concurrent Dispose
 - [ ] YAMV-24 Window state: regroup only when the document list changes
 - [ ] YAMV-26 Instance coordinator: stale socket unlink on slow exit, elevated vs normal launch
