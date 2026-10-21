@@ -182,6 +182,8 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     /// derived from that path (see <see cref="Endpoint"/>), retrying the connect every 50 ms so a main instance that is still
     /// starting gets it; <paramref name="timeout"/> bounds the whole wait, the write included, and
     /// <see cref="Timeout.InfiniteTimeSpan"/> waits without a bound.
+    /// On Unix a file at the endpoint that is not a socket is retried the same way, since the main instance's server replaces
+    /// whatever it finds there when it starts; one that is never replaced makes the signal wait out its timeout.
     /// Returns true once the frame was delivered: on Windows the server has read it; on Unix it is in the connected socket's send
     /// buffer, so a main instance that exits before reading it loses it. Either way it may not have been handled yet. False (logged
     /// as a warning) when no server answered in time, the server did not read the frame in time, the pipe belongs to another user,
@@ -448,8 +450,12 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     private static bool IsRetryableConnectFailure(Exception exception) =>
         exception is TimeoutException or IOException || exception is SocketException socketException && IsRetryableSocketError(socketException);
 
-    private static bool IsRetryableSocketError(SocketException exception) =>
-        exception.SocketErrorCode is SocketError.ConnectionRefused or SocketError.AddressNotAvailable or SocketError.TryAgain;
+    internal static bool IsRetryableSocketError(SocketException exception) =>
+        exception.SocketErrorCode
+            is SocketError.ConnectionRefused
+                or SocketError.AddressNotAvailable
+                or SocketError.TryAgain
+                or SocketError.NotSocket;
 
     private static string DescribeFinalConnectFailure(string pipeName, Exception exception) =>
         exception is SocketException socketException

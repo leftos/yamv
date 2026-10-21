@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Instance;
@@ -499,7 +500,10 @@ public sealed class InstanceCoordinatorTests : IDisposable
                 acquiredRightAfterHandlerDispose.TrySetResult(probe.TryAcquireMainLock());
             });
 
-            Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
+            Assert.True(
+                await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token),
+                $"Warnings: {string.Join(" | ", _log.Warnings.Select(warning => $"{warning.Message} [{warning.Exception?.Message}]"))}"
+            );
 
             // The handler's Dispose did not wait on the handler it runs in, so the lock was free before the handler returned.
             Assert.True(await acquiredRightAfterHandlerDispose.Task.WaitAsync(HangGuard, Token));
@@ -537,7 +541,10 @@ public sealed class InstanceCoordinatorTests : IDisposable
         main.StartServer(_ => { });
 
         // On Windows the frame is lost with its connection and the signal retries; on Unix it is in the socket buffer at once.
-        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
+        Assert.True(
+            await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token),
+            $"Warnings: {string.Join(" | ", _log.Warnings.Select(warning => $"{warning.Message} [{warning.Exception?.Message}]"))}"
+        );
 
         Assert.False(
             await createdAfterFailure.Task.WaitAsync(HangGuard, Token),
@@ -549,19 +556,63 @@ public sealed class InstanceCoordinatorTests : IDisposable
     [Fact]
     public async Task StartServer_StaleSocketFileBesideTheLock_StillListens()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Only a Unix endpoint is a file a crashed main can leave behind.");
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Only a Unix endpoint is a file on disk.");
         TaskCompletionSource<string> received = NewSource<string>();
         using InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
 
-        // A crashed main's leftover: the server must unlink it before binding, which it skips under FirstPipeInstance.
+        // A leftover that is not a socket (a crashed main leaves a socket; a regular file is the case the server must still replace):
+        // the server must unlink it before binding, which it skips under FirstPipeInstance.
         File.WriteAllBytes(main.Endpoint, []);
         main.StartServer(message => received.TrySetResult(message));
 
-        Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
+        Assert.True(
+            await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token),
+            $"Warnings: {string.Join(" | ", _log.Warnings.Select(warning => $"{warning.Message} [{warning.Exception?.Message}]"))}"
+        );
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
         Assert.Empty(_log.Errors);
     }
+
+    [Fact]
+    public async Task SignalAsync_NonSocketFileAtEndpointUntilServerStarts_RetriesAndIsDelivered()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Only a Unix endpoint is a file that can be something other than a socket.");
+        using InstanceCoordinator main = new(_lockPath, _log);
+        Assert.True(main.TryAcquireMainLock());
+        File.WriteAllBytes(main.Endpoint, []);
+        TaskCompletionSource secondAttempt = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int attempts = 0;
+        InstanceCoordinator.ConnectAttempted.Value = _ =>
+        {
+            if (Interlocked.Increment(ref attempts) == 2)
+            {
+                secondAttempt.TrySetResult();
+            }
+        };
+        TaskCompletionSource<string> received = NewSource<string>();
+
+        // The server starts only once the signal has met the file and retried, or has given up on it.
+        Task<bool> signal = InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token);
+        await Task.WhenAny(secondAttempt.Task, signal).WaitAsync(HangGuard, Token);
+        main.StartServer(message => received.TrySetResult(message));
+
+        Assert.True(
+            await signal.WaitAsync(HangGuard, Token),
+            $"Connect attempts: {attempts}; "
+                + $"warnings: {string.Join(" | ", _log.Warnings.Select(warning => $"{warning.Message} [{warning.Exception?.Message}]"))}"
+        );
+        Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
+    }
+
+    [Theory]
+    [InlineData(SocketError.NotSocket, true)]
+    [InlineData(SocketError.ConnectionRefused, true)]
+    [InlineData(SocketError.AddressNotAvailable, true)]
+    [InlineData(SocketError.TryAgain, true)]
+    [InlineData(SocketError.AccessDenied, false)]
+    public void IsRetryableSocketError_ClassifiesConnectFailures(SocketError error, bool expected) =>
+        Assert.Equal(expected, InstanceCoordinator.IsRetryableSocketError(new SocketException((int)error)));
 
     [Fact]
     public void StartServer_WithoutLock_Throws()
