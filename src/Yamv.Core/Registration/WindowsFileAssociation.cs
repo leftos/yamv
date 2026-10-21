@@ -52,6 +52,8 @@ public sealed class WindowsFileAssociation(RegistryKey classesRoot, string exePa
     }
 
     /// <summary>Writes every key and value that puts YAMV in the "Open with" list for markdown files.</summary>
+    /// <remarks>A <c>YAMV.Markdown</c> tree that already opens a program other than <c>yamv.exe</c> is overwritten, and
+    /// the message says which command it replaced.</remarks>
     /// <returns>Whether the work succeeded, whether anything changed, and the line to print.</returns>
     public RegistrationResult Register()
     {
@@ -67,7 +69,8 @@ public sealed class WindowsFileAssociation(RegistryKey classesRoot, string exePa
         bool changed = false;
         try
         {
-            changed = WriteProgId();
+            string replaced;
+            (changed, replaced) = WriteProgId();
             foreach (string extension in Extensions)
             {
                 changed |= AddOpenWithProgid(extension);
@@ -75,7 +78,7 @@ public sealed class WindowsFileAssociation(RegistryKey classesRoot, string exePa
 
             changed |= WriteApplicationKey();
             string message = changed
-                ? $"Registered YAMV for .md and .markdown in Open with ({exePath})."
+                ? $"Registered YAMV for .md and .markdown in Open with ({exePath}).{replaced}"
                 : $"YAMV is already registered for .md and .markdown ({exePath}).";
             return new RegistrationResult(Succeeded: true, Changed: changed, Message: message);
         }
@@ -85,31 +88,27 @@ public sealed class WindowsFileAssociation(RegistryKey classesRoot, string exePa
         }
     }
 
-    /// <summary>Removes only what <see cref="Register"/> added, leaving every other association in place.</summary>
+    /// <summary>Removes the YAMV entries that point at this exe, leaving the ones that point at another program.</summary>
+    /// <remarks>A <c>YAMV.Markdown</c> tree that opens another <c>yamv.exe</c> is left in place and named with that path;
+    /// a tree that opens any other program, or has no command at all, is left in place and the message says it does not
+    /// open <c>yamv.exe</c>. Both extensions' Open with values are removed only when the <c>YAMV.Markdown</c> tree is
+    /// gone or opens this exe. An <c>Applications\yamv.exe</c> key is removed when it opens this exe or has no command,
+    /// and is otherwise left in place and named the same way.</remarks>
     /// <returns>Whether the work succeeded, whether anything was removed, and the line to print.</returns>
     public RegistrationResult Unregister()
     {
         bool changed = false;
         try
         {
-            foreach (string extension in Extensions)
-            {
-                changed |= RemoveOpenWithProgid(extension);
-            }
+            TreeState progId = InspectTree(ProgId, unclaimedWhenCommandMissing: false);
+            TreeState application = InspectTree(ApplicationKeyPath, unclaimedWhenCommandMissing: true);
 
-            bool foreign = IsForeignProgIdTree();
-            if (!foreign)
-            {
-                changed |= DeleteTree(ProgId);
-            }
+            changed |= RemoveProgIdEntries(progId);
+            changed |= RemoveApplicationKey(application);
 
-            changed |= DeleteTree(ApplicationKeyPath);
             string message = changed ? "Removed YAMV from Open with for .md and .markdown." : "Nothing to remove.";
-            if (foreign)
-            {
-                message += $" {ProgId} was left in place: it does not open {ExeName}.";
-            }
-
+            message += TreeNote(ProgId, progId);
+            message += TreeNote(ApplicationKeyPath, application);
             return new RegistrationResult(Succeeded: true, Changed: changed, Message: message);
         }
         catch (Exception exception) when (IsRegistryError(exception))
@@ -118,19 +117,46 @@ public sealed class WindowsFileAssociation(RegistryKey classesRoot, string exePa
         }
     }
 
+    /// <summary>Removes the extensions' Open with values, and the tree itself, when the tree is absent or opens this exe.</summary>
+    private bool RemoveProgIdEntries(TreeState progId)
+    {
+        if (progId.Ownership is not (TreeOwnership.Absent or TreeOwnership.Ours))
+        {
+            return false;
+        }
+
+        bool changed = false;
+        foreach (string extension in Extensions)
+        {
+            changed |= RemoveOpenWithProgid(extension);
+        }
+
+        if (progId.Ownership == TreeOwnership.Ours)
+        {
+            changed |= DeleteTree(ProgId);
+        }
+
+        return changed;
+    }
+
+    /// <summary>Removes the Applications key when it opens this exe or holds no command at all.</summary>
+    private bool RemoveApplicationKey(TreeState application) =>
+        (application.Ownership is TreeOwnership.Ours or TreeOwnership.Unclaimed) && DeleteTree(ApplicationKeyPath);
+
     private static bool IsRegistryError(Exception exception) => exception is UnauthorizedAccessException or IOException or SecurityException;
 
-    private bool WriteProgId()
+    private (bool Changed, string Replaced) WriteProgId()
     {
         using RegistryKey progId = EnsureSubKey(classesRoot, ProgId);
         using RegistryKey open = EnsureSubKey(progId, @"shell\open\command");
+        string replaced = ReplacedCommandNote(open);
         bool changed = SetString(open, name: null, CommandLine);
 
         using RegistryKey icon = EnsureSubKey(progId, "DefaultIcon");
         changed |= SetString(icon, name: null, $"\"{exePath}\",0");
 
         changed |= SetString(progId, name: null, FriendlyTypeName);
-        return changed;
+        return (changed, replaced);
     }
 
     private bool AddOpenWithProgid(string extension)
@@ -168,16 +194,82 @@ public sealed class WindowsFileAssociation(RegistryKey classesRoot, string exePa
         return true;
     }
 
-    private bool IsForeignProgIdTree()
+    private static string ReplacedCommandNote(RegistryKey open)
     {
-        using RegistryKey? progId = classesRoot.OpenSubKey(ProgId, writable: false);
-        if (progId is null)
+        if (open.GetValue(null) is not string previous || string.IsNullOrWhiteSpace(previous))
+        {
+            return string.Empty;
+        }
+
+        string? target = CommandTarget(previous);
+        if (target is not null && IsYamvExe(target))
+        {
+            return string.Empty;
+        }
+
+        return $" It replaced a {ProgId} command that opened {target ?? previous}.";
+    }
+
+    private TreeState InspectTree(string path, bool unclaimedWhenCommandMissing)
+    {
+        using RegistryKey? tree = classesRoot.OpenSubKey(path, writable: false);
+        if (tree is null)
+        {
+            return new TreeState(TreeOwnership.Absent, Target: null);
+        }
+
+        using RegistryKey? open = tree.OpenSubKey(@"shell\open\command", writable: false);
+        if (open is null || !HasValue(open, string.Empty))
+        {
+            TreeOwnership ownership = unclaimedWhenCommandMissing ? TreeOwnership.Unclaimed : TreeOwnership.Foreign;
+            return new TreeState(ownership, Target: null);
+        }
+
+        return InspectCommand(open.GetValue(null) as string);
+    }
+
+    private TreeState InspectCommand(string? command)
+    {
+        string? target = CommandTarget(command);
+        if (target is null || !IsYamvExe(target))
+        {
+            return new TreeState(TreeOwnership.Foreign, Target: null);
+        }
+
+        return SamePath(target, exePath) ? new TreeState(TreeOwnership.Ours, Target: null) : new TreeState(TreeOwnership.AnotherYamv, target);
+    }
+
+    private static string TreeNote(string path, TreeState state) =>
+        state.Ownership switch
+        {
+            TreeOwnership.AnotherYamv => $" {path} was left in place: it opens {state.Target}.",
+            TreeOwnership.Foreign => $" {path} was left in place: it does not open {ExeName}.",
+            _ => string.Empty,
+        };
+
+    /// <summary>The program a command line opens, or null when the line does not start with a quoted path.</summary>
+    private static string? CommandTarget(string? command)
+    {
+        string trimmed = command?.TrimStart() ?? string.Empty;
+        if (!trimmed.StartsWith('"'))
+        {
+            return null;
+        }
+
+        int close = trimmed.IndexOf('"', 1);
+        return close <= 1 ? null : trimmed[1..close];
+    }
+
+    private static bool SamePath(string left, string right)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return false;
         }
-
-        using RegistryKey? open = progId.OpenSubKey(@"shell\open\command", writable: false);
-        return !TargetsYamv(open?.GetValue(null) as string);
     }
 
     private bool DeleteTree(string path)
@@ -233,20 +325,14 @@ public sealed class WindowsFileAssociation(RegistryKey classesRoot, string exePa
 
     private static bool IsYamvExe(string path) => string.Equals(Path.GetFileName(path), ExeName, StringComparison.OrdinalIgnoreCase);
 
-    private static bool TargetsYamv(string? command)
+    private enum TreeOwnership
     {
-        if (string.IsNullOrWhiteSpace(command))
-        {
-            return false;
-        }
-
-        int open = command.IndexOf('"');
-        int close = open < 0 ? -1 : command.IndexOf('"', open + 1);
-        if (close < 0)
-        {
-            return false;
-        }
-
-        return IsYamvExe(command[(open + 1)..close]);
+        Absent,
+        Unclaimed,
+        Ours,
+        AnotherYamv,
+        Foreign,
     }
+
+    private readonly record struct TreeState(TreeOwnership Ownership, string? Target);
 }

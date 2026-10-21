@@ -9,7 +9,7 @@ public static class LaunchOptions
           yamv                 Open the main window with the documents from last time.
           yamv <file>...       Open a viewer window with just these files.
           yamv --register      Add YAMV to "Open with" for .md files (Windows).
-          yamv --unregister    Remove what --register added.
+          yamv --unregister    Remove the Open with entries that point at this yamv.exe.
         """;
 
     private const string ProcessSerialNumberPrefix = "-psn_";

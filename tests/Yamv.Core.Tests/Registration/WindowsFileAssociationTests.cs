@@ -188,6 +188,63 @@ public sealed class WindowsFileAssociationTests : IDisposable
     }
 
     [Fact]
+    public void Register_over_foreign_progid_notes_what_it_replaced()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using (RegistryKey command = root.CreateSubKey($@"{ProgId}\shell\open\command", writable: true)!)
+        {
+            command.SetValue(null, ForeignCommand, RegistryValueKind.String);
+        }
+
+        RegistrationResult registered = Register(root, ExeA);
+
+        Assert.True(registered.Succeeded);
+        Assert.True(registered.Changed);
+        Assert.Equal(
+            $"Registered YAMV for .md and .markdown in Open with ({ExeA}). It replaced a {ProgId} command that opened C:\\x\\other.exe.",
+            registered.Message
+        );
+    }
+
+    [Fact]
+    public void Register_over_unparseable_progid_command_notes_the_raw_text()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using (RegistryKey command = root.CreateSubKey($@"{ProgId}\shell\open\command", writable: true)!)
+        {
+            command.SetValue(null, "notepad %1", RegistryValueKind.String);
+        }
+
+        RegistrationResult registered = Register(root, ExeA);
+
+        Assert.True(registered.Succeeded);
+        Assert.True(registered.Changed);
+        Assert.EndsWith($" It replaced a {ProgId} command that opened notepad %1.", registered.Message);
+    }
+
+    [Fact]
+    public void Register_over_unquoted_program_with_quoted_argument_notes_the_raw_text()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using (RegistryKey command = root.CreateSubKey($@"{ProgId}\shell\open\command", writable: true)!)
+        {
+            command.SetValue(null, "notepad.exe \"%1\"", RegistryValueKind.String);
+        }
+
+        RegistrationResult registered = Register(root, ExeA);
+
+        Assert.True(registered.Succeeded);
+        Assert.True(registered.Changed);
+        Assert.Equal(
+            $"Registered YAMV for .md and .markdown in Open with ({ExeA}). It replaced a {ProgId} command that opened notepad.exe \"%1\".",
+            registered.Message
+        );
+    }
+
+    [Fact]
     public void Register_failure_after_partial_writes_reports_changed()
     {
         SkipOffWindows();
@@ -354,10 +411,107 @@ public sealed class WindowsFileAssociationTests : IDisposable
         Assert.Equal("\"" + ExeA + "\",0", DefaultValue(root, $@"{ProgId}\DefaultIcon"));
         using RegistryKey? application = root.OpenSubKey(@"Applications\yamv.exe");
         Assert.Null(application);
-        using RegistryKey markdownProgIds = Open(root, @".md\OpenWithProgids");
-        Assert.Empty(markdownProgIds.GetValueNames());
-        using RegistryKey longProgIds = Open(root, @".markdown\OpenWithProgids");
-        Assert.Empty(longProgIds.GetValueNames());
+        foreach (string extension in Extensions)
+        {
+            using RegistryKey progIds = Open(root, $@"{extension}\OpenWithProgids");
+            Assert.Contains(progIds.GetValueNames(), name => string.Equals(name, ProgId, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Fact]
+    public void Unregister_from_another_exe_leaves_everything_and_names_the_owner()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        Register(root, ExeA);
+        List<string> before = Snapshot(root);
+
+        using WindowsFileAssociation association = new(root, ExeB);
+        RegistrationResult left = association.Unregister();
+
+        Assert.True(left.Succeeded);
+        Assert.False(left.Changed);
+        Assert.Equal(
+            $"Nothing to remove. {ProgId} was left in place: it opens {ExeA}. Applications\\yamv.exe was left in place: it opens {ExeA}.",
+            left.Message
+        );
+        Assert.Equal(before, Snapshot(root));
+    }
+
+    [Fact]
+    public void Unregister_removes_own_progid_but_leaves_applications_key_of_another_exe()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        Register(root, ExeA);
+        using (RegistryKey command = root.OpenSubKey(@"Applications\yamv.exe\shell\open\command", writable: true)!)
+        {
+            command.SetValue(null, QuotedB, RegistryValueKind.String);
+        }
+
+        using WindowsFileAssociation association = new(root, ExeA);
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        Assert.Equal(
+            $"Removed YAMV from Open with for .md and .markdown. Applications\\yamv.exe was left in place: it opens {ExeB}.",
+            removed.Message
+        );
+        using (RegistryKey? progId = root.OpenSubKey(ProgId))
+        {
+            Assert.Null(progId);
+        }
+        foreach (string extension in Extensions)
+        {
+            using RegistryKey progIds = Open(root, $@"{extension}\OpenWithProgids");
+            Assert.Empty(progIds.GetValueNames());
+        }
+        Assert.Equal(QuotedB, DefaultValue(root, @"Applications\yamv.exe\shell\open\command"));
+    }
+
+    [Fact]
+    public void Unregister_removes_orphan_open_with_values_when_progid_is_absent()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        foreach (string extension in Extensions)
+        {
+            using RegistryKey progIds = root.CreateSubKey($@"{extension}\OpenWithProgids", writable: true)!;
+            progIds.SetValue(ProgId, Array.Empty<byte>(), RegistryValueKind.None);
+        }
+
+        using WindowsFileAssociation association = new(root, ExeA);
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        Assert.Equal("Removed YAMV from Open with for .md and .markdown.", removed.Message);
+        foreach (string extension in Extensions)
+        {
+            using RegistryKey progIds = Open(root, $@"{extension}\OpenWithProgids");
+            Assert.Empty(progIds.GetValueNames());
+        }
+    }
+
+    [Fact]
+    public void Unregister_removes_applications_key_without_a_command()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using (RegistryKey application = root.CreateSubKey(@"Applications\yamv.exe", writable: true)!)
+        {
+            application.SetValue("FriendlyAppName", "YAMV", RegistryValueKind.String);
+        }
+
+        using WindowsFileAssociation association = new(root, ExeA);
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        Assert.Equal("Removed YAMV from Open with for .md and .markdown.", removed.Message);
+        using RegistryKey? left = root.OpenSubKey(@"Applications\yamv.exe");
+        Assert.Null(left);
     }
 
     [Fact]
@@ -366,6 +520,80 @@ public sealed class WindowsFileAssociationTests : IDisposable
         Assert.Equal(0, new RegistrationResult(Succeeded: true, Changed: true, "ok").ExitCode);
         Assert.Equal(0, new RegistrationResult(Succeeded: true, Changed: false, "ok").ExitCode);
         Assert.Equal(1, new RegistrationResult(Succeeded: false, Changed: false, "no").ExitCode);
+    }
+
+    [Fact]
+    public void Unregister_matches_the_exe_path_case_insensitively()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        Register(root, ExeA);
+
+        using WindowsFileAssociation association = new(root, ExeA.ToUpperInvariant());
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        Assert.Equal("Removed YAMV from Open with for .md and .markdown.", removed.Message);
+        using (RegistryKey? progId = root.OpenSubKey(ProgId))
+        {
+            Assert.Null(progId);
+        }
+        foreach (string extension in Extensions)
+        {
+            using RegistryKey progIds = Open(root, $@"{extension}\OpenWithProgids");
+            Assert.Empty(progIds.GetValueNames());
+        }
+        using RegistryKey? application = root.OpenSubKey(@"Applications\yamv.exe");
+        Assert.Null(application);
+    }
+
+    [Fact]
+    public void Unregister_leaves_progid_tree_without_a_command()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using (RegistryKey progId = root.CreateSubKey(ProgId, writable: true)!)
+        {
+            progId.SetValue(null, "Markdown document", RegistryValueKind.String);
+        }
+        foreach (string extension in Extensions)
+        {
+            using RegistryKey progIds = root.CreateSubKey($@"{extension}\OpenWithProgids", writable: true)!;
+            progIds.SetValue(ProgId, Array.Empty<byte>(), RegistryValueKind.None);
+        }
+
+        using WindowsFileAssociation association = new(root, ExeA);
+        RegistrationResult left = association.Unregister();
+
+        Assert.True(left.Succeeded);
+        Assert.False(left.Changed);
+        Assert.EndsWith($" {ProgId} was left in place: it does not open yamv.exe.", left.Message);
+        Assert.Equal("Markdown document", DefaultValue(root, ProgId));
+        foreach (string extension in Extensions)
+        {
+            using RegistryKey progIds = Open(root, $@"{extension}\OpenWithProgids");
+            Assert.Contains(progIds.GetValueNames(), name => string.Equals(name, ProgId, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Fact]
+    public void Unregister_leaves_applications_key_of_a_foreign_program()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using (RegistryKey command = root.CreateSubKey(@"Applications\yamv.exe\shell\open\command", writable: true)!)
+        {
+            command.SetValue(null, ForeignCommand, RegistryValueKind.String);
+        }
+
+        using WindowsFileAssociation association = new(root, ExeA);
+        RegistrationResult left = association.Unregister();
+
+        Assert.True(left.Succeeded);
+        Assert.False(left.Changed);
+        Assert.EndsWith(@" Applications\yamv.exe was left in place: it does not open yamv.exe.", left.Message);
+        Assert.Equal(ForeignCommand, DefaultValue(root, @"Applications\yamv.exe\shell\open\command"));
     }
 
     private static void SkipOffWindows() => Assert.SkipUnless(OperatingSystem.IsWindows(), "The registry exists only on Windows.");
