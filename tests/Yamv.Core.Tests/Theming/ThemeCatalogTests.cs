@@ -119,8 +119,60 @@ public sealed class ThemeCatalogTests : IDisposable
         ThemeEntry entry = CreateCatalog().Import(source);
 
         Assert.Equal("mine-3", entry.Id);
-        Assert.True(File.Exists(Path.Combine(UserFolder, "mine-3.yamv-theme.json")));
+        Assert.Equal("Mine (3)", entry.Result.Theme!.Name);
+        Assert.Equal(
+            ValidTheme.Replace("\"Mine\"", "\"Mine (3)\"", StringComparison.Ordinal),
+            File.ReadAllText(Path.Combine(UserFolder, "mine-3.yamv-theme.json"))
+        );
         Assert.Equal(ValidTheme, File.ReadAllText(Path.Combine(UserFolder, "mine.yamv-theme.json")));
+    }
+
+    [Fact]
+    public void Import_TakenId_SuffixesNameAndKeepsTheRestOfTheFileVerbatim()
+    {
+        WriteUserFile("warm-solar", """{ "name": "Warm Solar", "dark": {} }""");
+        string text = string.Join(
+            "\r\n",
+            """// Shared with friends; "name": "Warm \"Solar\"" stays in this comment.""",
+            "{",
+            """  "name": "Warm \"Solar\"", // the name""",
+            """  "description": "Warm \"Solar\" for evenings",""",
+            """  "extra": { "name": "Warm \"Solar\"" },""",
+            """  "dark": { "name": "Warm \"Solar\"", "tokens": { "accent": "#123456" } }""",
+            "}",
+            ""
+        );
+        string expected = string.Join(
+            "\r\n",
+            """// Shared with friends; "name": "Warm \"Solar\"" stays in this comment.""",
+            "{",
+            """  "name": "Warm \"Solar\" (2)", // the name""",
+            """  "description": "Warm \"Solar\" for evenings",""",
+            """  "extra": { "name": "Warm \"Solar\"" },""",
+            """  "dark": { "name": "Warm \"Solar\"", "tokens": { "accent": "#123456" } }""",
+            "}",
+            ""
+        );
+        string source = WriteSourceFile("warm-solar.yamv-theme.json", text);
+
+        ThemeEntry entry = CreateCatalog().Import(source);
+
+        Assert.Equal(("warm-solar-2", "Warm \"Solar\" (2)"), (entry.Id, entry.Result.Theme!.Name));
+        Assert.Equal(expected, File.ReadAllText(entry.FilePath!));
+    }
+
+    [Fact]
+    public void Import_TakenIdTwice_SuffixesThree()
+    {
+        WriteUserFile("mine", ValidTheme);
+        string source = WriteSourceFile("mine.yamv-theme.json", ValidTheme);
+        ThemeCatalog catalog = CreateCatalog();
+
+        ThemeEntry first = catalog.Import(source);
+        ThemeEntry second = catalog.Import(source);
+
+        Assert.Equal(("mine-2", "Mine (2)"), (first.Id, first.Result.Theme!.Name));
+        Assert.Equal(("mine-3", "Mine (3)"), (second.Id, second.Result.Theme!.Name));
     }
 
     [Fact]
@@ -142,7 +194,7 @@ public sealed class ThemeCatalogTests : IDisposable
             """{ "name": "Both", "author": "Ann", "light": {}, "dark": { "css": "p { }" }, "extra": 1 }"""
         );
 
-        ThemeInspection inspection = ThemeCatalog.Inspect(source);
+        ThemeInspection inspection = CreateCatalog().Inspect(source);
 
         Assert.Equal(
             ("both.yamv-theme.json", "Both", "Ann", true, true, true),
@@ -156,7 +208,7 @@ public sealed class ThemeCatalogTests : IDisposable
     [Fact]
     public void Inspect_OneHalfWithoutCss()
     {
-        ThemeInspection inspection = ThemeCatalog.Inspect(WriteSourceFile("mine.yamv-theme.json", ValidTheme));
+        ThemeInspection inspection = CreateCatalog().Inspect(WriteSourceFile("mine.yamv-theme.json", ValidTheme));
 
         Assert.Equal(
             ("Mine", null, true, false, false),
@@ -168,7 +220,7 @@ public sealed class ThemeCatalogTests : IDisposable
     [Fact]
     public void Inspect_WhiteSpaceCss_IsNoCss()
     {
-        ThemeInspection inspection = ThemeCatalog.Inspect(WriteSourceFile("ws.yamv-theme.json", """{ "name": "W", "css": "  ", "light": {} }"""));
+        ThemeInspection inspection = CreateCatalog().Inspect(WriteSourceFile("ws.yamv-theme.json", """{ "name": "W", "css": "  ", "light": {} }"""));
 
         Assert.False(inspection.HasCss);
     }
@@ -178,7 +230,7 @@ public sealed class ThemeCatalogTests : IDisposable
     {
         string source = WriteSourceFile("bad.yamv-theme.json", """{ "light": { "tokens": { "accent": "#12" } } }""");
 
-        ThemeInspection inspection = ThemeCatalog.Inspect(source);
+        ThemeInspection inspection = CreateCatalog().Inspect(source);
 
         Assert.Null(inspection.Name);
         Assert.Equal(["The theme has no 'name'.", "Token 'accent' in light: '#12' is not a colour (#rgb, #rrggbb or #rrggbbaa)."], inspection.Errors);
@@ -187,7 +239,7 @@ public sealed class ThemeCatalogTests : IDisposable
     [Fact]
     public void Inspect_FileNamedOnlyTheSuffix_ListsTheIdError()
     {
-        ThemeInspection inspection = ThemeCatalog.Inspect(WriteSourceFile(ThemeCatalog.FileSuffix, ValidTheme));
+        ThemeInspection inspection = CreateCatalog().Inspect(WriteSourceFile(ThemeCatalog.FileSuffix, ValidTheme));
 
         Assert.Contains("gives no usable theme id", Assert.Single(inspection.Errors), StringComparison.Ordinal);
     }
@@ -195,10 +247,62 @@ public sealed class ThemeCatalogTests : IDisposable
     [Fact]
     public void Inspect_MissingFile_ListsTheReadError()
     {
-        ThemeInspection inspection = ThemeCatalog.Inspect(Path.Combine(_root, "missing.yamv-theme.json"));
+        ThemeInspection inspection = CreateCatalog().Inspect(Path.Combine(_root, "missing.yamv-theme.json"));
 
         Assert.Equal("missing.yamv-theme.json", inspection.FileName);
         Assert.StartsWith("The file cannot be read: ", Assert.Single(inspection.Errors), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_TakenId_ReportsAddedAsName()
+    {
+        WriteUserFile("mine", ValidTheme);
+
+        ThemeInspection inspection = CreateCatalog().Inspect(WriteSourceFile("mine.yamv-theme.json", ValidTheme));
+
+        Assert.Equal("Mine (2)", inspection.AddedAsName);
+    }
+
+    [Fact]
+    public void Inspect_FreeId_AddedAsNameIsNull()
+    {
+        ThemeInspection inspection = CreateCatalog().Inspect(WriteSourceFile("mine.yamv-theme.json", ValidTheme));
+
+        Assert.Null(inspection.AddedAsName);
+    }
+
+    [Fact]
+    public void Inspect_ReportsChipColoursPerHalf()
+    {
+        ThemeCatalog catalog = CreateCatalog();
+        string lightOnly = WriteSourceFile(
+            "sun.yamv-theme.json",
+            """{ "name": "Sun", "tokens": { "pageBackground": "#fafafa" }, "light": { "tokens": { "accent": "#123456" } } }"""
+        );
+        string both = WriteSourceFile(
+            "both.yamv-theme.json",
+            """{ "name": "Both", "tokens": { "accent": "#abcdef" }, "light": {}, "dark": { "tokens": { "pageBackground": "#101010" } } }"""
+        );
+
+        ThemeInspection sun = catalog.Inspect(lightOnly);
+        ThemeInspection pair = catalog.Inspect(both);
+
+        Assert.Equal(new ThemeChip(new ColorValue("#fafafa"), new ColorValue("#123456")), sun.LightChip);
+        Assert.Null(sun.DarkChip);
+        Assert.Equal(new ThemeChip(new ColorValue("#ffffff"), new ColorValue("#abcdef")), pair.LightChip);
+        Assert.Equal(new ThemeChip(new ColorValue("#101010"), new ColorValue("#abcdef")), pair.DarkChip);
+    }
+
+    [Fact]
+    public void Inspect_InvalidFile_ChipsNull()
+    {
+        string source = WriteSourceFile("bad.yamv-theme.json", """{ "light": { "tokens": { "accent": "#123456" } } }""");
+
+        ThemeInspection inspection = CreateCatalog().Inspect(source);
+
+        Assert.Null(inspection.LightChip);
+        Assert.Null(inspection.DarkChip);
+        Assert.Null(inspection.AddedAsName);
     }
 
     [Fact]
@@ -320,14 +424,59 @@ public sealed class ThemeCatalogTests : IDisposable
     }
 
     [Fact]
-    public void Export_OfAUserTheme_IsTheSerializerOutput()
+    public void Export_UserThemeWithFile_CopiesTheFileBytes()
     {
         ThemeCatalog catalog = CreateCatalog();
-        WriteUserFile("mine", "// dropped\n" + ValidTheme);
+        string path = WriteUserFile(
+            "mine",
+            "\uFEFF// kept\n" + ValidTheme.Replace("{ \"name\"", "{ \"extra\": 1, \"name\"", StringComparison.Ordinal)
+        );
         ThemeDefinition theme = catalog.LoadAll().Single(entry => entry.Id == "mine").Result.Theme!;
         string destination = Path.Combine(_root, "mine.yamv-theme.json");
 
         catalog.Export(theme, destination);
+
+        Assert.Equal(File.ReadAllBytes(path), File.ReadAllBytes(destination));
+        Assert.Contains("// kept", File.ReadAllText(destination), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Export_UserThemeWithInvalidUtf8InAComment_IsByteIdentical()
+    {
+        Directory.CreateDirectory(UserFolder);
+        string path = Path.Combine(UserFolder, "mine" + ThemeCatalog.FileSuffix);
+        byte[] bytes = [.. Encoding.UTF8.GetBytes("// caf"), 0xE9, .. Encoding.UTF8.GetBytes("\n" + ValidTheme)];
+        File.WriteAllBytes(path, bytes);
+        ThemeCatalog catalog = CreateCatalog();
+        ThemeDefinition theme = catalog.LoadAll().Single(entry => entry.Id == "mine").Result.Theme!;
+        string destination = Path.Combine(_root, "mine.yamv-theme.json");
+
+        catalog.Export(theme, destination);
+
+        Assert.Equal(bytes, File.ReadAllBytes(destination));
+    }
+
+    [Fact]
+    public void Save_LoneSurrogateInName_ThrowsAndLeavesTheFile()
+    {
+        string path = WriteUserFile("mine", ValidTheme);
+        ThemeCatalog catalog = CreateCatalog();
+        ThemeDefinition theme = catalog.LoadAll().Single(entry => entry.Id == "mine").Result.Theme!;
+
+        Assert.ThrowsAny<Exception>(() => catalog.Save(theme with { Name = "Mine\uD800" }));
+
+        Assert.Equal(ValidTheme, File.ReadAllText(path));
+        Assert.Equal(["mine.yamv-theme.json"], UserFileNames());
+    }
+
+    [Fact]
+    public void Export_UserThemeWithoutFile_Serializes()
+    {
+        string path = Path.Combine(UserFolder, "mine" + ThemeCatalog.FileSuffix);
+        ThemeDefinition theme = ThemeParser.Parse("// dropped\n" + ValidTheme, "mine", ThemeSource.User, path).Theme!;
+        string destination = Path.Combine(_root, "mine.yamv-theme.json");
+
+        CreateCatalog().Export(theme, destination);
 
         Assert.Equal(ThemeSerializer.Serialize(theme), File.ReadAllText(destination));
     }
@@ -353,6 +502,7 @@ public sealed class ThemeCatalogTests : IDisposable
         ThemeEntry entry = CreateCatalog().Import(source);
 
         Assert.Equal("paper-2", entry.Id);
+        Assert.Equal("Mine (2)", entry.Result.Theme!.Name);
         Assert.False(File.Exists(Path.Combine(UserFolder, "paper.yamv-theme.json")));
     }
 
@@ -697,7 +847,7 @@ public sealed class ThemeCatalogTests : IDisposable
     [Fact]
     public void Inspect_FileOverTheCap_ReportsTheSizeError()
     {
-        ThemeInspection inspection = ThemeCatalog.Inspect(WriteSourceFile("big.yamv-theme.json", ThemeOverTheCap()));
+        ThemeInspection inspection = CreateCatalog().Inspect(WriteSourceFile("big.yamv-theme.json", ThemeOverTheCap()));
 
         Assert.Equal("big.yamv-theme.json", inspection.FileName);
         Assert.Null(inspection.Name);

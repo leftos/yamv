@@ -40,7 +40,8 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
   - An unknown field (`"Light"`, `"token"`) is a warning; the field is ignored. `$schema` is allowed.
   - A `formatVersion` other than `1` is a warning, and so is one that isn't an integer (`2.0`, `"2"`); the file still loads.
   - A user file with a built-in theme's id replaces the built-in when it is valid. When it is invalid, the built-in stays listed and the invalid file is listed beside it with its errors, so two entries share the id.
-  - Import never replaces a built-in or an existing user theme: a file whose id is taken is imported as `<id>-2`, `<id>-3`, and so on.
+  - Import never replaces a built-in or an existing user theme: a file whose id is taken is imported as `<id>-2`, `<id>-3`, and so on, and its name becomes `<Name> (2)`, `<Name> (3)` (only the `name` value in the copied file is rewritten). The imported theme is selected and applied.
+  - Export writes a user theme's file bytes exactly, and a built-in theme's embedded text, to a file the user picks, suggesting `<id>.yamv-theme.json`. With unsaved edits it first asks Save, Discard or Cancel.
   - Duplicate writes `<id>-2` named `<Name> (copy)`, then `<id>-3` named `<Name> (copy 2)`.
   - Rename changes the theme's name and the file follows it: the file name is the name lower-cased, with each run of characters other than ASCII letters and digits turned into `-`, cut to 64 characters (`theme` when nothing is left). A taken or device name gets the `-2` suffix. A file already named for the new name, or `<name>-<n>`, keeps its name. If the file cannot be moved, the theme keeps its old id with the new name.
   - Save of an existing file changes only the edited values in the file's text, so comments, key order, unknown fields and a BOM survive. It is refused ("could not be updated in place") when the file on disk is not a valid theme, when an edited key appears twice in it, or when the patched text would not read back as the saved theme.
@@ -51,7 +52,7 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
   - The app never falls back silently. If the selected theme turns invalid, the window keeps the last valid version and shows the error in the theme settings window.
 - `css` is appended to the document page after YAMV's own stylesheet. It styles the document only, not the app chrome. Scripts can't run in the page (the page's Content-Security-Policy blocks them), so `css` can't run code.
 
-  Theme css can make the page load images from the web (`url(https://…)` in CSS), which can reveal that you opened a document and which links it holds. Import a theme from someone you trust, as you would a browser extension's styles. On Import the app shows a modal with a card for the file (name, author, which variants it has, whether it has css, and its errors and warnings) and this warning.
+  Theme css can make the page load images from the web (`url(https://…)` in CSS), which can reveal that you opened a document and which links it holds. Import a theme from someone you trust, as you would a browser extension's styles. On Import the app shows a modal with a card for the file (name, author, which halves it has, whether it has css, and its errors and warnings) and this warning.
 
 ## Tokens
 

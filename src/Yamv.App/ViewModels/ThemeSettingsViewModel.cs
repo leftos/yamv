@@ -33,6 +33,15 @@ public sealed class ThemeSettingsSeams
 
     /// <summary>Asks whether to delete the theme named by its argument.</summary>
     public required Func<string, Task<bool>> ConfirmDelete { get; init; }
+
+    /// <summary>Asks for a theme file to import; null when the pick was cancelled.</summary>
+    public required Func<Task<string?>> PickImport { get; init; }
+
+    /// <summary>Asks where to export a theme, suggesting the file name its argument holds; null when the pick was cancelled.</summary>
+    public required Func<string, Task<string?>> PickExport { get; init; }
+
+    /// <summary>Shows the Import notice for the inspected file; true when the user chose Import.</summary>
+    public required Func<ThemeInspection, Task<bool>> ConfirmImport { get; init; }
 }
 
 /// <summary>
@@ -489,6 +498,94 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Asks for a theme file, shows the Import notice for it and, after Import, copies it into Yours, then selects and applies it
+    /// through <see cref="SelectAsync"/>, so unsaved edits are asked about first and Cancel there leaves it imported but not selected.
+    /// A file that does not load still gets the notice and is never imported.
+    /// </summary>
+    [RelayCommand]
+    private async Task ImportAsync()
+    {
+        if (await _seams.PickImport() is not { } path)
+        {
+            return;
+        }
+
+        string fileName = Path.GetFileName(path);
+        ThemeInspection inspection;
+        try
+        {
+            inspection = _catalog.Inspect(path);
+        }
+        catch (Exception exception) when (IsWriteFailure(exception))
+        {
+            Fail("import", fileName, exception);
+            return;
+        }
+
+        if (!await _seams.ConfirmImport(inspection) || inspection.Errors.Count > 0)
+        {
+            return;
+        }
+
+        ThemeEntry imported;
+        ErrorLine = null;
+        try
+        {
+            imported = _catalog.Import(path);
+        }
+        catch (Exception exception) when (IsWriteFailure(exception))
+        {
+            Fail("import", fileName, exception);
+            return;
+        }
+
+        Reload(Selected?.Key);
+        NotifyDerived();
+        if (Find((ThemeSource.User, imported.Id)) is { } row)
+        {
+            await SelectAsync(row);
+        }
+    }
+
+    /// <summary>
+    /// Writes the selected theme's saved file where the user picks, suggesting <c>&lt;id&gt;.yamv-theme.json</c>. With unsaved
+    /// edits, first asks what to do with them: Save saves and exports, unless the save fails; Discard reverts them and exports the
+    /// saved theme; Cancel exports nothing.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(ShowsEditor))]
+    private async Task ExportAsync()
+    {
+        if (IsDirty && WorkingTheme is { } working)
+        {
+            UnsavedChoice choice = await _seams.ConfirmUnsaved(working.Name);
+            if (choice == UnsavedChoice.Cancel || (choice == UnsavedChoice.Save && !TrySave()))
+            {
+                return;
+            }
+
+            if (choice == UnsavedChoice.Discard)
+            {
+                Revert();
+            }
+        }
+
+        if (SavedTheme is not { } saved || await _seams.PickExport(saved.Id + ThemeCatalog.FileSuffix) is not { } destination)
+        {
+            return;
+        }
+
+        ErrorLine = null;
+        try
+        {
+            _catalog.Export(saved, destination);
+        }
+        catch (Exception exception) when (IsWriteFailure(exception))
+        {
+            Fail("export", saved.Name, exception);
+        }
+    }
+
     /// <summary>Opens the selected user theme's file in the user's editor.</summary>
     [RelayCommand(CanExecute = nameof(CanEditAsText))]
     private void EditAsText()
@@ -703,5 +800,6 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         RevertCommand.NotifyCanExecuteChanged();
         DuplicateToEditCommand.NotifyCanExecuteChanged();
         EditAsTextCommand.NotifyCanExecuteChanged();
+        ExportCommand.NotifyCanExecuteChanged();
     }
 }

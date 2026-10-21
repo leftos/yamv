@@ -786,6 +786,286 @@ public sealed class ThemeSettingsViewModelTests
         Assert.Null(viewModel.PreviewTheme);
     }
 
+    [Fact]
+    public async Task Import_Cancelled_ChangesNothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+
+        await viewModel.ImportCommand.ExecuteAsync(null);
+
+        Assert.Empty(fixture.ImportAsked);
+        Assert.Equal(3, viewModel.UserRows.Count);
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.Empty(fixture.Applied);
+        Assert.Null(viewModel.ErrorLine);
+    }
+
+    [Fact]
+    public async Task Import_NoticeDeclined_ImportsNothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        fixture.ImportPick = fixture.WriteOutside("sunset.yamv-theme.json", SunsetText);
+        fixture.ImportAnswer = false;
+
+        await viewModel.ImportCommand.ExecuteAsync(null);
+
+        Assert.Equal("Sunset", Assert.Single(fixture.ImportAsked).Name);
+        Assert.False(File.Exists(fixture.PathOf("sunset")));
+        Assert.Equal(3, viewModel.UserRows.Count);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public async Task Import_NoticeDeclined_KeepsAnEarlierError()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        string? earlier = await FailAnExport(fixture, viewModel);
+        fixture.ImportPick = fixture.WriteOutside("sunset.yamv-theme.json", SunsetText);
+        fixture.ImportAnswer = false;
+
+        await viewModel.ImportCommand.ExecuteAsync(null);
+
+        Assert.Single(fixture.ImportAsked);
+        Assert.Equal(earlier, viewModel.ErrorLine);
+    }
+
+    [Fact]
+    public async Task Import_Accepted_ClearsAnEarlierError()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        await FailAnExport(fixture, viewModel);
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        fixture.UnsavedAnswer = UnsavedChoice.Cancel;
+        fixture.ImportPick = fixture.WriteOutside("sunset.yamv-theme.json", SunsetText);
+
+        await viewModel.ImportCommand.ExecuteAsync(null);
+
+        Assert.True(File.Exists(fixture.PathOf("sunset")));
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.Null(viewModel.ErrorLine);
+    }
+
+    /// <summary>
+    /// Runs an Export to a path under a file, which fails at once without the replace's retries, and returns the error line it
+    /// leaves.
+    /// </summary>
+    private static async Task<string?> FailAnExport(Fixture fixture, ThemeSettingsViewModel viewModel)
+    {
+        string file = fixture.WriteOutside("plain.txt", "not a folder");
+        fixture.ExportPick = Path.Combine(file, "mine.yamv-theme.json");
+        await viewModel.ExportCommand.ExecuteAsync(null);
+        Assert.StartsWith("Couldn't export: ", viewModel.ErrorLine, StringComparison.Ordinal);
+        return viewModel.ErrorLine;
+    }
+
+    [Fact]
+    public async Task Import_Accepted_SelectsAndAppliesTheImportedTheme()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        fixture.ImportPick = fixture.WriteOutside("sunset.yamv-theme.json", SunsetText);
+
+        await viewModel.ImportCommand.ExecuteAsync(null);
+
+        Assert.Equal(SunsetText, File.ReadAllText(fixture.PathOf("sunset")));
+        Assert.Contains(viewModel.UserRows, row => row.Id == "sunset");
+        Assert.Equal(("sunset", "Sunset"), (viewModel.Selected?.Id, viewModel.Selected?.Name));
+        Assert.Equal([("sunset", "light")], fixture.Applied);
+        Assert.Equal("sunset", viewModel.InUseId);
+        Assert.Null(viewModel.ErrorLine);
+    }
+
+    [Fact]
+    public async Task Import_InvalidFile_AsksThenImportsNothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        fixture.ImportPick = fixture.WriteOutside("broken.yamv-theme.json", """{ "light": {} }""");
+
+        await viewModel.ImportCommand.ExecuteAsync(null);
+
+        Assert.Equal(["The theme has no 'name'."], Assert.Single(fixture.ImportAsked).Errors);
+        Assert.False(File.Exists(fixture.PathOf("broken")));
+        Assert.Equal(3, viewModel.UserRows.Count);
+        Assert.Empty(fixture.Applied);
+        Assert.Null(viewModel.ErrorLine);
+    }
+
+    [Fact]
+    public async Task Import_WithUnsavedEdits_CancelInConfirm_LeavesItImportedButNotSelected()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        fixture.UnsavedAnswer = UnsavedChoice.Cancel;
+        fixture.ImportPick = fixture.WriteOutside("sunset.yamv-theme.json", SunsetText);
+
+        await viewModel.ImportCommand.ExecuteAsync(null);
+
+        Assert.True(File.Exists(fixture.PathOf("sunset")));
+        Assert.Contains(viewModel.UserRows, row => row.Id == "sunset");
+        Assert.Equal(["Mine"], fixture.UnsavedAsked);
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.True(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#3fb950"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public async Task Import_Fails_ShowsCouldntImport()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        string source = fixture.WriteOutside("sunset.yamv-theme.json", SunsetText);
+        fixture.ImportPick = source;
+        fixture.WhileImportAsked = () => File.Delete(source);
+
+        await viewModel.ImportCommand.ExecuteAsync(null);
+
+        Assert.StartsWith("Couldn't import: ", viewModel.ErrorLine, StringComparison.Ordinal);
+        Assert.False(File.Exists(fixture.PathOf("sunset")));
+        Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error");
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public async Task Export_Clean_WritesTheSavedFileToThePickedPath()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        string destination = Path.Combine(fixture.OutsideFolder, "shared.yamv-theme.json");
+        fixture.ExportPick = destination;
+
+        await viewModel.ExportCommand.ExecuteAsync(null);
+
+        Assert.Equal(MineText, File.ReadAllText(destination));
+        Assert.Empty(fixture.UnsavedAsked);
+        Assert.Null(viewModel.ErrorLine);
+    }
+
+    [Fact]
+    public async Task Export_SuggestsIdFileName()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+
+        await viewModel.ExportCommand.ExecuteAsync(null);
+
+        Assert.Equal(["mine.yamv-theme.json"], fixture.ExportSuggested);
+    }
+
+    [Fact]
+    public async Task Export_Dirty_Cancel_ExportsNothing()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        fixture.UnsavedAnswer = UnsavedChoice.Cancel;
+        string destination = Path.Combine(fixture.OutsideFolder, "shared.yamv-theme.json");
+        fixture.ExportPick = destination;
+
+        await viewModel.ExportCommand.ExecuteAsync(null);
+
+        Assert.Equal(["Mine"], fixture.UnsavedAsked);
+        Assert.Empty(fixture.ExportSuggested);
+        Assert.False(File.Exists(destination));
+        Assert.True(viewModel.IsDirty);
+        Assert.Equal(MineText, File.ReadAllText(fixture.PathOf("mine")));
+    }
+
+    [Fact]
+    public async Task Export_Dirty_Save_SavesThenExports()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        fixture.UnsavedAnswer = UnsavedChoice.Save;
+        string destination = Path.Combine(fixture.OutsideFolder, "shared.yamv-theme.json");
+        fixture.ExportPick = destination;
+
+        await viewModel.ExportCommand.ExecuteAsync(null);
+
+        string saved = MineText.Replace("#112233", "#3fb950", StringComparison.Ordinal);
+        Assert.Equal(saved, File.ReadAllText(fixture.PathOf("mine")));
+        Assert.Equal(saved, File.ReadAllText(destination));
+        Assert.False(viewModel.IsDirty);
+    }
+
+    [Fact]
+    public async Task Export_Dirty_Discard_ExportsTheSavedTheme()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        fixture.UnsavedAnswer = UnsavedChoice.Discard;
+        string destination = Path.Combine(fixture.OutsideFolder, "shared.yamv-theme.json");
+        fixture.ExportPick = destination;
+
+        await viewModel.ExportCommand.ExecuteAsync(null);
+
+        Assert.Equal(MineText, File.ReadAllText(destination));
+        Assert.Equal(MineText, File.ReadAllText(fixture.PathOf("mine")));
+        Assert.False(viewModel.IsDirty);
+        Assert.Same(viewModel.SavedTheme, viewModel.WorkingTheme);
+    }
+
+    [Fact]
+    public async Task Export_BuiltIn_IsEnabled()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        await viewModel.SelectAsync(Row(viewModel, "studio"));
+        string destination = Path.Combine(fixture.OutsideFolder, "studio.yamv-theme.json");
+        fixture.ExportPick = destination;
+
+        Assert.True(viewModel.ExportCommand.CanExecute(null));
+
+        await viewModel.ExportCommand.ExecuteAsync(null);
+
+        Assert.Equal(["studio.yamv-theme.json"], fixture.ExportSuggested);
+        Assert.Contains("\"Studio\"", File.ReadAllText(destination), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Export_InvalidTheme_IsDisabled()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        Assert.True(viewModel.ExportCommand.CanExecute(null));
+
+        await viewModel.SelectAsync(Row(viewModel, "nord"));
+
+        Assert.False(viewModel.ExportCommand.CanExecute(null));
+        Assert.True(viewModel.ImportCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Export_Fails_ShowsCouldntExport()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        string destination = Path.Combine(fixture.OutsideFolder, "taken.yamv-theme.json");
+        Directory.CreateDirectory(destination);
+        fixture.ExportPick = destination;
+
+        await viewModel.ExportCommand.ExecuteAsync(null);
+
+        Assert.StartsWith("Couldn't export: ", viewModel.ErrorLine, StringComparison.Ordinal);
+        Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error");
+    }
+
+    private const string SunsetText = """
+        {
+          // Warm evenings.
+          "name": "Sunset",
+          "light": { "tokens": { "accent": "#d2691e" } }
+        }
+        """;
+
     private static IEnumerable<TokenRowViewModel> Tokens(ThemeSettingsViewModel viewModel) => viewModel.TokenGroups.SelectMany(group => group.Rows);
 
     private static TokenRowViewModel Token(ThemeSettingsViewModel viewModel, string name) => Tokens(viewModel).Single(row => row.Name == name);
@@ -821,7 +1101,36 @@ public sealed class ThemeSettingsViewModelTests
 
         public bool DeleteAnswer { get; set; } = true;
 
+        /// <summary>A folder outside the themes folder, for files to import and export destinations.</summary>
+        public string OutsideFolder => _folder + "-outside";
+
+        /// <summary>What the Import picker returns; null is a cancelled pick.</summary>
+        public string? ImportPick { get; set; }
+
+        /// <summary>Every inspection the Import notice was asked with, oldest first.</summary>
+        public List<ThemeInspection> ImportAsked { get; } = [];
+
+        /// <summary>The Import notice's answer: true is Import.</summary>
+        public bool ImportAnswer { get; set; } = true;
+
+        /// <summary>Runs while the Import notice is open, before it answers.</summary>
+        public Action? WhileImportAsked { get; set; }
+
+        /// <summary>What the Export picker returns; null is a cancelled pick.</summary>
+        public string? ExportPick { get; set; }
+
+        /// <summary>The file name the Export picker suggested on each pick, oldest first.</summary>
+        public List<string> ExportSuggested { get; } = [];
+
         public string PathOf(string id) => Path.Combine(_folder, id + ThemeCatalog.FileSuffix);
+
+        public string WriteOutside(string fileName, string text)
+        {
+            Directory.CreateDirectory(OutsideFolder);
+            string path = Path.Combine(OutsideFolder, fileName);
+            File.WriteAllText(path, text);
+            return path;
+        }
 
         public ThemeSettingsViewModel Create(string themeId = "mine", string appearance = "light") =>
             new(
@@ -840,6 +1149,18 @@ public sealed class ThemeSettingsViewModelTests
                     {
                         DeleteAsked.Add(name);
                         return Task.FromResult(DeleteAnswer);
+                    },
+                    PickImport = () => Task.FromResult(ImportPick),
+                    PickExport = suggested =>
+                    {
+                        ExportSuggested.Add(suggested);
+                        return Task.FromResult(ExportPick);
+                    },
+                    ConfirmImport = inspection =>
+                    {
+                        ImportAsked.Add(inspection);
+                        WhileImportAsked?.Invoke();
+                        return Task.FromResult(ImportAnswer);
                     },
                 },
                 themeId,
@@ -893,6 +1214,10 @@ public sealed class ThemeSettingsViewModelTests
             }
 
             Directory.Delete(_folder, recursive: true);
+            if (Directory.Exists(OutsideFolder))
+            {
+                Directory.Delete(OutsideFolder, recursive: true);
+            }
         }
 
         private static string Literal(string path) => OperatingSystem.IsWindows() ? @"\\?\" + path : path;

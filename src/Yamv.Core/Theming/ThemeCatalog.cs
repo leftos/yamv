@@ -43,6 +43,9 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     private static readonly TimeSpan MoveRetryDelay = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan StaleTemporaryAge = TimeSpan.FromMinutes(1);
 
+    /// <summary>UTF-8 without a byte order mark that throws on an unpaired surrogate, as <see cref="File.WriteAllText(string, string?)"/> does.</summary>
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     /// <summary>The built-in theme ids, in the order they are listed.</summary>
     public static IReadOnlyList<string> BuiltInIds { get; } = ["paper", "studio", "ink"];
 
@@ -82,12 +85,13 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
 
     /// <summary>
     /// Copies the theme file at <paramref name="sourcePath"/> into the user folder, verbatim, under its own id or, when that is a
-    /// user or built-in theme already, the first free <c>-2</c>, <c>-3</c>… variant of it. The source is read with sharing that
-    /// allows a concurrent write, so a file an editor holds open imports as it stands.
+    /// user or built-in theme already, the first free <c>-2</c>, <c>-3</c>… variant of it, with its name suffixed the same way,
+    /// "<c>&lt;Name&gt; (2)</c>", by changing only the name's value in the text. The source is read with sharing that allows a
+    /// concurrent write, so a file an editor holds open imports as it stands.
     /// </summary>
     /// <exception cref="ThemeException">
-    /// The file is not a valid theme, its name gives no usable id, or it is larger than <see cref="MaxFileBytes"/>; nothing is
-    /// written.
+    /// The file is not a valid theme, its name gives no usable id, or it is larger than <see cref="MaxFileBytes"/>; or its id is taken
+    /// and its root <c>name</c> cannot be updated in place (a file with two top-level <c>name</c> keys); nothing is written.
     /// </exception>
     public ThemeEntry Import(string sourcePath)
     {
@@ -101,22 +105,26 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         }
 
         ThemeLoadResult check = ThemeParser.Parse(text, baseId, ThemeSource.User, sourcePath);
-        if (check.Theme is null)
+        if (check.Theme is not { } theme)
         {
             throw new ThemeException($"{sourcePath} is not a valid theme: {string.Join(" ", check.Errors)}", check.Errors);
         }
 
-        string id = CreateNew(baseId, _ => text, []);
+        string ImportedText(string candidate) =>
+            candidate == baseId ? text : PatchedText(text, sourcePath, theme, theme with { Name = SuffixedName(theme.Name, baseId, candidate) });
+
+        (string id, string written) = CreateNew(baseId, ImportedText, []);
         string path = PathFor(id);
         log.LogInfo($"Imported the theme {sourcePath} as {path}.");
-        return new ThemeEntry(id, ThemeSource.User, path, ThemeParser.Parse(text, id, ThemeSource.User, path));
+        return new ThemeEntry(id, ThemeSource.User, path, ThemeParser.Parse(written, id, ThemeSource.User, path));
     }
 
     /// <summary>
     /// Reads the theme file at <paramref name="path"/> for the Import notice, listing the errors <see cref="Import"/> would fail with,
-    /// without copying it. A file that cannot be read, or is larger than <see cref="MaxFileBytes"/>, gives the read error.
+    /// the name it would be added as when its id is taken, and each half's chip colours, without copying it. A file that cannot be
+    /// read, or is larger than <see cref="MaxFileBytes"/>, gives the read error.
     /// </summary>
-    public static ThemeInspection Inspect(string path)
+    public ThemeInspection Inspect(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
         string fileName = Path.GetFileName(path);
@@ -127,19 +135,38 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return new ThemeInspection(fileName, null, null, false, false, false, [$"The file cannot be read: {exception.Message}"], []);
+            return new ThemeInspection(
+                fileName,
+                null,
+                null,
+                false,
+                false,
+                false,
+                [$"The file cannot be read: {exception.Message}"],
+                [],
+                null,
+                null,
+                null
+            );
         }
 
         string id = ThemeIds.FromFileName(path);
         ThemeLoadResult result = ThemeParser.Parse(text, id, ThemeSource.User, path);
-        List<string> errors = ThemeIds.IsValid(id) ? [] : [NoUsableIdError(path)];
+        bool usableId = ThemeIds.IsValid(id);
+        List<string> errors = usableId ? [] : [NoUsableIdError(path)];
         errors.AddRange(result.Errors);
         if (result.Theme is not { } theme)
         {
-            return new ThemeInspection(fileName, null, null, false, false, false, errors, result.Warnings);
+            return new ThemeInspection(fileName, null, null, false, false, false, errors, result.Warnings, null, null, null);
         }
 
         bool hasCss = new[] { theme.SharedCss, theme.Light?.Css, theme.Dark?.Css }.Any(css => !string.IsNullOrWhiteSpace(css));
+        string? addedAs = null;
+        if (usableId && ThemeIds.Unique(id, TakenIds()) is var newId && newId != id)
+        {
+            addedAs = SuffixedName(theme.Name, id, newId);
+        }
+
         return new ThemeInspection(
             fileName,
             theme.Name,
@@ -148,21 +175,57 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
             theme.Dark is not null,
             hasCss,
             errors,
-            result.Warnings
+            result.Warnings,
+            addedAs,
+            ChipOf(theme, theme.Light, Appearance.Light),
+            ChipOf(theme, theme.Dark, Appearance.Dark)
         );
     }
 
     /// <summary>
     /// Writes <paramref name="theme"/> to <paramref name="destinationPath"/>: a built-in theme as its embedded file, comments
-    /// included, and a user theme as <see cref="ThemeSerializer"/> writes it.
+    /// included; a user theme whose file exists as that file's bytes, so its comments and unknown fields stay; and a user theme with
+    /// no file yet as <see cref="ThemeSerializer"/> writes it.
     /// </summary>
     public void Export(ThemeDefinition theme, string destinationPath)
     {
         ArgumentNullException.ThrowIfNull(theme);
         ArgumentNullException.ThrowIfNull(destinationPath);
-        string text = theme.Source == ThemeSource.BuiltIn ? ReadBuiltInText(theme.Id) : ThemeSerializer.Serialize(theme);
-        Replace(destinationPath, text);
+        byte[] bytes;
+        if (theme.Source == ThemeSource.BuiltIn)
+        {
+            bytes = StrictUtf8.GetBytes(ReadBuiltInText(theme.Id));
+        }
+        else if (theme.FilePath is { } file && File.Exists(file))
+        {
+            bytes = ReadSharedBytes(file);
+        }
+        else
+        {
+            bytes = StrictUtf8.GetBytes(ThemeSerializer.Serialize(theme));
+        }
+
+        Replace(destinationPath, bytes);
         log.LogInfo($"Exported the theme '{theme.Id}' to {destinationPath}.");
+    }
+
+    /// <summary>
+    /// The name of a theme named <paramref name="name"/> filed under <paramref name="baseId"/> when it is added as
+    /// <paramref name="newId"/>, <c>&lt;baseId&gt;-&lt;n&gt;</c>: "<c>&lt;Name&gt; (n)</c>".
+    /// </summary>
+    private static string SuffixedName(string name, string baseId, string newId) =>
+        string.Create(CultureInfo.InvariantCulture, $"{name} ({newId.AsSpan(baseId.Length + 1)})");
+
+    /// <summary>The chip colours of <paramref name="half"/>, resolved as the token editor shows them, or null when it is missing.</summary>
+    private static ThemeChip? ChipOf(ThemeDefinition theme, ThemeVariant? half, Appearance appearance)
+    {
+        if (half is null)
+        {
+            return null;
+        }
+
+        Dictionary<string, (ThemeValue Value, TokenLayer Layer)> tokens = ThemeResolver.Layer(appearance, theme.SharedTokens, half.Tokens);
+        return new ThemeChip((ColorValue)tokens["pageBackground"].Value, (ColorValue)tokens["accent"].Value);
     }
 
     /// <summary>
@@ -175,7 +238,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         ArgumentNullException.ThrowIfNull(theme);
         ThemeDefinition CopyAs(string id) => theme with { Id = id, Name = CopyName(theme, id), Source = ThemeSource.User, FilePath = PathFor(id) };
 
-        string id = CreateNew(theme.Id, candidate => SerializeValid(CopyAs(candidate)), [theme.Id]);
+        string id = CreateNew(theme.Id, candidate => SerializeValid(CopyAs(candidate)), [theme.Id]).Id;
         ThemeDefinition copy = CopyAs(id);
         log.LogInfo($"Duplicated the theme '{theme.Id}' as {copy.FilePath}.");
         return copy;
@@ -349,9 +412,16 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     /// <exception cref="ThemeFileTooLargeException">The file is larger than <see cref="MaxFileBytes"/>.</exception>
     private static (string Text, bool Bom) ReadShared(string path)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        string text = Encoding.UTF8.GetString(ReadAtMost(stream));
+        string text = Encoding.UTF8.GetString(ReadSharedBytes(path));
         return text.StartsWith('\uFEFF') ? (text[1..], true) : (text, false);
+    }
+
+    /// <summary>The bytes of the file at <paramref name="path"/>, read with sharing that allows a concurrent write or delete.</summary>
+    /// <exception cref="ThemeFileTooLargeException">The file is larger than <see cref="MaxFileBytes"/>.</exception>
+    private static byte[] ReadSharedBytes(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return ReadAtMost(stream);
     }
 
     /// <summary>The bytes of <paramref name="stream"/>, read no further than one byte past <see cref="MaxFileBytes"/>.</summary>
@@ -678,9 +748,9 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     /// <summary>
     /// Writes a new user theme file under <paramref name="baseId"/> or the first free numbered variant of it, never replacing a file:
     /// when another writer creates the chosen file first, the next number is tried. Ids in <paramref name="alsoTaken"/> are never
-    /// chosen. <paramref name="textFor"/> gives the file text for the id being tried. Returns the id written.
+    /// chosen. <paramref name="textFor"/> gives the file text for the id being tried. Returns the id and the text written.
     /// </summary>
-    private string CreateNew(string baseId, Func<string, string> textFor, IEnumerable<string> alsoTaken)
+    private (string Id, string Text) CreateNew(string baseId, Func<string, string> textFor, IEnumerable<string> alsoTaken)
     {
         HashSet<string> taken = TakenIds();
         taken.UnionWith(alsoTaken);
@@ -688,12 +758,13 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         {
             string id = ThemeIds.Unique(baseId, taken);
             string path = PathFor(id);
-            string temporary = WriteTemporary(path, textFor(id));
+            string text = textFor(id);
+            string temporary = WriteTemporary(path, StrictUtf8.GetBytes(text));
             try
             {
                 if (MoveWithRetry(temporary, path, overwrite: false))
                 {
-                    return id;
+                    return (id, text);
                 }
             }
             finally
@@ -717,10 +788,14 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         return taken;
     }
 
-    /// <summary>Replaces <paramref name="path"/> with <paramref name="text"/>, leaving no partial file behind.</summary>
-    private void Replace(string path, string text)
+    /// <summary>Replaces <paramref name="path"/> with <paramref name="text"/> in UTF-8, leaving no partial file behind.</summary>
+    /// <exception cref="EncoderFallbackException"><paramref name="text"/> holds an unpaired surrogate; nothing is written.</exception>
+    private void Replace(string path, string text) => Replace(path, StrictUtf8.GetBytes(text));
+
+    /// <summary>Replaces <paramref name="path"/> with <paramref name="bytes"/>, leaving no partial file behind.</summary>
+    private void Replace(string path, byte[] bytes)
     {
-        string temporary = WriteTemporary(path, text);
+        string temporary = WriteTemporary(path, bytes);
         try
         {
             MoveWithRetry(temporary, path, overwrite: true);
@@ -731,7 +806,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         }
     }
 
-    private static string WriteTemporary(string path, string text)
+    private static string WriteTemporary(string path, byte[] bytes)
     {
         string directory = Path.GetDirectoryName(path) ?? "";
         if (directory.Length > 0)
@@ -740,7 +815,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         }
 
         string temporary = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
-        File.WriteAllText(temporary, text);
+        File.WriteAllBytes(temporary, bytes);
         return temporary;
     }
 

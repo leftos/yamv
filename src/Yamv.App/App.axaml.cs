@@ -106,6 +106,7 @@ public partial class App : Application
         _harnessBridge = bridge;
         bridge.Apply(ThemeCatalog.DefaultThemeId, "system");
         ThemeSettingsWindow? window = null;
+        var fileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess);
         var seams = new ThemeSettingsSeams
         {
             Apply = bridge.Apply,
@@ -113,6 +114,9 @@ public partial class App : Application
             OpenAsText = path => log.LogInfo($"Harness: edit as text {path}"),
             ConfirmUnsaved = name => window!.ConfirmUnsavedAsync(name),
             ConfirmDelete = name => window!.ConfirmDeleteAsync(name),
+            PickImport = () => fileActions.PickThemeAsync(window!),
+            PickExport = suggested => fileActions.PickThemeDestinationAsync(window!, suggested),
+            ConfirmImport = _ => Task.FromResult(true),
         };
         window = new ThemeSettingsWindow(new ThemeSettingsViewModel(catalog, seams, ThemeCatalog.DefaultThemeId, "system", log), log);
         window.Opened += (_, _) => log.LogInfo("Window: shown");

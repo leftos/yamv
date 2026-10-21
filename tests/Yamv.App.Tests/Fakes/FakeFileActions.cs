@@ -19,6 +19,18 @@ internal sealed class FakeFileActions : IFileActions
     /// <summary>The old path of every Locate pick asked for, oldest first.</summary>
     public List<string> ReplacementRequests { get; } = [];
 
+    /// <summary>What the next theme Import pick returns; null is a cancelled pick.</summary>
+    public string? ThemeToPick { get; set; }
+
+    /// <summary>How many theme Import picks were asked for.</summary>
+    public int ThemePicks { get; private set; }
+
+    /// <summary>What the next theme Export pick returns; null is a cancelled pick.</summary>
+    public string? ThemeDestinationToPick { get; set; }
+
+    /// <summary>The suggested file name of every theme Export pick asked for, oldest first.</summary>
+    public List<string> ThemeDestinationRequests { get; } = [];
+
     /// <summary>Every reveal asked for, oldest first.</summary>
     public List<(string Path, RevealKind Kind)> Reveals { get; } = [];
 
@@ -35,6 +47,18 @@ internal sealed class FakeFileActions : IFileActions
     {
         ReplacementRequests.Add(oldPath);
         return Task.FromResult(ReplacementToPick);
+    }
+
+    public Task<string?> PickThemeAsync(TopLevel owner)
+    {
+        ThemePicks++;
+        return Task.FromResult(ThemeToPick);
+    }
+
+    public Task<string?> PickThemeDestinationAsync(TopLevel owner, string suggestedName)
+    {
+        ThemeDestinationRequests.Add(suggestedName);
+        return Task.FromResult(ThemeDestinationToPick);
     }
 
     public void Reveal(string path, RevealKind kind) => Reveals.Add((path, kind));

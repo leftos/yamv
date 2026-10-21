@@ -321,8 +321,8 @@
       >
         <DockPanel VerticalAlignment="Center">
           <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8">
-            <Button x:Name="ImportButton" Classes="btn" Content="Import…" IsEnabled="False" />
-            <Button x:Name="ExportButton" Classes="btn" Content="Export…" IsEnabled="False" />
+            <Button x:Name="ImportButton" Classes="btn" Content="Import…" Command="{Binding ImportCommand}" />
+            <Button x:Name="ExportButton" Classes="btn" Content="Export…" Command="{Binding ExportCommand}" />
             <Button x:Name="EditAsTextButton" Classes="btn" Content="Edit as text" Command="{Binding EditAsTextCommand}" />
           </StackPanel>
           <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">

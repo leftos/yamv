@@ -23,6 +23,17 @@ public static class DocumentFileTypes
     ];
 }
 
+/// <summary>The file types the theme pickers offer: YAMV themes first, then any JSON file.</summary>
+public static class ThemeFileTypes
+{
+    /// <summary>The picker filters, in the order the picker lists them.</summary>
+    public static IReadOnlyList<FilePickerFileType> Filters { get; } =
+    [
+        new("YAMV theme") { Patterns = ["*.yamv-theme.json"], AppleUniformTypeIdentifiers = ["public.json"] },
+        new("JSON") { Patterns = ["*.json"], AppleUniformTypeIdentifiers = ["public.json"] },
+    ];
+}
+
 /// <summary>
 /// The platform's file actions: the window's storage provider for the pickers, Explorer or Finder for reveal, and the window's
 /// clipboard. Failures it can meet (no local path, no clipboard, a file manager that will not start) are logged as warnings.
@@ -61,6 +72,45 @@ internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> 
             SuggestedStartLocation = start,
         };
         return LocalPaths(await storage.OpenFilePickerAsync(options)).FirstOrDefault();
+    }
+
+    public async Task<string?> PickThemeAsync(TopLevel owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        var options = new FilePickerOpenOptions
+        {
+            Title = "Import a theme",
+            AllowMultiple = false,
+            FileTypeFilter = ThemeFileTypes.Filters,
+        };
+        return LocalPaths(await owner.StorageProvider.OpenFilePickerAsync(options)).FirstOrDefault();
+    }
+
+    public async Task<string?> PickThemeDestinationAsync(TopLevel owner, string suggestedName)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(suggestedName);
+        var options = new FilePickerSaveOptions
+        {
+            Title = "Export theme",
+            SuggestedFileName = suggestedName,
+            DefaultExtension = "yamv-theme.json",
+            FileTypeChoices = ThemeFileTypes.Filters,
+            ShowOverwritePrompt = true,
+        };
+        using IStorageFile? file = await owner.StorageProvider.SaveFilePickerAsync(options);
+        if (file is null)
+        {
+            return null;
+        }
+
+        string? path = file.TryGetLocalPath();
+        if (path is null)
+        {
+            log.LogWarning($"Export: {file.Name} has no local path; nothing is exported.");
+        }
+
+        return path;
     }
 
     public void Reveal(string path, RevealKind kind)
@@ -140,6 +190,15 @@ internal interface IFileActions
     /// <param name="owner">The window the picker belongs to.</param>
     /// <param name="oldPath">The path the window holds, which need not exist.</param>
     Task<string?> PickReplacementAsync(TopLevel owner, string oldPath);
+
+    /// <summary>Asks the user for one theme file to import; null when cancelled.</summary>
+    /// <param name="owner">The window the picker belongs to.</param>
+    Task<string?> PickThemeAsync(TopLevel owner);
+
+    /// <summary>Asks the user where to export a theme; null when cancelled. The platform's picker confirms an overwrite.</summary>
+    /// <param name="owner">The window the picker belongs to.</param>
+    /// <param name="suggestedName">The file name the picker suggests.</param>
+    Task<string?> PickThemeDestinationAsync(TopLevel owner, string suggestedName);
 
     /// <summary>Shows <paramref name="path"/> in Explorer or Finder.</summary>
     /// <param name="path">The file or folder to reveal.</param>
