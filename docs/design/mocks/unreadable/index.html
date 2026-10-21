@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV unreadable document</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1720px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 36px; font-size: 16px; max-width: 1450px; line-height: 1.5; }
+section { margin-bottom: 60px; }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > p { color: #eef0f2; margin: 0 0 16px; font-size: 15px; max-width: 1450px; }
+.pair { display: flex; gap: 40px; align-items: flex-start; }
+.opt { flex: none; }
+.opt > h3 { font: 600 15px "Inter V"; color: #fff; margin: 0 0 10px; }
+.opt > h3 small { font-weight: 450; color: #e3e6e9; font-size: 13px; margin-left: 8px; }
+.after { margin: 14px 0 0; color: #fff; font-size: 14.5px; max-width: 1450px; line-height: 1.5; }
+.after b { font-weight: 650; }
+
+/* Studio light tokens (ThemeTokens.cs) */
+.win, .pane-only { --doc-bg: #fff; --chrome-bg: #f6f8fa; --side-bg: #f6f8fa; --line: #d8dee4; --text: #1f2328; --text-2: #31373d; --muted: #656d76; --faint: #9aa3ad;
+       --heading: #111418; --accent: #0969da; --accent-soft: #b6d4f5; --sel-bg: #e3edfa; --sel-text: #0b3d7a; --hover-bg: #eaeef2;
+       --warn: #9a6700; --warn-bg: #fff8c5; --warn-line: #e5d17b; --warn-text: #4d3800; --code-bg: #f6f8fa; --shadow: rgba(31,35,40,.16); }
+/* Studio dark tokens (ThemeTokens.cs); --faint and --warn-text are mock-only */
+.dark { --doc-bg: #0f1318; --chrome-bg: #0a0d11; --side-bg: #0a0d11; --line: #2a3139; --text: #e6edf3; --text-2: #c9d1d9; --muted: #8b949e; --faint: #6e7681;
+        --heading: #f0f6fc; --accent: #4493f8; --accent-soft: #1f3b5e; --sel-bg: #182a40; --sel-text: #e6edf3; --hover-bg: #161b22;
+        --warn: #d29922; --warn-bg: #bb800926; --warn-line: #9e6a03; --warn-text: #e3b341; --code-bg: #161b22; --shadow: rgba(0,0,0,.5); }
+
+.win { width: 960px; height: 600px; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; position: relative;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--doc-bg); color: var(--text); font-size: 13px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--chrome-bg); border-bottom: 1px solid var(--line);
+            font: 500 12.5px "Inter V"; color: var(--muted); padding-left: 14px; }
+.titlebar .name { color: var(--text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; }
+.titlebar .ctl svg { stroke: var(--muted); }
+.body { flex: 1; display: flex; min-height: 0; }
+.doc { flex: 1; overflow: hidden; position: relative; background: var(--doc-bg); color: var(--text); display: flex; flex-direction: column; }
+.doc .scroll { flex: 1; overflow: hidden; padding: 30px 44px 0; }
+.side { width: 250px; flex: none; background: var(--side-bg); border-left: 1px solid var(--line); padding: 12px 8px; overflow: hidden; }
+
+.md { max-width: 600px; margin: 0 auto; }
+.md h1 { font: 700 27px/1.15 "Inter V"; letter-spacing: -.025em; margin: 0 0 12px; color: var(--heading); }
+.md p, .md li { font-size: 15px; line-height: 1.62; color: var(--text); }
+.md p { margin: 0 0 12px; }
+.md ul { margin: 0 0 12px; padding-left: 22px; }
+.md h2 { font: 650 19px "Inter V"; margin: 22px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); color: var(--heading); }
+.md code { font: 13px "JetBrains Mono V"; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--text); }
+.grp-h .chev { width: 10px; color: var(--muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--text-2); position: relative; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--sel-bg); color: var(--sel-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--accent); }
+.row .glyph { margin-left: auto; color: var(--warn); display: grid; place-items: center; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--doc-bg); color: var(--text); font: 550 12.5px "Inter V"; }
+.btn.sm { height: 24px; padding: 0 10px; font-size: 12px; }
+
+/* A: warning strip */
+.strip { flex: none; display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 14px; background: var(--warn-bg); border-bottom: 1px solid var(--warn-line); color: var(--warn-text); font-size: 12.5px; }
+.strip svg { flex: none; color: var(--warn); }
+.strip .spacer { flex: 1; }
+.strip .btn { background: transparent; border-color: var(--warn-line); color: var(--warn-text); }
+
+/* B: cannot-read pane, after the missing-document pane */
+.unread-pane { padding: 90px 40px; text-align: center; color: var(--muted); }
+.unread-pane .mark { width: 44px; height: 44px; border-radius: 12px; border: 1.5px solid var(--warn-line); background: var(--warn-bg); color: var(--warn); display: grid; place-items: center; margin: 0 auto 16px; }
+.unread-pane h4 { color: var(--text); font: 600 17px "Inter V"; margin: 0 0 6px; }
+.unread-pane p { font-size: 13.5px; margin: 0 0 12px; }
+.unread-pane code { font: 12px "JetBrains Mono V"; background: var(--chrome-bg); padding: 2px 6px; border-radius: 4px; color: var(--text-2); }
+.unread-pane .reason { color: var(--text-2); }
+
+/* C: toast */
+.toast { position: absolute; right: 18px; bottom: 18px; width: 340px; display: flex; gap: 10px; align-items: flex-start; background: var(--doc-bg); color: var(--text);
+         border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px 13px; box-shadow: 0 8px 24px var(--shadow); font-size: 12.5px; line-height: 1.45; overflow: hidden; }
+.toast svg { flex: none; color: var(--warn); margin-top: 1px; }
+.toast b { font-weight: 600; }
+.toast .x { margin-left: auto; color: var(--muted); font-size: 13px; padding-left: 4px; }
+.toast .timer { position: absolute; left: 0; bottom: 0; height: 2px; width: 62%; background: var(--warn); opacity: .7; }
+
+/* dark copy of the pane area */
+.pane-only { width: 710px; height: 562px; zoom: .8; border-radius: 10px; overflow: hidden; display: flex; box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.4); }
+.pane-only .doc { height: 100%; }
+.darklbl { font: 600 15px "Inter V"; color: #fff; margin: 0 0 10px; }
+.darklbl small { font-weight: 450; color: #e3e6e9; font-size: 13px; margin-left: 6px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: a document that exists but can't be read</h1>
+<p class="page">You select README.md in the tree, but another program holds it locked (or access is denied). Today the title bar switches to README.md while the page keeps showing MAIN.md, and nothing says the read failed. Each lane is the whole window in Studio light; beside it is the document pane alone in Studio dark.</p>
+
+<template id="ico"><svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg></template>
+<template id="warn"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1.6 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12.1" r=".9" fill="currentColor"/></svg></template>
+<template id="ctl"><span class="spacer"></span><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+<template id="doc"><div class="md"><h1>Plan</h1><p>Every task is a Linear issue in team YAMV. This page is a generated snapshot of the queue, refreshed when an issue changes.</p><h2>Current focus</h2><ul><li>Open documents from the command line and from Explorer.</li><li>Remember the tree, the selection and the window size between runs.</li><li>Reload a document when its file changes on disk.</li></ul><h2>Next up</h2><ul><li>Find bar: <code>Ctrl+F</code>, match count, Enter and Shift+Enter.</li><li>Theme settings window with the visual editor.</li></ul></div></template>
+
+<section>
+  <h2>A · Keep the previous page, with a warning strip</h2>
+  <p>The selection and the title move to README.md. The page stays on MAIN.md under a strip that says why it did not change.</p>
+  <div class="pair">
+    <div class="opt"><h3>Studio light <small>full window</small></h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">README.md</span><span>yamv</span></div>
+        <div class="body"><div class="doc" data-pane="a"></div><div class="side" data-tree="readme"></div></div></div></div>
+    <div class="opt"><div class="darklbl">Studio dark <small>pane only, access denied</small></div>
+      <div class="pane-only dark"><div class="doc" data-pane="a-denied"></div></div></div>
+  </div>
+  <p class="after"><b>Retry</b> reads README.md again: if it reads, the strip goes and the page shows README.md; if not, the strip stays. YAMV also watches the file and swaps the page in by itself once it becomes readable.</p>
+</section>
+
+<section>
+  <h2>B · A "can't read" pane in place of the page</h2>
+  <p>Modelled on the missing-document pane. The tree row stays normal (not greyed), with a small warning glyph while the read fails.</p>
+  <div class="pair">
+    <div class="opt"><h3>Studio light <small>full window</small></h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">README.md</span><span>yamv</span></div>
+        <div class="body"><div class="doc" data-pane="b"></div><div class="side" data-tree="readme-glyph"></div></div></div></div>
+    <div class="opt"><div class="darklbl">Studio dark <small>pane only, access denied</small></div>
+      <div class="pane-only dark"><div class="doc" data-pane="b-denied"></div></div></div>
+  </div>
+  <p class="after"><b>Retry</b> reads README.md again; if it reads, the document replaces this pane and the glyph leaves the row. When the file changes (the other program saves or lets go), YAMV retries by itself and the pane gives way the same way.</p>
+</section>
+
+<section>
+  <h2>C · Selection does not move; a notice says why</h2>
+  <p>The highlight, the title and the page all stay on MAIN.md. A notice at the bottom-right of the document pane shows for 4 seconds.</p>
+  <div class="pair">
+    <div class="opt"><h3>Studio light <small>full window</small></h3>
+      <div class="win"><div class="titlebar" data-ctl><span class="name">MAIN.md</span><span>yamv / docs / plans</span></div>
+        <div class="body"><div class="doc" data-pane="c"></div><div class="side" data-tree="main"></div></div></div></div>
+    <div class="opt"><div class="darklbl">Studio dark <small>pane only, access denied</small></div>
+      <div class="pane-only dark"><div class="doc" data-pane="c-denied"></div></div></div>
+  </div>
+  <p class="after">There is no <b>Retry</b>: clicking README.md again is the retry. Nothing waits on the file, so once it becomes readable it stays unopened until it is clicked again.</p>
+</section>
+
+<script>
+const ico = document.getElementById("ico").innerHTML;
+const warn = document.getElementById("warn").innerHTML;
+const docHtml = document.getElementById("doc").innerHTML;
+const row = (name, cls = "", extra = "") => `<div class="row ${cls}">${ico}<span class="name">${name}</span>${extra}</div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+const head = (name) => `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge">git</span></div>`;
+function tree(kind) {
+  const readmeCls = kind === "main" ? "" : "sel";
+  const glyph = kind === "readme-glyph" ? `<span class="glyph" title="Can't read this file">${warn}</span>` : "";
+  const yamv = head("yamv") + folder("docs/plans") + row("MAIN.md", kind === "main" ? "in sel" : "in") + row("CHANGELOG.md") + row("README.md", readmeCls, glyph);
+  const yaat = head("yaat") + folder("docs") + row("ARCHITECTURE.md", "in") + row("glossary.md", "in");
+  return `<div class="grp">${yamv}</div><div class="grp">${yaat}</div>`;
+}
+const reasons = {
+  busy: ["the file is in use by another program.", "It is in use by another program."],
+  denied: ["access is denied.", "Access is denied."],
+};
+function pane(kind) {
+  const [opt, variant] = kind.split("-");
+  const [short, full] = reasons[variant === "denied" ? "denied" : "busy"];
+  if (opt === "a") return `<div class="strip">${warn}<span>Can't read <b>README.md</b>: ${short}</span><span class="spacer"></span><span class="btn sm">Retry</span></div><div class="scroll">${docHtml}</div>`;
+  if (opt === "b") return `<div class="unread-pane"><div class="mark">${warn.replace('width="14" height="14"', 'width="22" height="22"')}</div><h4>This file can't be read</h4>
+    <p><code>X:\\dev\\yamv\\README.md</code></p><p class="reason">${full}</p>
+    <p style="margin-top:20px"><span class="btn">Retry</span>&nbsp;&nbsp;<span class="btn">Remove from list</span></p><p style="font-size:12px">YAMV tries again when the file changes.</p></div>`;
+  return `<div class="scroll">${docHtml}</div><div class="toast">${warn}<span>Couldn't open <b>README.md</b>: ${variant === "denied" ? "access is denied." : "it is in use by another program."}</span><span class="x">✕</span><span class="timer"></span></div>`;
+}
+for (const el of document.querySelectorAll("[data-tree]")) el.innerHTML = tree(el.dataset.tree);
+for (const el of document.querySelectorAll("[data-pane]")) el.innerHTML = pane(el.dataset.pane);
+for (const el of document.querySelectorAll("[data-ctl]")) el.insertAdjacentHTML("beforeend", document.getElementById("ctl").innerHTML);
+</script>
+</body>
+</html>
