@@ -162,6 +162,43 @@ public sealed class ThemeBridgeTests : IDisposable
         }
     }
 
+    [Fact]
+    public Task Requested_theme_before_any_apply_is_studio_and_system() =>
+        Headless.Run(() =>
+        {
+            using ThemeBridge bridge = CreateBridge();
+
+            Assert.Equal("studio", bridge.RequestedThemeId);
+            Assert.Equal("system", bridge.RequestedAppearance);
+        });
+
+    [Fact]
+    public Task Requested_theme_keeps_an_unknown_id_that_resolved_to_studio() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge bridge = CreateBridge();
+
+            bridge.Apply("nope", "dark");
+
+            Assert.Equal("nope", bridge.RequestedThemeId);
+            Assert.Equal("dark", bridge.RequestedAppearance);
+            Assert.Equal("studio", bridge.Current!.Id);
+        });
+
+    [Fact]
+    public Task Requested_appearance_other_than_light_or_dark_is_system() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge bridge = CreateBridge();
+
+            bridge.Apply("studio", "LIGHT");
+
+            Assert.Equal("studio", bridge.RequestedThemeId);
+            Assert.Equal("system", bridge.RequestedAppearance);
+        });
+
     private ThemeBridge CreateBridge() => new(new ThemeCatalog(_themesFolder, _log), Application.Current!, _log);
 
     private ResolvedTheme Resolve(string id, Appearance appearance)

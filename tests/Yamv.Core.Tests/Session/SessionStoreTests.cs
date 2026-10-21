@@ -65,6 +65,27 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_WindowWithoutScaling_HasScalingOne()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SessionFile, """{ "window": { "x": 10, "y": 20, "width": 900, "height": 700, "isMaximized": false } }""");
+
+        Assert.Equal(new WindowBounds(10, 20, 900, 700, IsMaximized: false, Scaling: 1), CreateStore().Load().Window);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-2)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void SaveThenLoad_RepairsAnUnusableScalingToOne(double scaling)
+    {
+        CreateStore().Save(new SessionState { Window = new WindowBounds(10, 20, 900, 700, IsMaximized: false, scaling) });
+
+        Assert.Equal(1, CreateStore().Load().Window!.Scaling);
+    }
+
+    [Fact]
     public void Load_MissingFile_ReturnsEmpty()
     {
         Assert.Same(SessionState.Empty, CreateStore().Load());

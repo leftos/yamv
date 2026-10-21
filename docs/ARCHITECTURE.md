@@ -7,7 +7,9 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Task | Files, in order | Deep doc |
 |---|---|---|
 | Change what a window holds, selects or closes, or what the title bar says | `src/Yamv.Core/Documents/DocumentWindowState.cs` → `DocumentTree.cs` → `TitleText.cs` → `tests/Yamv.Core.Tests/Documents/` | [look.md](design/look.md) |
-| Change what is saved between runs | `src/Yamv.Core/Session/SessionState.cs` → `SessionSnapshot.cs` → `SessionStore.cs` → `Debouncer.cs` → `tests/Yamv.Core.Tests/Session/` | |
+| Change what is saved between runs, or when it is saved | `src/Yamv.Core/Session/SessionState.cs` → `SessionSnapshot.cs` → `SessionStore.cs` → `Debouncer.cs` → `SessionSaver.cs` → `src/Yamv.App/Services/MainWindowSession.cs` → `tests/Yamv.Core.Tests/Session/` + `tests/Yamv.App.Tests/Services/MainWindowSessionTests.cs` | |
+| Change where the main window reopens (saved rectangle, screen, scaling, sidebar width) | `src/Yamv.Core/Session/WindowBounds.cs` → `WindowPlacement.cs` → `src/Yamv.App/Services/MainWindowFactory.cs` (`RestoreLayout`) → `tests/Yamv.Core.Tests/Session/WindowPlacementTests.cs` → `tests/Yamv.App.Tests/Services/MainWindowFactoryTests.cs` | |
+| Change a keyboard shortcut | `src/Yamv.Core/Input/Shortcuts.cs` → `src/Yamv.App/Views/MainWindow.axaml.cs` (`RunShortcut`) → `tests/Yamv.Core.Tests/Input/ShortcutsTests.cs` → `tests/Yamv.App.Tests/Views/MainWindowTests.cs` | |
 | Change what a launch, Finder open, Dock click or `activate` opens | `src/Yamv.Core/Launch/LaunchArbiter.cs` → `ActivationGate.cs` → `tests/Yamv.Core.Tests/Launch/` | |
 | Change how the main instance is held or signalled | `src/Yamv.Core/Instance/InstanceCoordinator.cs` → `ServerFailureLog.cs` → `InstanceMessages.cs` → `tests/Yamv.Core.Tests/Instance/` | |
 | Change how documents are grouped in the tree | `src/Yamv.Core/Grouping/` → `tests/Yamv.Core.Tests/Grouping/` | |
@@ -29,6 +31,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
   One main instance per user is held by a lock file (flock on Unix) plus a named pipe (a socket file on Unix) derived from the lock path, which later launches signal over; a named mutex is not used, because its behaviour differs on macOS.
 
+  Session saving (`Session/`): `SessionSaver` writes `session.json` through `SessionStore` 500 ms after a change (a `Debouncer`, so two saves never run at once) and at once on `Flush`; a failed save is logged and retried by the next. `WindowPlacement` picks the screen (`ScreenArea`) a saved rectangle overlaps most, in physical pixels, and clamps the rectangle there; `WindowBounds.Scaling` is the screen scale it was saved at. `Input/Shortcuts` matches a key to a `ShortcutCommand` (Ctrl/Cmd+W, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl/Cmd+B, Ctrl/Cmd+R).
+
   Theming (`Theming/`) parses theme files, resolves a theme for light or dark, builds its CSS (`ThemeCss`), and keeps the catalog of built-in and user themes (`ThemeCatalog`: list, import, inspect, duplicate, rename, save, delete); the editing services are `ThemeEditing` (set or reset a token, add a variant, rename), `ThemeTokenView` (the rows of one tab with value, layer and whether set there) and `ThemeFilePatch` (a save that edits only the changed values in the file's text).
 
   Deleting goes through `IFileTrash`, which the App implements with the Recycle Bin or Trash. `ThemeFolderWatcher` watches the user themes folder and raises `Changed` once per quiet 300 ms on a pool thread; a 2 s tick re-checks the folder, re-arms after an error and follows the folder being deleted or recreated. Theming owns no UI.
@@ -46,6 +50,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
     `ThemeBridge` picks the session's theme, sets the Avalonia theme variant, swaps one merged resource dictionary of chrome brushes (`YamvChromeBackground` … `YamvWarningLine`) and font (`YamvUiFont`, from Core's `ChromePalette`), and sends the theme CSS to every registered surface.
   - `Services/MainWindowFactory` composes the real main window: the log, the session, the theme catalog and bridge, `DocumentView`, `DocumentWindowState` and the view model.
 
+    `Services/MainWindowSession` feeds the view model's `BuildSession` to a `SessionSaver` and schedules a save on the window's changes (documents, selection, collapsed groups, sidebar, position, size, maximized, sidebar width); `RestoreLayout` applies the saved placement and sidebar width (clamped 200-480) before the window shows.
+
     `Views/` holds `MainWindow` (custom title bar, `TitleBar`, and the tree sidebar on the right), `EmptyState` and `MissingDocumentPane`; `HarnessWindow` is the dev harness (the old document-view test window), opened instead of the main window when `YAMV_DEV_HARNESS=1`. `YAMV_DATA_DIR`, when set and not empty, is the data directory for the session, lock, logs and themes on every platform (`AppPaths.DataDirectoryVariable`).
   - The find bar lives inside the page, because Avalonia cannot draw over a native web view (airspace). For the same reason an empty or missing state hides the web view rather than covering it.
 
@@ -57,7 +63,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 - Theme colours are CSS hex, `#rrggbbaa`; Avalonia's `Color.Parse` reads 8 digits as `#aarrggbb`, so brushes are built from `ColorValue`'s R, G, B and A, never by parsing the hex.
 - The page and the host speak by message name: `Web/yamv.js` posts `ready`, `rendered`, `scroll`, `link`, `key`, `find`, `blocked` and `error`, which `DocumentView`'s message handler switches on, and the host calls the `window.yamv` functions `render`, `setTheme`, `setContentWidth`, `find`, `clearFind` and `openFind`. A rename changes both sides, and the `RenderOptions` fields match the `settings.*` names the page reads.
 - Core's renderer marks diagrams as `<pre class="mermaid">` and puts `data-line` on the `code` element of a fenced block; the page's diagram loader and scroll restore read those.
-- The web view swallows Ctrl/Cmd shortcuts while it has focus; the page forwards them as `key` messages (`KeyForwarded`), so a window shortcut is handled in both `KeyDown` and `KeyForwarded`.
+- The web view swallows Ctrl/Cmd shortcuts while it has focus; the page forwards them as `key` messages (`KeyForwarded`), so a window shortcut is handled in both the window's tunnelled `KeyDown` and `KeyForwarded`, both through `MainWindow.RunShortcut`, which asks Core's `Shortcuts.Match` what the key means.
+- A change to any field `DocumentWindowViewModel.BuildSession` reads (documents, selection, bounds, sidebar width, theme id and appearance) must reach `MainWindowSession` (through the view model's `SessionDirty` or a window event it follows), which hands a fresh `BuildSession` to `SessionSaver.Schedule`; a scroll only calls `MarkDirty`, so it is written with the next save or the close. A change that reaches neither is saved only with the next unrelated change.
 - The instance endpoint is derived from the lock file's full path (`InstanceEndpoint`): `main.sock` beside the lock on macOS and Linux, `yamv-` plus a hash of the user SID and the lock path on Windows. Moving `AppPaths.MainLockFile` moves the endpoint, so a build with the old path cannot reach a main running the new one.
 - `InstanceCoordinator.StartServer`'s handler runs on a thread-pool thread: the App posts to the UI thread and never blocks in it (a `Dispose` from inside it releases the lock and returns at once; any other concurrent `Dispose` returns only after the lock is released). `SignalAsync` returning true means the main instance read the frame on Windows, but only that the frame reached the socket's send buffer on Unix.
 - On Windows, `File.Move(overwrite)` is refused while any other handle has the target open, so every multi-writer file in the data folder (`widths.json`) retries its replace.
@@ -68,7 +75,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 ## Test locations
 
 - `tests/Yamv.Core.Tests`: everything in Core. A new Core type gets a test file at the mirrored path.
-- `tests/Yamv.App.Tests`: App logic that needs Avalonia types (view model, `ThemeBridge`), run headless as plain `[Fact]`s through `HeadlessUnitTestSession` (`Avalonia.Headless.XUnit` fails discovery under xunit.v3). `Fakes/` holds the fake surface and log; `Yamv.App` exposes its internals to it. `Views/` holds headless window tests (title bar, tree, empty and missing states).
+- `tests/Yamv.App.Tests`: App logic that needs Avalonia types (view model, `ThemeBridge`), run headless as plain `[Fact]`s through `HeadlessUnitTestSession` (`Avalonia.Headless.XUnit` fails discovery under xunit.v3). `Fakes/` holds the fake surface and log; `Yamv.App` exposes its internals to it. `Views/` holds headless window tests (title bar, tree, empty and missing states, shortcuts). `Services/` holds `ThemeBridgeTests`, `MainWindowSessionTests` (what is saved and when) and `MainWindowFactoryTests` (`RestoreLayout`).
 - `tools/dev/page-check/`: a headless Chromium check of the document page (`npm install`, then `npm run check`), against a stubbed host.
 - `tools/dev/run-hidden.ps1` with `tools/dev/capture-window.ps1`, both run under `tools/hidden-desktop.ps1`: screenshots of the real app off the owner's desktop, each run on a fresh data folder (`-App` for the main window, `-Session` to seed it). `docs/design/fixtures/sample.md` is the sample document.
 

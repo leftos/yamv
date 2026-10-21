@@ -14,11 +14,7 @@ public sealed class FakeDocumentSurface : IDocumentSurface
         remove { }
     }
 
-    public event EventHandler<KeyForwardedEventArgs>? KeyForwarded
-    {
-        add { }
-        remove { }
-    }
+    public event EventHandler<KeyForwardedEventArgs>? KeyForwarded;
 
     /// <summary>Every <see cref="ShowAsync"/> call, oldest first.</summary>
     public List<ShownDocument> Shown { get; } = [];
@@ -53,6 +49,9 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     /// <summary>Raises <see cref="ScrollChanged"/> as the page would.</summary>
     public void RaiseScroll(double fraction) => ScrollChanged?.Invoke(this, fraction);
+
+    /// <summary>Raises <see cref="KeyForwarded"/> as the page would for a shortcut pressed while it had focus.</summary>
+    public void RaiseKey(KeyForwardedEventArgs key) => KeyForwarded?.Invoke(this, key);
 }
 
 /// <summary>One <see cref="FakeDocumentSurface.ShowAsync"/> call.</summary>

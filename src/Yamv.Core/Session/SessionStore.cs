@@ -131,7 +131,15 @@ public sealed class SessionStore(string filePath, IAppLog log)
         return scrollPositions;
     }
 
-    private static WindowBounds? NormalizeWindow(WindowBounds? window) => window is { } bounds && IsUsableSize(bounds) ? bounds : null;
+    private static WindowBounds? NormalizeWindow(WindowBounds? window)
+    {
+        if (window is not { } bounds || !IsUsableSize(bounds))
+        {
+            return null;
+        }
+
+        return double.IsFinite(bounds.Scaling) && bounds.Scaling > 0 ? bounds : bounds with { Scaling = 1 };
+    }
 
     private static bool IsUsableSize(WindowBounds bounds) =>
         double.IsFinite(bounds.X)

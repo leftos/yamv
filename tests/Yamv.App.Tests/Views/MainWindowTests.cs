@@ -7,11 +7,13 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Microsoft.Extensions.Time.Testing;
+using Yamv.App.Controls;
 using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.App.Views;
 using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
+using Yamv.Core.Session;
 
 namespace Yamv.App.Tests.Views;
 
@@ -182,6 +184,157 @@ public sealed class MainWindowTests
             Assert.True(fixture.Window.DocumentHost.IsVisible);
         });
 
+    [Fact]
+    public Task Command_W_closes_the_selected_document() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+
+            fixture.Press(Key.W, CommandModifier);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.DoesNotContain(fixture.DocA, fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Ctrl_tab_and_ctrl_shift_tab_step_selection_and_keep_focus_on_the_selected_row() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            fixture.Click(fixture.Row(fixture.DocA));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.Press(Key.Tab, RawInputModifiers.Control);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+            fixture.AssertFocusOnSelectedRow();
+
+            fixture.Press(Key.Tab, RawInputModifiers.Control | RawInputModifiers.Shift);
+            Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+            fixture.AssertFocusOnSelectedRow();
+        });
+
+    [Fact]
+    public Task Command_W_with_focus_in_the_tree_keeps_focus_on_the_new_selected_row() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB, fixture.Gone);
+            fixture.Click(fixture.Row(fixture.DocA));
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.AssertFocusOnSelectedRow();
+
+            fixture.Press(Key.W, CommandModifier);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+            fixture.AssertFocusOnSelectedRow();
+
+            fixture.Press(Key.Down);
+            Assert.Equal(fixture.Gone, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Saved_bounds_keep_the_normal_rectangle_while_maximized() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            fixture.Window.Position = new PixelPoint(120, 80);
+            fixture.Window.Width = 900;
+            fixture.Window.Height = 700;
+            await fixture.OpenAsync(fixture.DocA);
+            WindowBounds normal = Assert.IsType<WindowBounds>(fixture.Window.SavedBounds);
+            Assert.False(normal.IsMaximized);
+
+            fixture.Window.WindowState = WindowState.Maximized;
+            fixture.Window.Position = new PixelPoint(0, 0);
+            fixture.Window.Width = 1600;
+            fixture.Settle();
+
+            Assert.Equal(normal with { IsMaximized = true }, fixture.Window.SavedBounds);
+
+            fixture.Window.WindowState = WindowState.Normal;
+            fixture.Settle();
+            Assert.False(fixture.Window.SavedBounds!.IsMaximized);
+        });
+
+    [Fact]
+    public Task Command_B_toggles_the_sidebar() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+
+            fixture.Press(Key.B, CommandModifier);
+            Assert.True(fixture.ViewModel.SidebarHidden);
+            Assert.False(fixture.Window.Sidebar.IsVisible);
+
+            fixture.Press(Key.B, CommandModifier);
+            Assert.False(fixture.ViewModel.SidebarHidden);
+            Assert.True(fixture.Window.Sidebar.IsVisible);
+        });
+
+    [Fact]
+    public Task Command_R_renders_the_selected_document_again() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            int before = fixture.Surface.Shown.Count;
+
+            fixture.Press(Key.R, CommandModifier);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.Equal(before + 1, fixture.Surface.Shown.Count);
+            Assert.Equal(fixture.DocA, fixture.Surface.Shown[^1].DocumentPath);
+        });
+
+    [Fact]
+    public Task Forwarded_command_w_from_the_page_closes_the_selected_document() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            bool mac = OperatingSystem.IsMacOS();
+
+            fixture.Surface.RaiseKey(new KeyForwardedEventArgs("w", ctrl: !mac, meta: mac, shift: false, alt: false));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.DoesNotContain(fixture.DocA, fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Command_W_on_a_viewer_with_one_document_closes_the_window() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture(persist: false);
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Press(Key.W, CommandModifier);
+
+            Assert.True(fixture.IsClosed);
+        });
+
+    [Fact]
+    public Task Sidebar_width_above_the_limit_reads_480() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+
+            fixture.Window.SidebarWidth = 600;
+
+            Assert.Equal(480, fixture.Window.SidebarWidth);
+        });
+
+    /// <summary>The platform's command key: Cmd on macOS, Ctrl elsewhere.</summary>
+    private static RawInputModifiers CommandModifier => OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
+
     private static List<string> VisibleTexts(Visual root) =>
         [
             .. root.GetVisualDescendants()
@@ -230,8 +383,11 @@ public sealed class MainWindowTests
                 new GroupingOptions(null, StringComparison.OrdinalIgnoreCase)
             );
             ViewModel = new DocumentWindowViewModel(State, Surface, File.ReadAllText, new FakeTimeProvider(), Log);
-            Window = new MainWindow(ViewModel, new Border(), Log);
+            Window = new MainWindow(ViewModel, new Border(), Surface, Log);
+            Window.Closed += (_, _) => IsClosed = true;
         }
+
+        public bool IsClosed { get; private set; }
 
         public string DocA { get; }
 
@@ -295,9 +451,11 @@ public sealed class MainWindowTests
             Assert.IsType<DocumentItemViewModel>(focused.DataContext);
         }
 
-        public void Press(Key key)
+        public void Press(Key key) => Press(key, RawInputModifiers.None);
+
+        public void Press(Key key, RawInputModifiers modifiers)
         {
-            Window.KeyPress(key, RawInputModifiers.None, PhysicalKey.None, null);
+            Window.KeyPress(key, modifiers, PhysicalKey.None, null);
             Settle();
         }
 
@@ -315,7 +473,11 @@ public sealed class MainWindowTests
 
         public void Dispose()
         {
-            Window.Close();
+            if (!IsClosed)
+            {
+                Window.Close();
+            }
+
             ViewModel.Dispose();
             Directory.Delete(_root, recursive: true);
         }

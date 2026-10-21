@@ -56,6 +56,15 @@ public sealed class ThemeBridge : IDisposable
     /// <summary>The theme in use, or null before the first <see cref="Apply"/>.</summary>
     public ResolvedTheme? Current { get; private set; }
 
+    /// <summary>
+    /// The theme id the last <see cref="Apply"/> asked for, even when it resolved to Studio; <c>studio</c> before any. The session
+    /// saves this, so a user theme that is invalid for a moment is not rewritten to Studio.
+    /// </summary>
+    public string RequestedThemeId { get; private set; } = FallbackThemeId;
+
+    /// <summary>The appearance the last <see cref="Apply"/> asked for: <c>light</c>, <c>dark</c> or <c>system</c>; <c>system</c> before any.</summary>
+    public string RequestedAppearance { get; private set; } = "system";
+
     /// <summary>The resource key of a chrome colour token's brush: <c>Yamv</c> and the token name with its first letter upper-cased.</summary>
     public static string ResourceKey(string token)
     {
@@ -78,6 +87,8 @@ public sealed class ThemeBridge : IDisposable
         ApplyResolved(ThemeResolver.Resolve(theme, followsSystem ? PlatformAppearance() : requested));
         _theme = theme;
         _followsSystem = followsSystem;
+        RequestedThemeId = themeId;
+        RequestedAppearance = followsSystem ? "system" : appearance;
     }
 
     /// <summary>Starts sending the theme css to <paramref name="surface"/>, beginning with the current one.</summary>
