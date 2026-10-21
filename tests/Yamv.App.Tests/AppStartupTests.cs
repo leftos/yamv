@@ -54,4 +54,64 @@ public sealed class AppStartupTests
                 }
             }
         });
+
+    [Fact]
+    public Task Start_window_with_harness_and_theme_settings_variables_is_theme_settings_window() =>
+        Headless.Run(() =>
+        {
+            string dataFolder = Path.Combine(Path.GetTempPath(), "yamv-app-start-" + Guid.NewGuid().ToString("N"));
+            string? dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
+            string? harnessBefore = Environment.GetEnvironmentVariable(App.HarnessVariable);
+            string? settingsBefore = Environment.GetEnvironmentVariable(App.ThemeSettingsHarnessVariable);
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataFolder);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, "1");
+            Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, "1");
+            App app = Assert.IsType<App>(Application.Current);
+            try
+            {
+                Window window = app.CreateStartWindow();
+
+                ThemeSettingsWindow settings = Assert.IsType<ThemeSettingsWindow>(window);
+                ThemeSettingsViewModel viewModel = Assert.IsType<ThemeSettingsViewModel>(settings.DataContext);
+                Assert.Equal("studio", viewModel.Selected?.Id);
+                Assert.Equal("system", viewModel.SelectedAppearance.Value);
+            }
+            finally
+            {
+                app.ReleaseMainWindow();
+                Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
+                Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, settingsBefore);
+                if (Directory.Exists(dataFolder))
+                {
+                    Directory.Delete(dataFolder, recursive: true);
+                }
+            }
+        });
+
+    [Fact]
+    public Task Theme_settings_harness_without_a_data_folder_refuses_to_start() =>
+        Headless.Run(() =>
+        {
+            string? dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
+            string? harnessBefore = Environment.GetEnvironmentVariable(App.HarnessVariable);
+            string? settingsBefore = Environment.GetEnvironmentVariable(App.ThemeSettingsHarnessVariable);
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, null);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, "1");
+            Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, "1");
+            App app = Assert.IsType<App>(Application.Current);
+            try
+            {
+                InvalidOperationException refused = Assert.Throws<InvalidOperationException>(() => app.CreateStartWindow());
+
+                Assert.Equal("The theme settings harness needs YAMV_DATA_DIR set.", refused.Message);
+            }
+            finally
+            {
+                app.ReleaseMainWindow();
+                Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
+                Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, settingsBefore);
+            }
+        });
 }

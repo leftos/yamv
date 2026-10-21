@@ -10,7 +10,8 @@ namespace Yamv.App.Views;
 /// </summary>
 public partial class TitleBar : UserControl
 {
-    private const double MacTrafficLightInset = 78;
+    /// <summary>How far in a custom title bar's text starts on macOS, clear of the traffic lights.</summary>
+    internal const double MacTrafficLightInset = 78;
 
     /// <summary>
     /// The width the drawn minimize, maximize and close buttons take from the bar's right end: three 45 px buttons 2 px apart and

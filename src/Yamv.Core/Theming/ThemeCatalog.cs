@@ -35,6 +35,9 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     /// <summary><see cref="MaxFileBytes"/> written out, as the messages about a file over it report it.</summary>
     internal static readonly string MaxFileSizeText = MaxFileBytes / (1024 * 1024) + " MB";
 
+    /// <summary>The built-in theme the app uses when no other theme is chosen or the chosen one is gone: Studio.</summary>
+    public const string DefaultThemeId = "studio";
+
     private const string ResourcePrefix = "Yamv.Core.Theming.BuiltIn.";
     private const int MoveAttempts = 5;
     private static readonly TimeSpan MoveRetryDelay = TimeSpan.FromMilliseconds(50);

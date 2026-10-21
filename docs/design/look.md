@@ -35,5 +35,5 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
   - **Middle:** every token, grouped as in the [token table](themes.md#tokens) (Page, Chrome, Code, Syntax, Type, Layout). It has Shared / Light / Dark tabs, colour swatches with hex fields and a picker, and value fields for fonts and sizes.
   - **Right:** a live preview.
 - Unsaved changes are marked with a dot.
-- Footer: **Import…**, **Export…**, **Edit as text** (opens the file in the default editor), **Revert**, **Save**. A built-in theme is read-only and has no file, so it shows **Duplicate** in place of Edit as text: editing one starts with a copy in Yours. Edit as text exists only for user themes.
+- Footer: **Import…**, **Export…**, **Edit as text** (opens the file in the default editor), **Revert**, **Save**. A built-in theme is read-only and has no file, so it shows **Duplicate to edit** in place of Edit as text: editing one starts with a copy in Yours. Edit as text exists only for user themes.
 - Editing a theme file outside the app re-applies it live.

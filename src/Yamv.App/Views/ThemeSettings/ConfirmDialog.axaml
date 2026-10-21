@@ -1,0 +1,84 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="Yamv.App.Views.ThemeSettings.ConfirmDialog"
+  IsVisible="False"
+>
+  <UserControl.Styles>
+    <Style Selector="Button.ctl">
+      <Setter Property="Width" Value="46" />
+      <Setter Property="Height" Value="38" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Panel Background="Transparent">
+            <Path
+              Data="M0,0 L10,10 M10,0 L0,10"
+              Stroke="{DynamicResource YamvTextMuted}"
+              StrokeThickness="1"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+            />
+          </Panel>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+  </UserControl.Styles>
+
+  <!-- The scrim covers the whole window, so nothing under the dialog takes a click while it is open. -->
+  <Panel x:Name="Scrim" Background="#6B0F1216">
+    <Border
+      Width="470"
+      HorizontalAlignment="Center"
+      VerticalAlignment="Center"
+      Background="{DynamicResource YamvPageBackground}"
+      CornerRadius="10"
+      ClipToBounds="True"
+      BoxShadow="0 24 60 0 #66000000, 0 0 0 1 #2E000000"
+    >
+      <DockPanel>
+        <Border
+          DockPanel.Dock="Top"
+          Height="38"
+          Padding="16,0,0,0"
+          Background="{DynamicResource YamvChromeBackground}"
+          BorderBrush="{DynamicResource YamvLine}"
+          BorderThickness="0,0,0,1"
+        >
+          <DockPanel>
+            <Button x:Name="CloseButton" Classes="ctl" DockPanel.Dock="Right" Click="OnCancelClick" AutomationProperties.Name="Close" />
+            <TextBlock
+              x:Name="DialogTitle"
+              VerticalAlignment="Center"
+              FontSize="12.5"
+              FontWeight="SemiBold"
+              Foreground="{DynamicResource YamvText}"
+            />
+          </DockPanel>
+        </Border>
+        <Border
+          DockPanel.Dock="Bottom"
+          Margin="0,10,0,0"
+          Padding="16,12"
+          Background="{DynamicResource YamvChromeBackground}"
+          BorderBrush="{DynamicResource YamvLine}"
+          BorderThickness="0,1,0,0"
+        >
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button x:Name="CancelButton" Classes="btn" Content="Cancel" Click="OnCancelClick" />
+            <Button x:Name="SecondaryButton" Classes="btn" Click="OnSecondaryClick" />
+            <Button x:Name="PrimaryButton" Classes="btn primary" IsDefault="True" Click="OnPrimaryClick" />
+          </StackPanel>
+        </Border>
+        <TextBlock
+          x:Name="DialogBody"
+          Margin="20,18,20,6"
+          FontSize="13"
+          LineHeight="19.5"
+          TextWrapping="Wrap"
+          Foreground="{DynamicResource YamvText}"
+        />
+      </DockPanel>
+    </Border>
+  </Panel>
+</UserControl>

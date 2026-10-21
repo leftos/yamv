@@ -10,6 +10,7 @@
 - **Group**: a top-level node of the sidebar tree, one per group root: a git repo or a folder.
 - **Group root**: the folder a document is grouped under in the tree: its git work-tree root, or its parent folder when it is not in a repo.
 - **Harness window**: the development window (`HarnessWindow`) that hosts a bare `DocumentView` with `--theme`, `--find`, `--scroll` and similar switches; opened instead of the main window when `YAMV_DEV_HARNESS=1`.
+- **Import notice**: the modal an Import shows before copying a theme file, with a card for the file (name, author, variants, whether it has css, its errors and warnings) and the warning about css that loads from the web; the card is read by `ThemeCatalog.Inspect` into a `ThemeInspection` ([themes.md](design/themes.md)).
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.
 - **Main instance**: the one YAMV process started with no file arguments. It remembers its open documents between runs; a second no-arg launch brings it to the front and exits.
 - **Missing document**: an open document whose file no longer exists; it stays in the tree, greyed, until removed or until the file comes back.

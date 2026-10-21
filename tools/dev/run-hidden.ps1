@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Starts the Release yamv.exe (the dev harness, or with -App the real main window), captures its window after a wait,
+    Starts the Release yamv.exe (the dev harness, with -App the real main window, or with -ThemeSettings the theme
+    settings window), captures its window after a wait,
     stops it and prints the log lines the run wrote.
 
 .DESCRIPTION
@@ -16,7 +17,11 @@
     value is replaced), so the owner's session, themes and log in %APPDATA%\YAMV are never read or written. By default it
     starts the dev harness (YAMV_DEV_HARNESS=1) and waits for its "Harness: showing" log line. With -App it starts the
     real main window, copies -Session into the data folder as session.json first, and waits for the window's
-    "Window: shown" log line. Both lines are read from the data folder's logs\yamv.log. A fresh WebView2 profile starts
+    "Window: shown" log line. With -ThemeSettings it starts the theme settings window instead (YAMV_DEV_HARNESS=1 and
+    YAMV_DEV_THEME_SETTINGS=1), with Studio applied to follow the system, after copying the *.yamv-theme.json files of
+    -Themes into the data folder's themes folder, and waits for its "Window: shown" log line. Its Delete deletes the file
+    outright inside the data folder, and Edit as text writes a "Harness: edit as text <path>" log line.
+    Both lines are read from the data folder's logs\yamv.log. A fresh WebView2 profile starts
     slowly, hence the wait. With -DeleteAfterShown it then deletes that file and waits for the window's missing-file
     re-check. Then it captures the window with capture-window.ps1, stops yamv.exe, waits for its msedgewebview2 processes
     again, and prints the log.
@@ -34,6 +39,13 @@
     With -App: a file to delete once the window has shown, normally the session's selected document, so the capture shows
     the window after it switched from that document to its missing pane. The capture waits 3 s for the 2 s re-check.
 
+.PARAMETER ThemeSettings
+    Run the theme settings window instead of the harness, on a fresh data folder under .tmp\yamv-data.
+
+.PARAMETER Themes
+    With -ThemeSettings: a folder whose *.yamv-theme.json files are copied into the fresh data folder's themes folder
+    first. Default: none (only the built-in themes).
+
 .PARAMETER Out
     The PNG file to write.
 
@@ -50,6 +62,10 @@
 .EXAMPLE
     pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -App `
         -Session .tmp/session.json -Out .tmp/main.png
+
+.EXAMPLE
+    pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ThemeSettings `
+        -Themes .tmp/themes -Out .tmp/theme-settings.png
 #>
 [CmdletBinding()]
 param(
@@ -57,6 +73,8 @@ param(
     [switch] $App,
     [string] $Session = '',
     [string] $DeleteAfterShown = '',
+    [switch] $ThemeSettings,
+    [string] $Themes = '',
     [Parameter(Mandatory)] [string] $Out,
     [int] $Wait = 30,
     [int] $WebViewTimeoutSeconds = 15
@@ -72,6 +90,12 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 if (($Session -or $DeleteAfterShown) -and -not $App) {
     throw '-Session and -DeleteAfterShown need -App: the harness does not read a session.'
 }
+if ($App -and $ThemeSettings) {
+    throw '-App and -ThemeSettings each start a different window; pass one.'
+}
+if ($Themes -and -not $ThemeSettings) {
+    throw '-Themes needs -ThemeSettings: only the theme settings window reads the themes folder here.'
+}
 $dataDir = Join-Path $root ".tmp\yamv-data\$stamp"
 New-Item -ItemType Directory -Path $dataDir | Out-Null
 $env:YAMV_DATA_DIR = $dataDir
@@ -82,10 +106,22 @@ if ($App) {
         Copy-Item -LiteralPath $Session -Destination (Join-Path $dataDir 'session.json')
     }
     $env:YAMV_DEV_HARNESS = $null
+    $env:YAMV_DEV_THEME_SETTINGS = $null
+    $readyLine = 'Window: shown'
+}
+elseif ($ThemeSettings) {
+    if ($Themes) {
+        $themesDir = Join-Path $dataDir 'themes'
+        New-Item -ItemType Directory -Path $themesDir | Out-Null
+        Get-ChildItem -LiteralPath $Themes -Filter '*.yamv-theme.json' | Copy-Item -Destination $themesDir
+    }
+    $env:YAMV_DEV_HARNESS = '1'
+    $env:YAMV_DEV_THEME_SETTINGS = '1'
     $readyLine = 'Window: shown'
 }
 else {
     $env:YAMV_DEV_HARNESS = '1'
+    $env:YAMV_DEV_THEME_SETTINGS = $null
     $readyLine = 'Harness: showing'
 }
 

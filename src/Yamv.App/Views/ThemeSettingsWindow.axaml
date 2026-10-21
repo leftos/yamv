@@ -1,0 +1,494 @@
+<Window
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  xmlns:ts="using:Yamv.App.Views.ThemeSettings"
+  xmlns:chrome="using:Avalonia.Controls.Chrome"
+  x:Class="Yamv.App.Views.ThemeSettingsWindow"
+  x:DataType="vm:ThemeSettingsViewModel"
+  Title="Theme settings"
+  Width="980"
+  Height="640"
+  MinWidth="760"
+  MinHeight="480"
+  CanMinimize="False"
+  CanMaximize="False"
+  ExtendClientAreaToDecorationsHint="True"
+  ExtendClientAreaTitleBarHeightHint="38"
+  Background="{DynamicResource YamvPageBackground}"
+  Foreground="{DynamicResource YamvText}"
+  FontFamily="{DynamicResource YamvUiFont}"
+  FontSize="13"
+>
+  <Window.Styles>
+    <!--
+      A close button only: CanMinimize and CanMaximize turn the drawn minimize and maximize buttons off but still draw them, so
+      they are hidden here, their width zeroed as App.axaml does for the full-screen button.
+    -->
+    <Style Selector="WindowDrawnDecorations /template/ #PART_MinimizeButton" x:SetterTargetType="Layoutable">
+      <Setter Property="IsVisible" Value="False" />
+      <Setter Property="Width" Value="0" />
+    </Style>
+    <Style Selector="WindowDrawnDecorations /template/ #PART_MaximizeButton" x:SetterTargetType="Layoutable">
+      <Setter Property="IsVisible" Value="False" />
+      <Setter Property="Width" Value="0" />
+    </Style>
+
+    <!-- Footer and dialog buttons, drawn here so Fluent's own fills never show. -->
+    <Style Selector="Button.btn">
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Padding" Value="12,0" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="{DynamicResource YamvPageBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <!-- The transparent panel keeps the whole button clickable whatever the fill resolves to. -->
+          <Panel Background="Transparent">
+            <Border
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="6"
+              Padding="{TemplateBinding Padding}"
+            >
+              <ContentPresenter
+                Content="{TemplateBinding Content}"
+                Foreground="{TemplateBinding Foreground}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+              />
+            </Border>
+          </Panel>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.btn.primary">
+      <Setter Property="Background" Value="{DynamicResource YamvAccent}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvAccent}" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.btn:disabled">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+
+    <Style Selector="TextBlock.section">
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.63" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+      <Setter Property="Margin" Value="8,6" />
+    </Style>
+
+    <Style Selector="Panel.row">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Panel.row > Border.fill">
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Panel.row:pointerover > Border.fill">
+      <Setter Property="Background" Value="{DynamicResource YamvHoverBackground}" />
+    </Style>
+    <Style Selector="Panel.row.selected > Border.fill">
+      <Setter Property="Background" Value="{DynamicResource YamvSelectionBackground}" />
+    </Style>
+    <Style Selector="Panel.row TextBlock.name">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextSecondary}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="Panel.row.bad TextBlock.name">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+    <Style Selector="Panel.row.selected TextBlock.name">
+      <Setter Property="Foreground" Value="{DynamicResource YamvSelectionText}" />
+      <!-- The mock's 550; the bundled Inter has static faces only (Medium 500, SemiBold 600, no 550), so the heavier one. -->
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBox.rename">
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Padding" Value="4,0" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Border.badge">
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="5,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvAccentSoft}" />
+    </Style>
+    <Style Selector="Border.badge > TextBlock">
+      <Setter Property="FontSize" Value="9.5" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.5" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvAccent}" />
+    </Style>
+    <Style Selector="Border.badge.mute">
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+    </Style>
+    <Style Selector="Border.badge.mute > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+
+    <Style Selector="ComboBox#AppearanceBox">
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="{DynamicResource YamvPageBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+    </Style>
+  </Window.Styles>
+
+  <Window.Resources>
+    <DataTemplate x:Key="ThemeRow" x:DataType="vm:ThemeRowViewModel">
+      <Panel
+        Classes="row"
+        Classes.selected="{Binding IsSelected}"
+        Classes.bad="{Binding !IsValid}"
+        PointerPressed="OnRowPressed"
+        AutomationProperties.Name="{Binding Name}"
+      >
+        <Panel.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Rename" IsEnabled="{Binding CanRename}" Click="OnRenameClick" />
+            <MenuItem Header="Delete" IsEnabled="{Binding CanDelete}" Click="OnDeleteClick" />
+          </ContextMenu>
+        </Panel.ContextMenu>
+        <Border Classes="fill" />
+        <Border
+          Width="3"
+          Margin="0,6"
+          CornerRadius="2"
+          HorizontalAlignment="Left"
+          Background="{DynamicResource YamvAccent}"
+          IsVisible="{Binding IsSelected}"
+        />
+        <DockPanel Margin="8,0">
+          <!-- The 22 x 14 chip with a 1 px ring outside it, as the mock's box-shadow; negative margins keep the ring out of the layout. -->
+          <Border
+            DockPanel.Dock="Left"
+            Margin="-1,-1,7,-1"
+            VerticalAlignment="Center"
+            CornerRadius="4"
+            BorderBrush="{DynamicResource YamvLine}"
+            BorderThickness="1"
+          >
+            <Border Width="22" Height="14" CornerRadius="3" ClipToBounds="True">
+              <Panel>
+                <Grid ColumnDefinitions="*,*" IsVisible="{Binding IsValid}">
+                  <Panel Grid.Column="0">
+                    <Panel.Background>
+                      <SolidColorBrush Color="{Binding LightBackground}" />
+                    </Panel.Background>
+                    <Border Height="2" Margin="2,0,2,1" CornerRadius="1" VerticalAlignment="Bottom">
+                      <Border.Background>
+                        <SolidColorBrush Color="{Binding LightAccent}" />
+                      </Border.Background>
+                    </Border>
+                  </Panel>
+                  <Panel Grid.Column="1">
+                    <Panel.Background>
+                      <SolidColorBrush Color="{Binding DarkBackground}" />
+                    </Panel.Background>
+                    <Border Height="2" Margin="2,0,2,1" CornerRadius="1" VerticalAlignment="Bottom">
+                      <Border.Background>
+                        <SolidColorBrush Color="{Binding DarkAccent}" />
+                      </Border.Background>
+                    </Border>
+                  </Panel>
+                </Grid>
+                <Path
+                  IsVisible="{Binding !IsValid}"
+                  Data="M-4,4 L4,-4 M-4,8 L8,-4 M-4,12 L12,-4 M0,12 L16,-4 M4,12 L20,-4 M8,12 L24,-4 M12,12 L24,0 M16,12 L24,4 M20,12 L24,8"
+                  Stroke="{DynamicResource YamvLine}"
+                  StrokeThickness="1"
+                />
+              </Panel>
+            </Border>
+          </Border>
+          <Panel DockPanel.Dock="Right" Background="Transparent" IsVisible="{Binding !IsValid}" ToolTip.Tip="This theme didn't load">
+            <Viewbox Width="14" Height="14">
+              <Canvas Width="16" Height="16">
+                <Path Data="M8,1.6 L15,14 L1,14 Z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
+                <Path Data="M8,6 L8,10" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
+              </Canvas>
+            </Viewbox>
+          </Panel>
+          <Panel>
+            <TextBlock Classes="name" Text="{Binding Name}" IsVisible="{Binding !IsRenaming}" />
+            <TextBox
+              Classes="rename"
+              Text="{Binding RenameText}"
+              IsVisible="{Binding IsRenaming}"
+              KeyDown="OnRenameKeyDown"
+              LostFocus="OnRenameLostFocus"
+            />
+          </Panel>
+        </DockPanel>
+      </Panel>
+    </DataTemplate>
+  </Window.Resources>
+
+  <Panel>
+    <DockPanel x:Name="WindowContent">
+      <Border
+        x:Name="TitleBar"
+        DockPanel.Dock="Top"
+        Height="38"
+        Background="{DynamicResource YamvChromeBackground}"
+        BorderBrush="{DynamicResource YamvLine}"
+        BorderThickness="0,0,0,1"
+        chrome:WindowDecorationProperties.ElementRole="TitleBar"
+      >
+        <StackPanel x:Name="TitleText" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0" IsHitTestVisible="False">
+          <TextBlock Text="Themes" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource YamvText}" Margin="0,0,10,0" />
+          <TextBlock
+            x:Name="TitleDetail"
+            Text="{Binding TitleDetail}"
+            FontSize="12.5"
+            FontWeight="Medium"
+            Foreground="{DynamicResource YamvTextMuted}"
+          />
+          <TextBlock
+            x:Name="DirtyDot"
+            Text="●"
+            FontSize="10"
+            Margin="6,0,0,0"
+            VerticalAlignment="Center"
+            Foreground="{DynamicResource YamvAccent}"
+            IsVisible="{Binding IsDirty}"
+          />
+        </StackPanel>
+      </Border>
+
+      <Border
+        x:Name="Footer"
+        DockPanel.Dock="Bottom"
+        Height="52"
+        Padding="16,0"
+        Background="{DynamicResource YamvChromeBackground}"
+        BorderBrush="{DynamicResource YamvLine}"
+        BorderThickness="0,1,0,0"
+      >
+        <DockPanel VerticalAlignment="Center">
+          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="ImportButton" Classes="btn" Content="Import…" IsEnabled="False" />
+            <Button x:Name="ExportButton" Classes="btn" Content="Export…" IsEnabled="False" />
+            <Button x:Name="EditAsTextButton" Classes="btn" Content="Edit as text" Command="{Binding EditAsTextCommand}" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Button x:Name="RevertButton" Classes="btn" Content="Revert" Command="{Binding RevertCommand}" />
+            <Button x:Name="SaveButton" Classes="btn primary" Content="Save" Command="{Binding SaveCommand}" IsVisible="{Binding !IsBuiltIn}" />
+            <Button
+              x:Name="DuplicateButton"
+              Classes="btn primary"
+              Content="Duplicate to edit"
+              Command="{Binding DuplicateToEditCommand}"
+              IsVisible="{Binding IsBuiltIn}"
+            />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <Grid x:Name="Body" ColumnDefinitions="190,350,*">
+        <Border
+          Grid.Column="0"
+          x:Name="ThemeList"
+          Padding="8,12"
+          Background="{DynamicResource YamvSidebarBackground}"
+          BorderBrush="{DynamicResource YamvLine}"
+          BorderThickness="0,0,1,0"
+        >
+          <DockPanel>
+            <Border DockPanel.Dock="Bottom" Padding="8,10,8,2" BorderBrush="{DynamicResource YamvLine}" BorderThickness="0,1,0,0">
+              <StackPanel>
+                <TextBlock Text="Appearance" FontSize="11.5" Foreground="{DynamicResource YamvTextMuted}" Margin="0,0,0,5" />
+                <ComboBox
+                  x:Name="AppearanceBox"
+                  HorizontalAlignment="Stretch"
+                  ItemsSource="{x:Static vm:ThemeSettingsViewModel.Appearances}"
+                  SelectedItem="{Binding SelectedAppearance}"
+                  AutomationProperties.Name="Appearance"
+                >
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:AppearanceChoice">
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </StackPanel>
+            </Border>
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+              <StackPanel>
+                <TextBlock Classes="section" Text="BUILT-IN" />
+                <ItemsControl x:Name="BuiltInList" ItemsSource="{Binding BuiltInRows}" ItemTemplate="{StaticResource ThemeRow}" />
+                <TextBlock Classes="section" Text="YOURS" Margin="8,16,8,6" />
+                <ItemsControl x:Name="UserList" ItemsSource="{Binding UserRows}" ItemTemplate="{StaticResource ThemeRow}" />
+              </StackPanel>
+            </ScrollViewer>
+          </DockPanel>
+        </Border>
+
+        <Border
+          Grid.Column="1"
+          x:Name="TokenPane"
+          Background="{DynamicResource YamvPageBackground}"
+          BorderBrush="{DynamicResource YamvLine}"
+          BorderThickness="0,0,1,0"
+        >
+          <DockPanel>
+            <Border x:Name="Header" DockPanel.Dock="Top" Padding="16,14,16,10" BorderBrush="{DynamicResource YamvLine}" BorderThickness="0,0,0,1">
+              <StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock
+                    x:Name="HeaderName"
+                    Text="{Binding SelectedName}"
+                    FontSize="15"
+                    FontWeight="SemiBold"
+                    Foreground="{DynamicResource YamvHeading}"
+                  />
+                  <Border Classes="badge" Classes.mute="{Binding IsBuiltIn}">
+                    <TextBlock Text="{Binding Badge}" />
+                  </Border>
+                </StackPanel>
+                <TextBlock
+                  x:Name="HeaderDescription"
+                  Text="{Binding Description}"
+                  Margin="0,3,0,10"
+                  FontSize="11.5"
+                  Foreground="{DynamicResource YamvTextMuted}"
+                  TextTrimming="CharacterEllipsis"
+                />
+                <DockPanel x:Name="LockNote" Margin="0,8,0,0" IsVisible="{Binding IsBuiltIn}">
+                  <Canvas DockPanel.Dock="Left" Width="13" Height="13" Margin="0,1,7,0" VerticalAlignment="Top">
+                    <Canvas.RenderTransform>
+                      <ScaleTransform ScaleX="0.8125" ScaleY="0.8125" />
+                    </Canvas.RenderTransform>
+                    <Rectangle
+                      Canvas.Left="3"
+                      Canvas.Top="7"
+                      Width="10"
+                      Height="7"
+                      RadiusX="1.5"
+                      RadiusY="1.5"
+                      Stroke="{DynamicResource YamvTextMuted}"
+                      StrokeThickness="1.4"
+                    />
+                    <Path Data="M5.5,7 V5 A2.5,2.5 0 0 1 10.5,5 V7" Stroke="{DynamicResource YamvTextMuted}" StrokeThickness="1.4" />
+                  </Canvas>
+                  <TextBlock
+                    Text="Built-in themes are read-only. Duplicate this one to edit a copy in Yours."
+                    FontSize="11.5"
+                    LineHeight="16"
+                    TextWrapping="Wrap"
+                    Foreground="{DynamicResource YamvTextSecondary}"
+                  />
+                </DockPanel>
+                <TextBlock
+                  x:Name="ErrorLineText"
+                  Text="{Binding ErrorLine}"
+                  IsVisible="{Binding ErrorLine, Converter={x:Static ObjectConverters.IsNotNull}}"
+                  Margin="0,8,0,0"
+                  FontSize="11.5"
+                  TextWrapping="Wrap"
+                  Foreground="{DynamicResource YamvWarning}"
+                />
+              </StackPanel>
+            </Border>
+            <Panel>
+              <ContentControl x:Name="EditorHost" IsVisible="{Binding ShowsEditor}" />
+              <StackPanel x:Name="InvalidPane" Margin="18,22" IsVisible="{Binding IsInvalid}">
+                <Border
+                  Padding="14,12"
+                  CornerRadius="8"
+                  BorderThickness="1"
+                  BorderBrush="{DynamicResource YamvWarningLine}"
+                  Background="{DynamicResource YamvWarningBackground}"
+                >
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                      <Viewbox Width="14" Height="14">
+                        <Canvas Width="16" Height="16">
+                          <Path Data="M8,1.6 L15,14 L1,14 Z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
+                          <Path Data="M8,6 L8,10" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                          <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
+                        </Canvas>
+                      </Viewbox>
+                      <TextBlock Text="This theme didn't load" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource YamvText}" />
+                    </StackPanel>
+                    <ItemsControl x:Name="ErrorList" ItemsSource="{Binding Errors}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <DockPanel Margin="0,0,0,6">
+                            <TextBlock DockPanel.Dock="Left" Text="•" Width="12" FontSize="12" Foreground="{DynamicResource YamvTextSecondary}" />
+                            <TextBlock
+                              Text="{Binding}"
+                              FontFamily="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace"
+                              FontSize="11"
+                              LineHeight="16"
+                              TextWrapping="Wrap"
+                              Foreground="{DynamicResource YamvTextSecondary}"
+                            />
+                          </DockPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+                <TextBlock
+                  Text="{Binding InvalidNote}"
+                  Margin="0,12,0,14"
+                  FontSize="12"
+                  LineHeight="18"
+                  TextWrapping="Wrap"
+                  Foreground="{DynamicResource YamvTextMuted}"
+                />
+                <Button
+                  x:Name="InvalidEditAsTextButton"
+                  Classes="btn primary"
+                  Content="Edit as text"
+                  HorizontalAlignment="Left"
+                  Command="{Binding EditAsTextCommand}"
+                />
+              </StackPanel>
+            </Panel>
+          </DockPanel>
+        </Border>
+
+        <Panel Grid.Column="2" x:Name="PreviewPane" Background="{DynamicResource YamvPageBackground}">
+          <ContentControl x:Name="PreviewHost" IsVisible="{Binding ShowsEditor}" />
+          <Border x:Name="NoPreview" Background="{DynamicResource YamvChromeBackground}" IsVisible="{Binding IsInvalid}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Rectangle
+                Width="44"
+                Height="44"
+                Margin="0,0,0,12"
+                RadiusX="12"
+                RadiusY="12"
+                Opacity="0.6"
+                Stroke="{DynamicResource YamvTextMuted}"
+                StrokeThickness="1.5"
+                StrokeDashArray="3,2"
+              />
+              <TextBlock Text="No preview" HorizontalAlignment="Center" FontSize="12.5" Foreground="{DynamicResource YamvTextMuted}" />
+              <TextBlock Text="until the theme loads." HorizontalAlignment="Center" FontSize="12.5" Foreground="{DynamicResource YamvTextMuted}" />
+            </StackPanel>
+          </Border>
+        </Panel>
+      </Grid>
+    </DockPanel>
+
+    <ts:ConfirmDialog x:Name="Confirm" />
+  </Panel>
+</Window>
