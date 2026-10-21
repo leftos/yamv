@@ -90,7 +90,7 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
   - Rows show a close button on hover.
   - Context menu: Reveal in Explorer/Finder, Copy path, Close, Close group.
   - The title follows the chosen chrome.
-  - The theme follows the OS, with a manual override in the View menu.
+  - The theme follows the OS, with a manual override in the theme settings window (YAMV-11).
   - MVVM uses CommunityToolkit.Mvvm (source generators; the dependency is justified because it is Avalonia's default template choice and avoids hand-written INotifyPropertyChanged). One `DocumentWindowViewModel` serves both modes, with a `Persist` flag that is true only for main.
 
 ## Step 5 — Launch modes
@@ -98,7 +98,7 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
 - `Program.Main`:
   - `Register`/`Unregister` → registry work, then exit.
   - `Viewer(files)` → a window with `Persist = false`; the sidebar is visible only when the window holds 2+ files.
-  - `Main` → the coordinator; if not main, signal and exit; else restore the session (missing files handled per Step 2) and handle `ActivateRequested` (restore, un-minimize, bring to front).
+  - `Main` → the coordinator; if not main, signal and exit; else restore the session (missing files handled per Step 2). A second launch brings the main window forward as `docs/ARCHITECTURE.md` describes (`SecondLaunch`, the pid file, `AllowSetForegroundWindow`).
 - macOS: handle `IActivatableLifetime` file activation by opening a viewer window in the running process.
   - Cold start from a Finder double-click: hold main-window creation until launch-time file events have arrived, so that a Finder-opened file starts only a viewer window, and Dock/no-file launches start the main window.
   - Dock-icon reopen with no windows shows the main window.
@@ -106,13 +106,10 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
 
 ## Step 6 — Extras
 
-- **Live reload**: a `FileSystemWatcher` per open file's directory, filtered to open files, debounced about 150 ms. It handles editors that save by write-temp-then-rename. The doc re-renders at the same scroll; a deleted file shows the missing state.
+- **Live reload**: a `FileSystemWatcher` per open file's directory, filtered to open files, with a trailing 150 ms debounce and a 1 s maximum wait (YAMV-9 ruling). It handles editors that save by write-temp-then-rename. The doc re-renders at the same scroll; a deleted file shows the missing state.
 - **Find**: Ctrl/Cmd+F opens the find bar from the mock. JS wraps matches in `<mark>`, Enter / Shift+Enter step through them, the bar shows a match count, and Esc clears.
 - **Drag-drop and File > Open** (multi-select, `.md`/`.markdown`/`.mdx`/`.txt`): add to the current window; only the main window persists.
-- **Links**:
-  - `http(s)`/`mailto` → `Launcher` (OS browser);
-  - a relative or absolute local `.md` → opened in this window and added to its tree, with a `#fragment` scrolled to;
-  - other local files → the OS default app.
+- **Links**: decided by Core's link policy under the rulings on YAMV-9: `http(s)`/`mailto` → the OS browser; a local document type (`.md .markdown .mdx .txt`) → opened in this window and added to its tree, with a `#fragment` scrolled to, missing or outside the group root included; another local file inside the group root (checked after resolving links) → the OS default app, at once for the viewable-type allowlist and after a confirm otherwise; everything else is ignored.
 
 ## Step 7 — Windows registration (`--register` / `--unregister`)
 
