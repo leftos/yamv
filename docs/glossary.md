@@ -1,6 +1,7 @@
 # Glossary
 
 - **Activation gate**: holds an `activate` request that arrives before the main window exists and delivers it once the window is shown, coalescing duplicates.
+- **App default**: the content width a document uses when no folder at or above it has its own width; set from the popover's All documents segment ([content-width.md](design/content-width.md)).
 - **Appearance**: Match system, Light or Dark — which variant of the current theme family is shown.
 - **Asset cache**: the versioned folder under the local app-data dir (`YAMV/web/{assembly version id}/`) that the document page's template, CSS, JS, fonts and vendored libraries are extracted to, so the page loads over `file://`.
 - **Chrome**: the app's own UI around the document (title bar, sidebar tree, dialogs), drawn with Avalonia from the theme's chrome tokens, as opposed to the document page.

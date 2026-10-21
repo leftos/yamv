@@ -11,7 +11,7 @@ How wide the document's text column is. It is a viewer setting and not part of t
 
 ## Where a width comes from
 
-- Any folder can hold a width. A document uses the width of the nearest folder at or above its own folder that has one. If no folder has one, it uses the app default.
+- Any folder can hold a width. A document uses the width of the nearest folder at or above its own folder that has one. If no folder has one, it uses the app default. The walk up ends at the file-system root; the group root does not bound it, and bounds only **Clear all overrides here**.
 - Folder paths are compared with the platform's path comparison (`AppPaths.PathComparison`).
 - The widths are saved in `<data dir>/widths.json` (beside `session.json`): `{ "default": 800 | "full", "folders": { "<full folder path>": 760 | "full" } }`, written atomically.
 - Main and viewer instances both read the file and write to it. Width is a preference, not session state. A change made in one instance reaches the other instances when they next render a document (each re-reads the file when it changes).
@@ -26,5 +26,5 @@ How wide the document's text column is. It is a viewer setting and not part of t
   - **Clear all overrides here**, which removes every folder width at or below the group root.
 - When the popover opens, the selected segment is the source of the current width: the folder it is inherited from, or All documents. Moving the slider therefore edits that source. Picking a narrower segment first creates an override there.
 - The selected segment's source is shown as "Inherited from `<folder>`" when it differs from the selected segment.
-- **Ctrl+[** / **Ctrl+]** (Cmd on macOS) step the current source's width by 40 px. Stepping past the pane width becomes Full, and stepping down from Full goes to the largest 40 px step below the pane width.
+- **Ctrl+[** / **Ctrl+]** (Cmd on macOS) step the current source's width on a 40 px grid that starts at 480. From a width off the grid, one press snaps to the next grid value (from 763 px, up goes to 800 and down to 760); from a grid value it moves by 40. Stepping down stops at 480. Stepping past the pane width becomes Full, and stepping down from Full goes to the largest grid value below the pane width.
 - The page applies the width with no reload: the host sets `--yamv-content-width` (a px value, or `none` for Full) on the page.
