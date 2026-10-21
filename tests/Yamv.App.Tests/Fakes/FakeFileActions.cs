@@ -4,7 +4,7 @@ using Yamv.Core.Platform;
 
 namespace Yamv.App.Tests.Fakes;
 
-/// <summary>An <see cref="IFileActions"/> that answers picks with set paths and records reveals and copies.</summary>
+/// <summary>An <see cref="IFileActions"/> that answers picks with set paths and records reveals, opens and copies.</summary>
 internal sealed class FakeFileActions : IFileActions
 {
     /// <summary>What the next Open files pick returns; empty is a cancelled pick.</summary>
@@ -34,6 +34,9 @@ internal sealed class FakeFileActions : IFileActions
     /// <summary>Every reveal asked for, oldest first.</summary>
     public List<(string Path, RevealKind Kind)> Reveals { get; } = [];
 
+    /// <summary>Every path opened in its default app, oldest first.</summary>
+    public List<string> Opened { get; } = [];
+
     /// <summary>Every text copied, oldest first.</summary>
     public List<string> Copied { get; } = [];
 
@@ -62,6 +65,8 @@ internal sealed class FakeFileActions : IFileActions
     }
 
     public void Reveal(string path, RevealKind kind) => Reveals.Add((path, kind));
+
+    public void OpenWithDefaultApp(string path) => Opened.Add(path);
 
     public Task CopyTextAsync(TopLevel owner, string text)
     {

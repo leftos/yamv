@@ -6,6 +6,7 @@
 - **Asset cache**: the versioned folder under the local app-data dir (`YAMV/web/{assembly version id}/`) that the document page's template, CSS, JS, fonts and vendored libraries are extracted to, so the page loads over `file://`.
 - **Chrome**: the app's own UI around the document (title bar, sidebar tree, dialogs), drawn with Avalonia from the theme's chrome tokens, as opposed to the document page.
 - **Document surface**: what the window logic sees of the document page (`IDocumentSurface`, implemented by `DocumentView`); tests substitute a fake.
+- **Edit as text**: opening a user theme's `.json` file in the app the system associates with it (`IFileActions.OpenWithDefaultApp`, built by `OpenFileCommand`).
 - **Grace period**: the 300 ms after framework initialization on macOS during which launch-time file opens may arrive, before the main window is created.
 - **Group**: a top-level node of the sidebar tree, one per group root: a git repo or a folder.
 - **Group root**: the folder a document is grouped under in the tree: its git work-tree root, or its parent folder when it is not in a repo.

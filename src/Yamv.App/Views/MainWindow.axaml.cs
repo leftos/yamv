@@ -64,7 +64,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _surface = surface;
         _log = log;
-        FileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess);
+        FileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
         DocumentHost.Content = documentView;
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;

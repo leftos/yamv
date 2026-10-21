@@ -21,13 +21,20 @@ public static class ThemeFileTypes
 }
 
 /// <summary>
-/// The platform's file actions: the window's storage provider for the pickers, Explorer or Finder for reveal, and the window's
-/// clipboard. Failures it can meet (no local path, no clipboard, a file manager that will not start) are logged as warnings.
+/// The platform's file actions: the window's storage provider for the pickers, Explorer or Finder for reveal, the app the
+/// system associates with a file for opening it, and the window's clipboard. Failures it can meet (no local path, no
+/// clipboard, an app that will not start) are logged as warnings.
 /// </summary>
 /// <param name="log">Where warnings go.</param>
-/// <param name="startProcess">Starts a process; <see cref="StartProcess"/> outside tests.</param>
-internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> startProcess) : IFileActions
+/// <param name="startProcess">Starts a process and lets it run on its own; <see cref="StartProcess"/> outside tests.</param>
+/// <param name="seams">The platform and the way a process is waited for; <see cref="FileActionSeams.Default"/> outside tests.</param>
+internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> startProcess, FileActionSeams seams) : IFileActions
 {
+    /// <summary>The longest <c>open</c> is waited for; it hands the file off and returns well before this.</summary>
+    private static readonly TimeSpan MacOpenTimeout = TimeSpan.FromSeconds(2);
+
+    private const string JsonExtension = ".json";
+
     /// <summary>The document pickers' filters, in the order the picker lists them, built from <see cref="DocumentFileTypes"/>.</summary>
     private static readonly IReadOnlyList<FilePickerFileType> DocumentFilters =
     [
@@ -113,7 +120,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> 
     public void Reveal(string path, RevealKind kind)
     {
         ArgumentNullException.ThrowIfNull(path);
-        if (RevealCommand.For(path, kind, OperatingSystem.IsMacOS()) is not { } command)
+        if (RevealCommand.For(path, kind, seams.Platform == FilePlatform.MacOS) is not { } command)
         {
             log.LogWarning($"Reveal: no folder of {path} exists.");
             return;
@@ -138,6 +145,81 @@ internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> 
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
             log.LogWarning($"Reveal: could not start {command.Program} for {path}.", exception);
+        }
+    }
+
+    public void OpenWithDefaultApp(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (!Path.IsPathFullyQualified(path))
+        {
+            throw new ArgumentException($"Only a fully qualified path can be opened: {path}", nameof(path));
+        }
+
+        if (!string.Equals(Path.GetExtension(path), JsonExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"Only a .json file can be opened as text: {path}", nameof(path));
+        }
+
+        FilePlatform platform = seams.Platform;
+        if (platform == FilePlatform.Other)
+        {
+            throw new PlatformNotSupportedException($"Opening {path} in its default app is not supported on this platform.");
+        }
+
+        var command = OpenFileCommand.For(path, platform == FilePlatform.MacOS);
+        var start = new ProcessStartInfo(command.Program) { UseShellExecute = command.UseShellExecute };
+        foreach (string argument in command.ArgumentList)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        if (platform == FilePlatform.Windows)
+        {
+            StartOnWindows(start, path);
+            return;
+        }
+
+        RunOpen(start, path);
+    }
+
+    /// <summary>Starts the shell open, whose failure is the window's: no app is associated with the file.</summary>
+    /// <param name="start">The shell open to start.</param>
+    /// <param name="path">The file being opened, named in the message.</param>
+    /// <exception cref="IOException">The shell refused to start.</exception>
+    private void StartOnWindows(ProcessStartInfo start, string path)
+    {
+        try
+        {
+            startProcess(start);
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        {
+            log.LogWarning($"Edit as text: could not open {path}.", exception);
+            throw new IOException($"Could not open {path} in its default app.", exception);
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>open</c> and reads what it said: it returns once the hand-off is done, so a non-zero exit means no app took
+    /// the file. A run that outlives the wait is logged and left alone, since the file may still open.
+    /// </summary>
+    /// <param name="start">The <c>open</c> to run.</param>
+    /// <param name="path">The file being opened, named in the messages.</param>
+    /// <exception cref="IOException"><c>open</c> reported no app would take the file.</exception>
+    private void RunOpen(ProcessStartInfo start, string path)
+    {
+        ProcessOutcome outcome = seams.Run(start, MacOpenTimeout);
+        if (outcome.TimedOut)
+        {
+            log.LogWarning($"Edit as text: open did not finish within {MacOpenTimeout.TotalSeconds:0} s for {path}.");
+            return;
+        }
+
+        if (outcome.ExitCode != 0)
+        {
+            log.LogWarning($"Edit as text: open exited {outcome.ExitCode} for {path}: {outcome.StandardError.Trim()}");
+            throw new IOException($"Could not open {path} in its default app: {outcome.StandardError.Trim()}");
         }
     }
 
@@ -176,7 +258,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> 
     }
 }
 
-/// <summary>The file work a document window hands to the platform: the pickers, revealing a path and copying text.</summary>
+/// <summary>The file work a document window hands to the platform: the pickers, revealing a path, opening a file and copying text.</summary>
 internal interface IFileActions
 {
     /// <summary>Asks the user for documents to open; empty when the pick was cancelled.</summary>
@@ -202,8 +284,63 @@ internal interface IFileActions
     /// <param name="kind">Whether <paramref name="path"/> is a file or a folder.</param>
     void Reveal(string path, RevealKind kind);
 
+    /// <summary>Opens <paramref name="path"/> in whatever app the system associates with it.</summary>
+    /// <param name="path">The file to open.</param>
+    /// <exception cref="IOException">No app would open the file.</exception>
+    void OpenWithDefaultApp(string path);
+
     /// <summary>Puts <paramref name="text"/> on the clipboard.</summary>
     /// <param name="owner">The window whose clipboard is used.</param>
     /// <param name="text">The text to copy.</param>
     Task CopyTextAsync(TopLevel owner, string text);
+}
+
+/// <summary>The desktops YAMV's file actions tell apart.</summary>
+internal enum FilePlatform
+{
+    /// <summary>Windows: Explorer, and the shell opening a file by its association.</summary>
+    Windows,
+
+    /// <summary>macOS: Finder, and <c>/usr/bin/open</c>.</summary>
+    MacOS,
+
+    /// <summary>Anything else, where neither reveal nor open is known.</summary>
+    Other,
+}
+
+/// <summary>What a process said when it was run and waited for.</summary>
+/// <param name="TimedOut">Whether it was still running when the wait ended.</param>
+/// <param name="ExitCode">The code it exited with; it means nothing when <paramref name="TimedOut"/> is true.</param>
+/// <param name="StandardError">What it wrote to its error stream.</param>
+internal sealed record ProcessOutcome(bool TimedOut, int ExitCode, string StandardError);
+
+/// <summary>The two things a test replaces: the platform the actions run on, and the way a process is run and waited for.</summary>
+/// <param name="Platform">The desktop the actions run on.</param>
+/// <param name="Run">Starts a process, waits up to the timeout for it, and reports what it said.</param>
+internal sealed record FileActionSeams(FilePlatform Platform, Func<ProcessStartInfo, TimeSpan, ProcessOutcome> Run)
+{
+    /// <summary>This machine's desktop, and a real process run and waited for.</summary>
+    public static FileActionSeams Default { get; } = new(ThisPlatform, RunProcess);
+
+    private static FilePlatform ThisPlatform =>
+        OperatingSystem.IsWindows() ? FilePlatform.Windows
+        : OperatingSystem.IsMacOS() ? FilePlatform.MacOS
+        : FilePlatform.Other;
+
+    /// <summary>Starts the process, waits up to <paramref name="timeout"/> for it, and reads its error stream when it exits.</summary>
+    /// <param name="start">The process to run.</param>
+    /// <param name="timeout">How long to wait before leaving it running.</param>
+    /// <returns>Its code and error stream, or that it outlived the wait.</returns>
+    private static ProcessOutcome RunProcess(ProcessStartInfo start, TimeSpan timeout)
+    {
+        start.UseShellExecute = false;
+        start.RedirectStandardError = true;
+        using Process process = Process.Start(start) ?? throw new InvalidOperationException($"Could not start {start.FileName}.");
+        if (!process.WaitForExit(timeout))
+        {
+            return new ProcessOutcome(TimedOut: true, ExitCode: 0, StandardError: string.Empty);
+        }
+
+        return new ProcessOutcome(TimedOut: false, ExitCode: process.ExitCode, StandardError: process.StandardError.ReadToEnd());
+    }
 }

@@ -231,7 +231,7 @@ public partial class App : Application
         _harnessBridge = bridge;
         bridge.Apply(ThemeCatalog.DefaultThemeId, "system");
         ThemeSettingsWindow? window = null;
-        var fileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess);
+        var fileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
         string? importFile = Environment.GetEnvironmentVariable(ImportFileVariable) is { } given && !string.IsNullOrWhiteSpace(given) ? given : null;
         string? pendingImport = null;
         var seams = new ThemeSettingsSeams

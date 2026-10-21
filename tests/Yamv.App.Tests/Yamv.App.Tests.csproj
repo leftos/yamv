@@ -5,7 +5,8 @@
     <IsTestProject>true</IsTestProject>
     <!-- CA1707: xUnit test names use underscores (Method_State_Expected). -->
     <NoWarn>$(NoWarn);CA1707</NoWarn>
-    <!-- Desktop tests show a real window, so a plain run leaves them out; -p:DesktopTestFilter="..." replaces the filter. -->
+    <!-- Desktop tests show a real window or touch the owner's Recycle Bin or Trash, so a plain run leaves them out. -->
+    <!-- -p:DesktopTestFilter="..." replaces the filter. -->
     <DesktopTestFilter Condition="'$(DesktopTestFilter)' == ''">--filter-not-trait "Category=Desktop"</DesktopTestFilter>
     <TestingPlatformCommandLineArguments>$(TestingPlatformCommandLineArguments) $(DesktopTestFilter)</TestingPlatformCommandLineArguments>
   </PropertyGroup>

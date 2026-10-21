@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using Yamv.App.Services;
 using Yamv.App.Tests.Fakes;
@@ -45,7 +46,143 @@ public sealed class FileActionsTests
         }
     }
 
-    private AvaloniaFileActions Actions() => new(_log, _started.Add);
+    [Fact]
+    public void OpenWithDefaultApp_on_windows_shell_opens_the_file_itself()
+    {
+        string path = ThemePath();
+
+        WindowsActions().OpenWithDefaultApp(path);
+
+        ProcessStartInfo start = Assert.Single(_started);
+        Assert.True(start.UseShellExecute);
+        Assert.Equal(path, start.FileName);
+        Assert.Empty(start.ArgumentList);
+        Assert.Empty(_log.Entries);
+    }
+
+    [Fact]
+    public void OpenWithDefaultApp_on_mac_runs_open_with_the_path_as_one_argument()
+    {
+        string path = ThemePath();
+        List<ProcessStartInfo> runs = [];
+        var log = new RecordingAppLog();
+        AvaloniaFileActions actions = MacActions(
+            log,
+            (start, _) =>
+            {
+                runs.Add(start);
+                return new ProcessOutcome(false, 0, string.Empty);
+            }
+        );
+
+        actions.OpenWithDefaultApp(path);
+
+        ProcessStartInfo start = Assert.Single(runs);
+        Assert.Equal("/usr/bin/open", start.FileName);
+        Assert.Equal(path, Assert.Single(start.ArgumentList));
+        Assert.Empty(log.Entries);
+    }
+
+    [Fact]
+    public void OpenWithDefaultApp_on_mac_when_open_fails_logs_its_error_and_throws()
+    {
+        string path = ThemePath();
+        var log = new RecordingAppLog();
+        AvaloniaFileActions actions = MacActions(log, (_, _) => new ProcessOutcome(false, 1, "no application knows how to open"));
+
+        IOException failure = Assert.Throws<IOException>(() =>
+        {
+            actions.OpenWithDefaultApp(path);
+        });
+
+        Assert.Contains("no application knows how to open", failure.Message, StringComparison.Ordinal);
+        LogEntry entry = Assert.Single(log.Entries);
+        Assert.Equal("warning", entry.Level);
+        Assert.Contains("no application knows how to open", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpenWithDefaultApp_on_mac_when_open_outlives_the_wait_logs_and_does_not_throw()
+    {
+        string path = ThemePath();
+        var log = new RecordingAppLog();
+        AvaloniaFileActions actions = MacActions(log, (_, _) => new ProcessOutcome(true, 0, string.Empty));
+
+        actions.OpenWithDefaultApp(path);
+
+        LogEntry entry = Assert.Single(log.Entries);
+        Assert.Equal("warning", entry.Level);
+    }
+
+    [Fact]
+    public void OpenWithDefaultApp_on_an_unknown_platform_throws_platform_not_supported()
+    {
+        string path = ThemePath();
+        var seams = new FileActionSeams(FilePlatform.Other, (_, _) => new ProcessOutcome(false, 0, string.Empty));
+        var actions = new AvaloniaFileActions(_log, _started.Add, seams);
+
+        Assert.Throws<PlatformNotSupportedException>(() =>
+        {
+            actions.OpenWithDefaultApp(path);
+        });
+
+        Assert.Empty(_started);
+    }
+
+    [Theory]
+    [InlineData("a.yamv-theme.json")]
+    [InlineData("themes/a.yamv-theme.json")]
+    public void OpenWithDefaultApp_of_a_relative_path_throws_argument_exception(string path)
+    {
+        Assert.Throws<ArgumentException>(() =>
+        {
+            WindowsActions().OpenWithDefaultApp(path);
+        });
+
+        Assert.Empty(_started);
+    }
+
+    [Fact]
+    public void OpenWithDefaultApp_of_a_file_that_is_not_json_throws_argument_exception()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "yamv themes", "a.txt");
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            WindowsActions().OpenWithDefaultApp(path);
+        });
+
+        Assert.Empty(_started);
+    }
+
+    [Fact]
+    public void OpenWithDefaultApp_when_the_start_throws_logs_it_and_surfaces_the_failure()
+    {
+        string path = ThemePath();
+        var log = new RecordingAppLog();
+        var actions = new AvaloniaFileActions(log, _ => throw new Win32Exception(1155), WindowsSeams);
+
+        IOException failure = Assert.Throws<IOException>(() =>
+        {
+            actions.OpenWithDefaultApp(path);
+        });
+
+        Assert.Contains(path, failure.Message, StringComparison.Ordinal);
+        Assert.IsType<Win32Exception>(failure.InnerException);
+        LogEntry entry = Assert.Single(log.Entries);
+        Assert.Equal(("warning", $"Edit as text: could not open {path}."), (entry.Level, entry.Message));
+    }
+
+    private static FileActionSeams WindowsSeams { get; } = new(FilePlatform.Windows, (_, _) => new ProcessOutcome(false, 0, string.Empty));
+
+    private static string ThemePath() => Path.Combine(Path.GetTempPath(), "yamv themes", "a b.yamv-theme.json");
+
+    private AvaloniaFileActions Actions() => new(_log, _started.Add, FileActionSeams.Default);
+
+    private AvaloniaFileActions WindowsActions() => new(_log, _started.Add, WindowsSeams);
+
+    private static AvaloniaFileActions MacActions(RecordingAppLog log, Func<ProcessStartInfo, TimeSpan, ProcessOutcome> run) =>
+        new(log, _ => { }, new FileActionSeams(FilePlatform.MacOS, run));
 
     /// <summary>The root of a drive letter no volume is mounted on, Z: first.</summary>
     private static string MissingDriveRoot()
