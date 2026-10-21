@@ -10,6 +10,9 @@ namespace Yamv.App.Tests.ViewModels;
 public sealed class ContentWidthViewModelTests
 {
     private const double WidePane = 1600;
+
+    /// <summary>A pane whose text space is 712 px, narrower than the 800 px app default.</summary>
+    private const double NarrowPane = 800;
     private static readonly double WideTextSpace = ContentWidth.TextSpace(WidePane);
     private static readonly TimeSpan GateBackstop = TimeSpan.FromSeconds(30);
     private static readonly GroupingOptions Plain = new(null, StringComparison.OrdinalIgnoreCase);
@@ -968,12 +971,133 @@ public sealed class ContentWidthViewModelTests
             await fixture.ViewModel.WhenRendersSettled();
             ContentWidthViewModel popover = await fixture.CreateAsync(paneWidth);
 
-            popover.SliderPosition = 1;
+            // The default 800 px is wider than the 568 px pane's 480 px text space, so that enabled slider opens pinned at 1; a
+            // move to 0 is a drag there.
+            popover.SliderPosition = 0;
             await fixture.ViewModel.WhenRendersSettled();
 
             Assert.Equal(enabled, popover.IsSliderEnabled);
             Assert.Equal(enabled ? null : "The window is narrower than 480 px", popover.SliderCaption);
             Assert.Equal(enabled ? 1 : 0, fixture.Surface.ContentWidths.Count);
+        });
+
+    [Fact]
+    public Task A_stored_width_wider_than_the_window_shows_its_px_and_is_marked_wider() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(800)));
+
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, NarrowPane);
+
+            Assert.Equal(712, ContentWidth.TextSpace(NarrowPane));
+            Assert.Equal("800 px", popover.Readout);
+            Assert.True(popover.IsWiderThanWindow);
+            Assert.Equal(1, popover.SliderPosition);
+        });
+
+    [Fact]
+    public Task Opening_and_closing_with_a_wider_stored_width_writes_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(800)));
+            byte[] before = File.ReadAllBytes(fixture.WidthsFile);
+
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, NarrowPane);
+            popover.EndDrag();
+            popover.Close();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(before, File.ReadAllBytes(fixture.WidthsFile));
+            Assert.Empty(fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task Dragging_from_the_pinned_end_clears_the_mark_and_saves_as_today() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(800)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, NarrowPane);
+
+            popover.SliderPosition = 0.5;
+            Assert.False(popover.IsWiderThanWindow);
+            Assert.Equal("596 px", popover.Readout);
+            popover.SliderPosition = 1;
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal("Full", popover.Readout);
+            Assert.False(popover.IsWiderThanWindow);
+            Assert.True(fixture.Widths.Get(Docs)?.IsFull);
+        });
+
+    [Fact]
+    public Task Switching_to_a_segment_whose_width_fits_clears_the_mark() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(800)));
+            Assert.True(fixture.Widths.Set(Repo, ContentWidth.FromPx(600)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, NarrowPane);
+            Assert.True(popover.IsWiderThanWindow);
+
+            popover.SelectSegmentCommand.Execute(popover.Segments[1]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(Repo, popover.SelectedSegment?.Folder);
+            Assert.False(popover.IsWiderThanWindow);
+            Assert.Equal("600 px", popover.Readout);
+            Assert.Equal(ContentWidth.FromPx(600).ToSlider(ContentWidth.TextSpace(NarrowPane)), popover.SliderPosition, 6);
+        });
+
+    [Fact]
+    public Task A_wider_width_pins_an_enabled_slider_without_travel_at_its_end() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(800)));
+
+            // A 568 px pane leaves a 480 px text space: the slider is enabled but has no travel.
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, 568);
+
+            Assert.True(popover.IsSliderEnabled);
+            Assert.True(popover.IsWiderThanWindow);
+            Assert.Equal(1, popover.SliderPosition);
+        });
+
+    [Fact]
+    public Task Reset_re_evaluates_the_mark_for_the_inherited_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Repo, ContentWidth.FromPx(800)));
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(600)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, NarrowPane);
+            Assert.False(popover.IsWiderThanWindow);
+
+            popover.ResetCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Null(fixture.Widths.Get(Docs));
+            Assert.Equal("800 px", popover.Readout);
+            Assert.True(popover.IsWiderThanWindow);
+            Assert.Equal(1, popover.SliderPosition);
+        });
+
+    [Fact]
+    public Task A_width_equal_to_the_text_space_is_not_marked_wider() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(712)));
+
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, NarrowPane);
+
+            Assert.Equal("712 px", popover.Readout);
+            Assert.False(popover.IsWiderThanWindow);
+            Assert.Equal(1, popover.SliderPosition);
         });
 
     private static string P(params string[] parts) => Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", Path.Combine(parts));
@@ -1036,11 +1160,16 @@ public sealed class ContentWidthViewModelTests
         public DocumentWindowViewModel ViewModel { get; }
 
         /// <summary>Opens <paramref name="path"/>, waits for it to show, and creates its popover over a wide pane.</summary>
-        public async Task<ContentWidthViewModel> OpenAsync(string path)
+        public Task<ContentWidthViewModel> OpenAsync(string path) => OpenAsync(path, WidePane);
+
+        /// <summary>
+        /// Opens <paramref name="path"/>, waits for it to show, and creates its popover over a pane <paramref name="paneWidth"/> wide.
+        /// </summary>
+        public async Task<ContentWidthViewModel> OpenAsync(string path, double paneWidth)
         {
             ViewModel.Open([path]);
             await ViewModel.WhenRendersSettled();
-            return await CreateAsync();
+            return await CreateAsync(paneWidth);
         }
 
         /// <summary>

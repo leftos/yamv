@@ -6,6 +6,8 @@ How wide the document's text column is. It is a viewer setting and not part of t
 
 - A width is the text measure: a number of px from 480 up to the pane's width minus its 88 px of side padding, or **Full**. A stored 760 draws 760 px text lines inside the column's 44 px side paddings (an 848 px column box), and Full fills the pane minus those paddings.
 - The slider snaps to Full within the last 5% of its travel. The readout says `760 px` or `Full`.
+- A stored px width wider than the window's text space is shown as itself: the readout says `800 px` with a muted second line "wider than this window", and the knob is pinned at the right end as a dashed ring with a centre dot over a hatched cap on the last 14% of the track. Opening and closing the popover keeps the stored width; any drag or key clears the pin and works as above, so the end saves Full. The popover does not follow a window resize while it is open.
+- The popover's arrow and card cast one shadow together and share one 1 px `line` rim, with no seam where the arrow meets the card.
 - When the pane is narrower than a stored px width plus the side padding, the column is the pane width. The stored value is never changed by a window resize.
 - The app default starts at 800 px, which is also the page's fallback text measure when the host has set none.
 

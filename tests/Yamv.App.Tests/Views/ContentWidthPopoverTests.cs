@@ -5,6 +5,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Platform;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Microsoft.Extensions.Time.Testing;
@@ -453,6 +454,142 @@ public sealed class ContentWidthPopoverTests
 
             Assert.False(fixture.Popover.ClearAllLink.IsEffectivelyEnabled);
         });
+
+    [Fact]
+    public Task The_shadow_is_cast_by_the_arrow_and_the_card_together() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenPopoverAsync(fixture.DocA);
+            ContentWidthPopover view = fixture.Popover;
+
+            Visual[] casters = [.. view.Arrow.GetVisualAncestors().Where(visual => visual.Effect is DropShadowEffect)];
+            Assert.NotEmpty(casters);
+            Assert.All(casters, caster => Assert.Contains(caster, view.Card.GetVisualAncestors()));
+            Assert.Equal(0, view.Card.BoxShadow.Count);
+        });
+
+    [Fact]
+    public Task One_rim_outlines_the_arrow_and_the_card() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Window.Resources["YamvLine"] = Brushes.Orange;
+            await fixture.OpenPopoverAsync(fixture.DocA);
+            ContentWidthPopover view = fixture.Popover;
+
+            Assert.Same(Brushes.Orange, view.Rim.Stroke);
+            Assert.Equal(1, view.Rim.StrokeThickness);
+            AssertRimOutlines(view);
+        });
+
+    [Fact]
+    public Task The_rim_follows_the_card_when_it_grows() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.FromPx(700)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenPopoverAsync(fixture.DocA);
+            ContentWidthPopover view = fixture.Popover;
+            double before = view.Card.Bounds.Height;
+
+            fixture.ClickLink(view.ClearAllLink);
+            await fixture.SettleAsync();
+
+            Assert.True(view.Card.Bounds.Height > before, $"The card stayed {view.Card.Bounds.Height} px high.");
+            AssertRimOutlines(view);
+        });
+
+    [Fact]
+    public Task The_pinned_knob_grows_while_the_slider_has_keyboard_focus() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.FromPx(800)));
+            fixture.Window.Width = 900;
+            await fixture.OpenPopoverAsync(fixture.DocA);
+            ContentWidthPopover view = fixture.Popover;
+
+            Assert.Contains(":focus-visible", view.WidthSlider.Classes);
+            Assert.Contains("pinned", view.WidthSlider.Classes);
+            Assert.Equal(new Size(18, 18), SliderPart(view, "PinnedKnob").Bounds.Size);
+        });
+
+    [Fact]
+    public Task The_shadow_follows_the_theme() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenPopoverAsync(fixture.DocA);
+            ContentWidthPopover view = fixture.Popover;
+
+            fixture.Window.RequestedThemeVariant = ThemeVariant.Dark;
+            await fixture.SettleAsync();
+            AssertShadow(view.FarShadow, Colors.Black, 0.70, 10, 22);
+            AssertShadow(view.NearShadow, Colors.Black, 0.55, 1, 3);
+
+            fixture.Window.RequestedThemeVariant = ThemeVariant.Light;
+            await fixture.SettleAsync();
+            AssertShadow(view.FarShadow, Color.Parse("#1F2328"), 0.26, 10, 22);
+            AssertShadow(view.NearShadow, Color.Parse("#1F2328"), 0.16, 1, 3);
+        });
+
+    [Fact]
+    public Task The_pinned_knob_and_hatched_cap_show_only_while_wider() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.FromPx(800)));
+            fixture.Window.Width = 900;
+            ContentWidthViewModel popover = await fixture.OpenPopoverAsync(fixture.DocA);
+            ContentWidthPopover view = fixture.Popover;
+            Assert.True(view.WidthSlider.IsEffectivelyEnabled);
+
+            Assert.True(popover.IsWiderThanWindow);
+            Assert.Equal("800 px", view.Readout.Text);
+            Assert.True(view.WiderNote.IsEffectivelyVisible);
+            Assert.True(SliderPart(view, "PinnedKnob").IsEffectivelyVisible);
+            Assert.True(SliderPart(view, "PinnedCap").IsEffectivelyVisible);
+            Assert.Equal(0, SliderPart(view, "Thumb").Opacity);
+
+            fixture.PressInPopover(Key.Left, RawInputModifiers.None, PhysicalKey.ArrowLeft);
+            await fixture.SettleAsync();
+
+            Assert.False(popover.IsWiderThanWindow);
+            Assert.False(view.WiderNote.IsEffectivelyVisible);
+            Assert.False(SliderPart(view, "PinnedKnob").IsEffectivelyVisible);
+            Assert.False(SliderPart(view, "PinnedCap").IsEffectivelyVisible);
+            Assert.Equal(1, SliderPart(view, "Thumb").Opacity);
+            fixture.ReleaseInPopover(Key.Left, PhysicalKey.ArrowLeft);
+            await fixture.SettleAsync();
+        });
+
+    /// <summary>
+    /// Asserts the rim's geometry covers points 1 px inside the arrow's tip and the card's bottom corners; the rim's 1 px stroke
+    /// runs half a px inside the outline.
+    /// </summary>
+    private static void AssertRimOutlines(ContentWidthPopover view)
+    {
+        Rect outline = view.Rim.Data?.Bounds ?? throw new InvalidOperationException("The rim has no geometry.");
+        Size card = view.Card.Bounds.Size;
+        Point[] inside =
+        [
+            view.Arrow.TranslatePoint(new Point(view.Arrow.Bounds.Width / 2, 1), view.Rim)!.Value,
+            view.Card.TranslatePoint(new Point(1, card.Height - 1), view.Rim)!.Value,
+            view.Card.TranslatePoint(new Point(card.Width - 1, card.Height - 1), view.Rim)!.Value,
+        ];
+        Assert.All(inside, point => Assert.True(outline.Contains(point), $"The rim's bounds {outline} miss {point}."));
+    }
+
+    private static Control SliderPart(ContentWidthPopover view, string name) =>
+        view.WidthSlider.GetVisualDescendants().OfType<Control>().Single(control => control.Name == name);
+
+    private static void AssertShadow(Visual caster, Color color, double opacity, double offsetY, double blur)
+    {
+        DropShadowEffect shadow = Assert.IsType<DropShadowEffect>(caster.Effect);
+        Assert.Equal((color, opacity, 0d, offsetY, blur), (shadow.Color, shadow.Opacity, shadow.OffsetX, shadow.OffsetY, shadow.BlurRadius));
+    }
 
     /// <summary>A shown main window over a temp repo with <c>docs/a.md</c>, <c>docs/b.md</c> and <c>docs/plans/v1.md</c>, and a missing <c>docs/gone.md</c>.</summary>
     private sealed class Fixture : IAsyncDisposable

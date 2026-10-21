@@ -76,6 +76,14 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     public partial string Readout { get; private set; } = "";
 
     /// <summary>
+    /// True while the shown width is a stored px width wider than the pane's text space: the readout shows that width, and the
+    /// view draws the knob pinned at the slider's right end, where an enabled slider's position is 1. Moving the slider clears
+    /// it; showing a segment's width sets it again.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsWiderThanWindow { get; private set; }
+
+    /// <summary>
     /// Where the selected segment inherits its width from, shown as "Inherited from {folder}" under the segments: a folder's
     /// name, or All documents; null when the selected segment holds the width itself.
     /// </summary>
@@ -167,6 +175,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
             _ => throw new ArgumentOutOfRangeException(nameof(step), step, "Unknown slider step."),
         };
         _moved = true;
+        IsWiderThanWindow = false;
         if (width == _width)
         {
             return;
@@ -285,6 +294,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
 
         ContentWidth width = ContentWidth.FromSlider(value, _textSpace);
         _moved = true;
+        IsWiderThanWindow = false;
         if (width == _width)
         {
             return;
@@ -472,14 +482,20 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Moves the slider to <paramref name="width"/> without starting a drag. A px width wider than the text space is marked
+    /// <see cref="IsWiderThanWindow"/>, and an enabled slider is placed at its right end (1) for it; a disabled one stays where
+    /// <see cref="ContentWidth.ToSlider"/> puts it.
+    /// </summary>
     private void PlaceSlider(ContentWidth width)
     {
         _width = width;
         Readout = ReadoutOf(width);
+        IsWiderThanWindow = width.Px > _textSpace;
         _placingSlider = true;
         try
         {
-            SliderPosition = width.ToSlider(_textSpace);
+            SliderPosition = IsWiderThanWindow && IsSliderEnabled ? 1 : width.ToSlider(_textSpace);
         }
         finally
         {

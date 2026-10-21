@@ -61,6 +61,23 @@
                 </Thumb.Template>
               </Thumb>
             </Track>
+            <!-- While the stored width is wider than the window: a hatched cap on the track's last 14% and the knob pinned at the end. -->
+            <Grid Name="PinnedCap" Height="4" Margin="8,0" ColumnDefinitions="86*,14*" IsVisible="False" IsHitTestVisible="False">
+              <Border Grid.Column="1" CornerRadius="0,2,2,0" Background="{DynamicResource YamvLine}" ClipToBounds="True">
+                <Canvas>
+                  <Path Stroke="{DynamicResource YamvAccent}" StrokeThickness="2" Data="{x:Static views:ContentWidthPopover.PinnedHatch}" />
+                </Canvas>
+              </Border>
+            </Grid>
+            <Panel Name="PinnedKnob" Width="16" Height="16" HorizontalAlignment="Right" IsVisible="False" IsHitTestVisible="False">
+              <Ellipse
+                Fill="{DynamicResource YamvPageBackground}"
+                Stroke="{DynamicResource YamvAccent}"
+                StrokeThickness="2"
+                StrokeDashArray="1.5,1"
+              />
+              <Ellipse Width="6" Height="6" Fill="{DynamicResource YamvAccent}" />
+            </Panel>
           </Grid>
         </ControlTemplate>
       </Setter>
@@ -68,6 +85,19 @@
         <Setter Property="Opacity" Value="0.45" />
       </Style>
       <Style Selector="^:focus-visible /template/ Thumb#Thumb">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+      </Style>
+      <Style Selector="^.pinned /template/ Grid#PinnedCap">
+        <Setter Property="IsVisible" Value="True" />
+      </Style>
+      <Style Selector="^.pinned /template/ Panel#PinnedKnob">
+        <Setter Property="IsVisible" Value="True" />
+      </Style>
+      <Style Selector="^.pinned /template/ Thumb#Thumb">
+        <Setter Property="Opacity" Value="0" />
+      </Style>
+      <Style Selector="^.pinned:focus-visible /template/ Panel#PinnedKnob">
         <Setter Property="Width" Value="18" />
         <Setter Property="Height" Value="18" />
       </Style>
@@ -136,132 +166,144 @@
     </Style>
   </UserControl.Styles>
 
-  <!-- The transparent margin around the card holds its shadow; the arrow points up at the ⟷ button. -->
-  <StackPanel Margin="12,0,12,20">
-    <Path
-      x:Name="Arrow"
-      Data="M0,7 L7,0 L14,7 Z"
-      Width="14"
-      Height="7"
-      HorizontalAlignment="Right"
-      Margin="0,0,7,0"
-      Fill="{DynamicResource YamvPageBackground}"
-    />
-    <Border x:Name="Card" Width="300" Background="{DynamicResource YamvPageBackground}" CornerRadius="8" Padding="14,14,14,12">
+  <!--
+    The transparent margin around the card holds its shadow; the arrow points up at the ⟷ button. The arrow and the card cast
+    one shadow together (a far and a near one, set per theme in code) and one 1 px rim, built in code, outlines them both.
+  -->
+  <Panel x:Name="NearShadow" Margin="12,0,12,20">
+    <Panel x:Name="FarShadow">
       <StackPanel>
-        <DockPanel>
-          <TextBlock
-            x:Name="Readout"
-            DockPanel.Dock="Right"
-            Text="{Binding Readout}"
-            FontSize="13"
-            FontWeight="SemiBold"
-            FontFeatures="+tnum"
-            Foreground="{DynamicResource YamvAccent}"
-          />
-          <TextBlock Text="Content width" FontSize="13" FontWeight="SemiBold" />
-        </DockPanel>
-        <Slider
-          x:Name="WidthSlider"
-          Theme="{StaticResource WidthSliderTheme}"
-          Margin="0,9,0,2"
-          Value="{Binding SliderPosition, Mode=TwoWay}"
-          IsEnabled="{Binding IsSliderEnabled}"
-          AutomationProperties.Name="Content width"
+        <Path
+          x:Name="Arrow"
+          Data="M0,7 L7,0 L14,7 Z"
+          Width="14"
+          Height="7"
+          HorizontalAlignment="Right"
+          Margin="0,0,7,0"
+          Fill="{DynamicResource YamvPageBackground}"
         />
-        <Panel Margin="2,0,2,11">
-          <DockPanel x:Name="Ticks" IsVisible="{Binding IsSliderEnabled}">
-            <TextBlock Text="480" FontSize="10.5" Foreground="{DynamicResource YamvTextMuted}" />
-            <TextBlock Text="Full" FontSize="10.5" Foreground="{DynamicResource YamvTextMuted}" HorizontalAlignment="Right" />
-          </DockPanel>
-          <TextBlock
-            x:Name="SliderCaption"
-            Text="{Binding SliderCaption}"
-            IsVisible="{Binding !IsSliderEnabled}"
-            FontSize="11.5"
-            Foreground="{DynamicResource YamvTextMuted}"
-          />
-        </Panel>
-        <Border BorderBrush="{DynamicResource YamvLine}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+        <Border x:Name="Card" Width="300" Background="{DynamicResource YamvPageBackground}" CornerRadius="8" Padding="14,14,14,12">
           <StackPanel>
-            <TextBlock Text="Saved for" FontSize="12" Foreground="{DynamicResource YamvTextMuted}" />
-            <Border
-              Margin="0,6,0,8"
-              BorderBrush="{DynamicResource YamvLine}"
-              BorderThickness="1"
-              CornerRadius="6"
-              ClipToBounds="True"
-            >
-              <ItemsControl x:Name="Segments" ItemsSource="{Binding Segments}">
-                <ItemsControl.ItemsPanel>
-                  <ItemsPanelTemplate>
-                    <views:SegmentPanel />
-                  </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="widths:WidthScope">
-                    <Button
-                      Classes="segment"
-                      Classes.on="{Binding IsSelected}"
-                      Content="{Binding Label}"
-                      AutomationProperties.Name="{Binding Label}"
-                      Click="OnSegmentClick"
+            <DockPanel>
+              <TextBlock
+                x:Name="Readout"
+                DockPanel.Dock="Right"
+                Text="{Binding Readout}"
+                FontSize="13"
+                FontWeight="SemiBold"
+                FontFeatures="+tnum"
+                Foreground="{DynamicResource YamvAccent}"
+              />
+              <TextBlock Text="Content width" FontSize="13" FontWeight="SemiBold" />
+            </DockPanel>
+            <TextBlock
+              x:Name="WiderNote"
+              Text="wider than this window"
+              HorizontalAlignment="Right"
+              Margin="0,1,0,0"
+              FontSize="11.5"
+              Foreground="{DynamicResource YamvTextMuted}"
+              IsVisible="{Binding IsWiderThanWindow}"
+            />
+            <Slider
+              x:Name="WidthSlider"
+              Classes.pinned="{Binding IsWiderThanWindow}"
+              Theme="{StaticResource WidthSliderTheme}"
+              Margin="0,9,0,2"
+              Value="{Binding SliderPosition, Mode=TwoWay}"
+              IsEnabled="{Binding IsSliderEnabled}"
+              AutomationProperties.Name="Content width"
+            />
+            <Panel Margin="2,0,2,11">
+              <DockPanel x:Name="Ticks" IsVisible="{Binding IsSliderEnabled}">
+                <TextBlock Text="480" FontSize="10.5" Foreground="{DynamicResource YamvTextMuted}" />
+                <TextBlock Text="Full" FontSize="10.5" Foreground="{DynamicResource YamvTextMuted}" HorizontalAlignment="Right" />
+              </DockPanel>
+              <TextBlock
+                x:Name="SliderCaption"
+                Text="{Binding SliderCaption}"
+                IsVisible="{Binding !IsSliderEnabled}"
+                FontSize="11.5"
+                Foreground="{DynamicResource YamvTextMuted}"
+              />
+            </Panel>
+            <Border BorderBrush="{DynamicResource YamvLine}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+              <StackPanel>
+                <TextBlock Text="Saved for" FontSize="12" Foreground="{DynamicResource YamvTextMuted}" />
+                <Border Margin="0,6,0,8" BorderBrush="{DynamicResource YamvLine}" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+                  <ItemsControl x:Name="Segments" ItemsSource="{Binding Segments}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <views:SegmentPanel />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="widths:WidthScope">
+                        <Button
+                          Classes="segment"
+                          Classes.on="{Binding IsSelected}"
+                          Content="{Binding Label}"
+                          AutomationProperties.Name="{Binding Label}"
+                          Click="OnSegmentClick"
+                        />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Border>
+                <StackPanel
+                  x:Name="Inherited"
+                  Orientation="Horizontal"
+                  Margin="0,-2,0,8"
+                  IsVisible="{Binding InheritedFrom, Converter={x:Static ObjectConverters.IsNotNull}}"
+                >
+                  <TextBlock Text="Inherited from " FontSize="12" Foreground="{DynamicResource YamvTextMuted}" VerticalAlignment="Center" />
+                  <Border Background="{DynamicResource YamvCodeBackground}" CornerRadius="3" Padding="5,1" VerticalAlignment="Center">
+                    <TextBlock
+                      x:Name="InheritedFolder"
+                      Text="{Binding InheritedFrom}"
+                      FontFamily="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace"
+                      FontSize="11"
                     />
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </Border>
-            <StackPanel
-              x:Name="Inherited"
-              Orientation="Horizontal"
-              Margin="0,-2,0,8"
-              IsVisible="{Binding InheritedFrom, Converter={x:Static ObjectConverters.IsNotNull}}"
-            >
-              <TextBlock Text="Inherited from " FontSize="12" Foreground="{DynamicResource YamvTextMuted}" VerticalAlignment="Center" />
-              <Border Background="{DynamicResource YamvCodeBackground}" CornerRadius="3" Padding="5,1" VerticalAlignment="Center">
-                <TextBlock
-                  x:Name="InheritedFolder"
-                  Text="{Binding InheritedFrom}"
-                  FontFamily="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace"
-                  FontSize="11"
-                />
-              </Border>
-            </StackPanel>
-            <StackPanel x:Name="Links" Orientation="Horizontal" Spacing="16" IsVisible="{Binding !IsConfirmingClearAll}">
-              <Button x:Name="ResetLink" Classes="link" Content="Reset to inherited" Command="{Binding ResetCommand}" />
-              <Button x:Name="ClearAllLink" Classes="link" Content="Clear all overrides here" Command="{Binding AskClearAllCommand}" />
-            </StackPanel>
-            <StackPanel x:Name="ClearAllConfirm" Spacing="6" IsVisible="{Binding IsConfirmingClearAll}">
-              <TextBlock x:Name="ClearAllQuestion" Text="{Binding ClearAllQuestion}" FontSize="12" TextWrapping="Wrap" />
-              <StackPanel Orientation="Horizontal" Spacing="16">
-                <Button x:Name="ClearAllYes" Classes="link" Content="Clear" Command="{Binding ClearAllCommand}" />
-                <Button x:Name="ClearAllNo" Classes="link" Content="Cancel" Command="{Binding CancelClearAllCommand}" />
+                  </Border>
+                </StackPanel>
+                <StackPanel x:Name="Links" Orientation="Horizontal" Spacing="16" IsVisible="{Binding !IsConfirmingClearAll}">
+                  <Button x:Name="ResetLink" Classes="link" Content="Reset to inherited" Command="{Binding ResetCommand}" />
+                  <Button x:Name="ClearAllLink" Classes="link" Content="Clear all overrides here" Command="{Binding AskClearAllCommand}" />
+                </StackPanel>
+                <StackPanel x:Name="ClearAllConfirm" Spacing="6" IsVisible="{Binding IsConfirmingClearAll}">
+                  <TextBlock x:Name="ClearAllQuestion" Text="{Binding ClearAllQuestion}" FontSize="12" TextWrapping="Wrap" />
+                  <StackPanel Orientation="Horizontal" Spacing="16">
+                    <Button x:Name="ClearAllYes" Classes="link" Content="Clear" Command="{Binding ClearAllCommand}" />
+                    <Button x:Name="ClearAllNo" Classes="link" Content="Cancel" Command="{Binding CancelClearAllCommand}" />
+                  </StackPanel>
+                </StackPanel>
               </StackPanel>
-            </StackPanel>
+            </Border>
+            <Border
+              x:Name="Foot"
+              Margin="-14,11,-14,-12"
+              Padding="14,8"
+              Background="{DynamicResource YamvWarningBackground}"
+              BorderBrush="{DynamicResource YamvWarningLine}"
+              BorderThickness="0,1,0,0"
+              CornerRadius="0,0,8,8"
+              IsVisible="{Binding FootMessage, Converter={x:Static ObjectConverters.IsNotNull}}"
+            >
+              <DockPanel>
+                <Viewbox Width="14" Height="14" Margin="0,0,7,0" VerticalAlignment="Center">
+                  <Canvas Width="16" Height="16">
+                    <Path Data="M8 1.6 15 14H1z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
+                    <Path Data="M8 6v4" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                    <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
+                  </Canvas>
+                </Viewbox>
+                <TextBlock x:Name="FootText" Text="{Binding FootMessage}" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+              </DockPanel>
+            </Border>
           </StackPanel>
         </Border>
-        <Border
-          x:Name="Foot"
-          Margin="-14,11,-14,-12"
-          Padding="14,8"
-          Background="{DynamicResource YamvWarningBackground}"
-          BorderBrush="{DynamicResource YamvWarningLine}"
-          BorderThickness="0,1,0,0"
-          CornerRadius="0,0,8,8"
-          IsVisible="{Binding FootMessage, Converter={x:Static ObjectConverters.IsNotNull}}"
-        >
-          <DockPanel>
-            <Viewbox Width="14" Height="14" Margin="0,0,7,0" VerticalAlignment="Center">
-              <Canvas Width="16" Height="16">
-                <Path Data="M8 1.6 15 14H1z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
-                <Path Data="M8 6v4" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
-                <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
-              </Canvas>
-            </Viewbox>
-            <TextBlock x:Name="FootText" Text="{Binding FootMessage}" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-          </DockPanel>
-        </Border>
       </StackPanel>
-    </Border>
-  </StackPanel>
+      <Path x:Name="Rim" Stroke="{DynamicResource YamvLine}" StrokeThickness="1" IsHitTestVisible="False" />
+    </Panel>
+  </Panel>
 </UserControl>

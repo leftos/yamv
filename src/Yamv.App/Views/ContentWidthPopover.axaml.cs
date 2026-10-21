@@ -20,9 +20,22 @@ namespace Yamv.App.Views;
 /// </summary>
 public partial class ContentWidthPopover : UserControl
 {
-    // The card's shadow is not a theme token: the width-popover mock's values for light and dark.
-    private static readonly BoxShadows LightShadow = BoxShadows.Parse("0 10 22 0 #421F2328, 0 1 3 0 #291F2328");
-    private static readonly BoxShadows DarkShadow = BoxShadows.Parse("0 10 22 0 #B3000000, 0 1 3 0 #8C000000");
+    // The shadow is not a theme token: the width-popover-arrow mock's values, a far and a near shadow in each theme.
+    private static readonly Color LightShadowColor = Color.Parse("#1F2328");
+
+    private const double CardRadius = 8;
+
+    // The rim's centre line runs half a px inside the outline, so its 1 px stroke lies on whole pixels inside the fill.
+    private const double RimInset = 0.5;
+
+    // The pinned cap's hatch, as the wide-stored-width mock draws it: 2 px stripes 4.5 px apart, rising at 55°.
+    private const int HatchStripes = 20;
+    private const double HatchHeight = 6;
+    private const double HatchRise = 4.2;
+    private const double HatchPitch = 5.49;
+
+    /// <summary>The hatch of the slider's cap while the stored width is wider than the window; enough stripes for a 100 px cap.</summary>
+    public static Geometry PinnedHatch { get; } = HatchGeometry();
 
     public ContentWidthPopover()
     {
@@ -40,6 +53,7 @@ public partial class ContentWidthPopover : UserControl
         ActualThemeVariantChanged += OnActualThemeVariantChanged;
         ClearAllConfirm.PropertyChanged += OnClearAllConfirmPropertyChanged;
         ClearAllLink.PropertyChanged += OnClearAllLinkPropertyChanged;
+        Card.SizeChanged += (_, _) => UpdateRim();
         UpdateShadow();
     }
 
@@ -113,7 +127,90 @@ public partial class ContentWidthPopover : UserControl
 
     private void OnActualThemeVariantChanged(object? sender, EventArgs e) => UpdateShadow();
 
-    private void UpdateShadow() => Card.BoxShadow = ActualThemeVariant == ThemeVariant.Dark ? DarkShadow : LightShadow;
+    /// <summary>
+    /// Gives the arrow and the card their shadow for the theme: a far one (0 10 22) and a near one (0 1 3), cast by the panels
+    /// that hold both, so they cast one silhouette.
+    /// </summary>
+    private void UpdateShadow()
+    {
+        bool dark = ActualThemeVariant == ThemeVariant.Dark;
+        Color color = dark ? Colors.Black : LightShadowColor;
+        FarShadow.Effect = new DropShadowEffect
+        {
+            OffsetX = 0,
+            OffsetY = 10,
+            BlurRadius = 22,
+            Color = color,
+            Opacity = dark ? 0.70 : 0.26,
+        };
+        NearShadow.Effect = new DropShadowEffect
+        {
+            OffsetX = 0,
+            OffsetY = 1,
+            BlurRadius = 3,
+            Color = color,
+            Opacity = dark ? 0.55 : 0.16,
+        };
+    }
+
+    /// <summary>The hatch's stripes, from 5 px left of the cap's start and 1 px past its 4 px height at each end.</summary>
+    private static StreamGeometry HatchGeometry()
+    {
+        var geometry = new StreamGeometry();
+        using StreamGeometryContext context = geometry.Open();
+        for (int stripe = 0; stripe < HatchStripes; stripe++)
+        {
+            double x = -5 + (stripe * HatchPitch);
+            context.BeginFigure(new Point(x, HatchHeight - 1), isFilled: false);
+            context.LineTo(new Point(x + HatchRise, -1));
+            context.EndFigure(isClosed: false);
+        }
+
+        return geometry;
+    }
+
+    /// <summary>Outlines the arrow and the card again, as the card's size changed.</summary>
+    private void UpdateRim()
+    {
+        if (BoundsInRim(Arrow) is { } arrow && BoundsInRim(Card) is { } card)
+        {
+            Rim.Data = RimGeometry(arrow, card);
+        }
+    }
+
+    /// <summary><paramref name="control"/>'s bounds in the rim's coordinates; null while it is not in the rim's visual tree.</summary>
+    private Rect? BoundsInRim(Control control) => control.TranslatePoint(default, Rim) is { } origin ? new Rect(origin, control.Bounds.Size) : null;
+
+    /// <summary>
+    /// The rim's outline: the card's rounded rectangle with the arrow rising from its top edge, as one closed figure, so the
+    /// stroke has no seam where the arrow meets the card. Both rectangles are in the rim's coordinates.
+    /// </summary>
+    private static StreamGeometry RimGeometry(Rect arrow, Rect card)
+    {
+        double inset = RimInset;
+        double top = card.Top + inset;
+        double bottom = card.Bottom - inset;
+        double left = card.Left + inset;
+        double right = card.Right - inset;
+        var corner = new Size(CardRadius - inset, CardRadius - inset);
+        var geometry = new StreamGeometry();
+        using StreamGeometryContext context = geometry.Open();
+        context.BeginFigure(new Point(card.Left + CardRadius, top), isFilled: false);
+        context.LineTo(new Point(arrow.Left + inset, top));
+        // The arrow's sides rise at 45°, so its tip moves down by the inset times √2.
+        context.LineTo(new Point(arrow.Center.X, arrow.Top + (inset * Math.Sqrt(2))));
+        context.LineTo(new Point(arrow.Right - inset, top));
+        context.LineTo(new Point(Math.Max(arrow.Right - inset, card.Right - CardRadius), top));
+        context.ArcTo(new Point(right, card.Top + CardRadius), corner, 0, false, SweepDirection.Clockwise);
+        context.LineTo(new Point(right, card.Bottom - CardRadius));
+        context.ArcTo(new Point(card.Right - CardRadius, bottom), corner, 0, false, SweepDirection.Clockwise);
+        context.LineTo(new Point(card.Left + CardRadius, bottom));
+        context.ArcTo(new Point(left, card.Bottom - CardRadius), corner, 0, false, SweepDirection.Clockwise);
+        context.LineTo(new Point(left, card.Top + CardRadius));
+        context.ArcTo(new Point(card.Left + CardRadius, top), corner, 0, false, SweepDirection.Clockwise);
+        context.EndFigure(isClosed: true);
+        return geometry;
+    }
 
     private void OnSegmentClick(object? sender, RoutedEventArgs e)
     {
