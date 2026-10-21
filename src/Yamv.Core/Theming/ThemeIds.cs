@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Yamv.Core.Theming;
@@ -20,6 +21,40 @@ public static partial class ThemeIds
             ? name[..^ThemeCatalog.FileSuffix.Length]
             : Path.GetFileNameWithoutExtension(name);
     }
+
+    /// <summary>
+    /// The id a theme named <paramref name="name"/> is filed under: lower case, each run of characters that are not ASCII letters or
+    /// digits written as one <c>-</c>, with none at either end ("My Theme!" gives <c>my-theme</c>), cut to
+    /// <see cref="MaxSlugLength"/> characters with no <c>-</c> left at the end of the cut; <c>theme</c> when nothing is left.
+    /// </summary>
+    public static string Slug(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var builder = new StringBuilder(name.Length);
+        bool gap = false;
+        foreach (char character in name)
+        {
+            if (!char.IsAsciiLetterOrDigit(character))
+            {
+                gap = true;
+                continue;
+            }
+
+            if (gap && builder.Length > 0)
+            {
+                builder.Append('-');
+            }
+
+            gap = false;
+            builder.Append(char.ToLowerInvariant(character));
+        }
+
+        string slug = builder.ToString(0, Math.Min(builder.Length, MaxSlugLength)).TrimEnd('-');
+        return slug.Length > 0 ? slug : "theme";
+    }
+
+    /// <summary>The longest id <see cref="Slug"/> gives, before any <see cref="Unique"/> suffix.</summary>
+    public const int MaxSlugLength = 64;
 
     /// <summary><paramref name="baseId"/> when it is free, else the first free of <c>-2</c>, <c>-3</c>… appended to it.</summary>
     public static string Unique(string baseId, IReadOnlySet<string> taken)

@@ -17,7 +17,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Change how a theme reaches the window chrome | `src/Yamv.App/Services/ThemeBridge.cs` → `src/Yamv.Core/Theming/ChromePalette.cs` → `tests/Yamv.App.Tests/Services/ThemeBridgeTests.cs` | [themes.md](design/themes.md) |
 | Change how YAMV is built, published, packaged or run in CI, or its app icon | `scripts/publish.ps1` → `scripts/make-app.sh` → `.github/workflows/ci.yml` → `src/Yamv.App/Yamv.App.csproj` → `tools/dev/make-icons.py` → `src/Yamv.App/Assets/` | README "Building and packaging" |
 | Change what `--register` / `--unregister` writes to the Windows registry | `src/Yamv.Core/Registration/WindowsFileAssociation.cs` → `RegistrationResult.cs` → `tests/Yamv.Core.Tests/Registration/` | [v1-build.md](plans/v1-build.md) step 7 |
-| Change how themes are listed, imported, saved or deleted | `src/Yamv.Core/Theming/ThemeCatalog.cs` → `ThemeIds.cs` → `tests/Yamv.Core.Tests/Theming/ThemeCatalogTests.cs` | [themes.md](design/themes.md) |
+| Change how themes are listed, imported, renamed, duplicated or deleted | `src/Yamv.Core/Theming/ThemeCatalog.cs` → `ThemeIds.cs` → `ThemeInspection.cs` → `IFileTrash.cs` → `tests/Yamv.Core.Tests/Theming/ThemeCatalogTests.cs` → `ThemeCatalogWriteTests.cs` | [themes.md](design/themes.md) |
+| Edit or save a theme file | `src/Yamv.Core/Theming/ThemeCatalog.cs` → `ThemeFilePatch.cs` → `ThemeEditing.cs` → `ThemeTokenView.cs` → `tests/Yamv.Core.Tests/Theming/` | [themes.md](design/themes.md) |
 | Change per-folder content width | `src/Yamv.Core/Widths/ContentWidth.cs` → `WidthStore.cs` → `src/Yamv.App/Controls/DocumentView.cs` (`SetContentWidthAsync`) → `src/Yamv.App/Web/yamv.js` → `Web/yamv.css` → `tests/Yamv.Core.Tests/Widths/` | [content-width.md](design/content-width.md) |
 | Add a JSON file format | `src/Yamv.Core/Session/SessionJsonContext.cs` → `SessionStore.cs` (its `Normalize`) → `tests/Yamv.Core.Tests/Session/SessionStoreTests.cs`; `src/Yamv.Core/Widths/WidthsFile.cs` is the multi-writer example | |
 
@@ -25,7 +26,11 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
 - **`Yamv.Core`** (`src/Yamv.Core/`): owns grouping, git-root discovery, the session file, the single-instance lock and pipe, launch-argument parsing and markdown → HTML. References Markdig and the BCL only; never Avalonia.
 
-  One main instance per user is held by a lock file (flock on Unix) plus a named pipe (a socket file on Unix) derived from the lock path, which later launches signal over; a named mutex is not used, because its behaviour differs on macOS. Theming (`Theming/`) parses theme files, resolves a theme for light or dark, builds its CSS (`ThemeCss`), and keeps the catalog of built-in and user themes (`ThemeCatalog`); it owns no watcher and no UI.
+  One main instance per user is held by a lock file (flock on Unix) plus a named pipe (a socket file on Unix) derived from the lock path, which later launches signal over; a named mutex is not used, because its behaviour differs on macOS.
+
+  Theming (`Theming/`) parses theme files, resolves a theme for light or dark, builds its CSS (`ThemeCss`), and keeps the catalog of built-in and user themes (`ThemeCatalog`: list, import, inspect, duplicate, rename, save, delete); the editing services are `ThemeEditing` (set or reset a token, add a variant, rename), `ThemeTokenView` (the rows of one tab with value, layer and whether set there) and `ThemeFilePatch` (a save that edits only the changed values in the file's text).
+
+  Deleting goes through `IFileTrash`, which the App implements with the Recycle Bin or Trash. Theming owns no watcher and no UI.
 
   Widths (`Widths/`) holds the content-width value (`ContentWidth`: px or Full, snapped to a 40 px grid) and `WidthStore`, the per-folder widths in `widths.json` shared by every instance: a lookup walks from the document's folder up to the file-system root, else the [app default](glossary.md); changes are replaced atomically and the store's lock is held through file IO, so callers keep changes off the UI thread.
 
@@ -43,6 +48,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 ## Integration Footguns
 
 - A theme token rename or a new token also changes the page's `yamv.css` variables (`src/Yamv.App/Web/`) and the schema `themes/yamv-theme.schema.json`.
+- A new `ThemeFileJson` field needs `ThemeFilePatch`'s `Apply` and `RootOrder` and `ThemeDefinition.ContentEquals` updated, or Save silently drops edits to it.
 - Theme colours are CSS hex, `#rrggbbaa`; Avalonia's `Color.Parse` reads 8 digits as `#aarrggbb`, so brushes are built from `ColorValue`'s R, G, B and A, never by parsing the hex.
 - The page and the host speak by message name: `Web/yamv.js` posts `ready`, `rendered`, `scroll`, `link`, `key`, `find`, `blocked` and `error`, which `DocumentView`'s message handler switches on, and the host calls the `window.yamv` functions `render`, `setTheme`, `setContentWidth`, `find`, `clearFind` and `openFind`. A rename changes both sides, and the `RenderOptions` fields match the `settings.*` names the page reads.
 - Core's renderer marks diagrams as `<pre class="mermaid">` and puts `data-line` on the `code` element of a fenced block; the page's diagram loader and scroll restore read those.

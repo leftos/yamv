@@ -29,7 +29,31 @@ public sealed record ThemeDefinition(
     string SharedCss,
     ThemeVariant? Light,
     ThemeVariant? Dark
-);
+)
+{
+    /// <summary>
+    /// Whether <paramref name="other"/> holds the same name, author, description, tokens and css, whatever its id, source and file;
+    /// record equality compares the token dictionaries by reference, so two reads of one file are not <c>==</c>.
+    /// </summary>
+    public bool ContentEquals(ThemeDefinition other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        return Name == other.Name
+            && Author == other.Author
+            && Description == other.Description
+            && SharedCss == other.SharedCss
+            && SameTokens(SharedTokens, other.SharedTokens)
+            && SameVariant(Light, other.Light)
+            && SameVariant(Dark, other.Dark);
+    }
+
+    /// <summary>Whether two token sets hold the same tokens with equal values.</summary>
+    internal static bool SameTokens(IReadOnlyDictionary<string, ThemeValue> a, IReadOnlyDictionary<string, ThemeValue> b) =>
+        a.Count == b.Count && a.All(pair => b.TryGetValue(pair.Key, out ThemeValue? other) && Equals(pair.Value, other));
+
+    private static bool SameVariant(ThemeVariant? a, ThemeVariant? b) =>
+        a is null || b is null ? a is null && b is null : a.Css == b.Css && SameTokens(a.Tokens, b.Tokens);
+}
 
 /// <summary>The outcome of reading a theme file: the theme when it is valid, and every error and warning found.</summary>
 public sealed record ThemeLoadResult(ThemeDefinition? Theme, IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings);

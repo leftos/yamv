@@ -132,6 +132,73 @@ public sealed class ThemeCatalogTests : IDisposable
     }
 
     [Fact]
+    public void Inspect_TwoHalvesWithCss_ListsThemAndCopiesNothing()
+    {
+        string source = WriteSourceFile(
+            "both.yamv-theme.json",
+            """{ "name": "Both", "author": "Ann", "light": {}, "dark": { "css": "p { }" }, "extra": 1 }"""
+        );
+
+        ThemeInspection inspection = ThemeCatalog.Inspect(source);
+
+        Assert.Equal(
+            ("both.yamv-theme.json", "Both", "Ann", true, true, true),
+            (inspection.FileName, inspection.Name, inspection.Author, inspection.HasLight, inspection.HasDark, inspection.HasCss)
+        );
+        Assert.Empty(inspection.Errors);
+        Assert.Equal(["Unknown field 'extra' is ignored."], inspection.Warnings);
+        Assert.False(Directory.Exists(UserFolder));
+    }
+
+    [Fact]
+    public void Inspect_OneHalfWithoutCss()
+    {
+        ThemeInspection inspection = ThemeCatalog.Inspect(WriteSourceFile("mine.yamv-theme.json", ValidTheme));
+
+        Assert.Equal(
+            ("Mine", null, true, false, false),
+            (inspection.Name, inspection.Author, inspection.HasLight, inspection.HasDark, inspection.HasCss)
+        );
+        Assert.Empty(inspection.Errors);
+    }
+
+    [Fact]
+    public void Inspect_WhiteSpaceCss_IsNoCss()
+    {
+        ThemeInspection inspection = ThemeCatalog.Inspect(WriteSourceFile("ws.yamv-theme.json", """{ "name": "W", "css": "  ", "light": {} }"""));
+
+        Assert.False(inspection.HasCss);
+    }
+
+    [Fact]
+    public void Inspect_InvalidFile_ListsItsErrors()
+    {
+        string source = WriteSourceFile("bad.yamv-theme.json", """{ "light": { "tokens": { "accent": "#12" } } }""");
+
+        ThemeInspection inspection = ThemeCatalog.Inspect(source);
+
+        Assert.Null(inspection.Name);
+        Assert.Equal(["The theme has no 'name'.", "Token 'accent' in light: '#12' is not a colour (#rgb, #rrggbb or #rrggbbaa)."], inspection.Errors);
+    }
+
+    [Fact]
+    public void Inspect_FileNamedOnlyTheSuffix_ListsTheIdError()
+    {
+        ThemeInspection inspection = ThemeCatalog.Inspect(WriteSourceFile(ThemeCatalog.FileSuffix, ValidTheme));
+
+        Assert.Contains("gives no usable theme id", Assert.Single(inspection.Errors), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_MissingFile_ListsTheReadError()
+    {
+        ThemeInspection inspection = ThemeCatalog.Inspect(Path.Combine(_root, "missing.yamv-theme.json"));
+
+        Assert.Equal("missing.yamv-theme.json", inspection.FileName);
+        Assert.StartsWith("The file cannot be read: ", Assert.Single(inspection.Errors), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Duplicate_WritesALoadableCopy()
     {
         ThemeCatalog catalog = CreateCatalog();
@@ -140,14 +207,53 @@ public sealed class ThemeCatalogTests : IDisposable
         ThemeDefinition copy = catalog.Duplicate(ink);
         ThemeDefinition second = catalog.Duplicate(ink);
 
-        Assert.Equal(("ink-copy", "Ink (copy)", ThemeSource.User), (copy.Id, copy.Name, copy.Source));
-        Assert.Equal(Path.Combine(UserFolder, "ink-copy.yamv-theme.json"), copy.FilePath);
-        Assert.Equal("ink-copy-2", second.Id);
-        ThemeEntry loaded = catalog.LoadAll().Single(entry => entry.Id == "ink-copy");
+        Assert.Equal(("ink-2", "Ink (copy)", ThemeSource.User), (copy.Id, copy.Name, copy.Source));
+        Assert.Equal(Path.Combine(UserFolder, "ink-2.yamv-theme.json"), copy.FilePath);
+        Assert.Equal(("ink-3", "Ink (copy 2)"), (second.Id, second.Name));
+        ThemeEntry loaded = catalog.LoadAll().Single(entry => entry.Id == "ink-2");
         Assert.Empty(loaded.Result.Errors);
         Assert.Equal("Ink (copy)", loaded.Result.Theme!.Name);
+        Assert.Equal("Ink (copy 2)", catalog.LoadAll().Single(entry => entry.Id == "ink-3").Result.Theme!.Name);
         Assert.Equal(ink.SharedCss, loaded.Result.Theme.SharedCss);
         Assert.Equal(ink.Dark!.Tokens.OrderBy(pair => pair.Key), loaded.Result.Theme.Dark!.Tokens.OrderBy(pair => pair.Key));
+    }
+
+    [Fact]
+    public void Duplicate_OfAUserThemeWhoseFileIsGone_WritesTheCopy()
+    {
+        string path = Path.Combine(UserFolder, "mine" + ThemeCatalog.FileSuffix);
+        ThemeDefinition gone = ThemeParser.Parse(ValidTheme, "mine", ThemeSource.User, path).Theme!;
+
+        ThemeDefinition copy = CreateCatalog().Duplicate(gone);
+
+        Assert.Equal(("mine-2", "Mine (copy)"), (copy.Id, copy.Name));
+        Assert.Equal(["mine-2.yamv-theme.json"], UserFileNames());
+    }
+
+    [Fact]
+    public void Duplicate_OfStudio_IsStudio2ThenStudio3()
+    {
+        ThemeCatalog catalog = CreateCatalog();
+        ThemeDefinition studio = catalog.LoadAll().Single(entry => entry.Id == "studio").Result.Theme!;
+
+        ThemeDefinition copy = catalog.Duplicate(studio);
+        ThemeDefinition second = catalog.Duplicate(studio);
+
+        Assert.Equal(("studio-2", "Studio (copy)"), (copy.Id, copy.Name));
+        Assert.Equal(("studio-3", "Studio (copy 2)"), (second.Id, second.Name));
+    }
+
+    [Fact]
+    public void Duplicate_OfADuplicate_GetsAnotherUniqueId()
+    {
+        ThemeCatalog catalog = CreateCatalog();
+        ThemeDefinition studio = catalog.LoadAll().Single(entry => entry.Id == "studio").Result.Theme!;
+        ThemeDefinition copy = catalog.Duplicate(studio);
+
+        ThemeDefinition copyOfCopy = catalog.Duplicate(copy);
+
+        Assert.Equal(("studio-2-2", "Studio (copy) (copy)"), (copyOfCopy.Id, copyOfCopy.Name));
+        Assert.Equal(["studio-2-2.yamv-theme.json", "studio-2.yamv-theme.json"], UserFileNames());
     }
 
     [Fact]
@@ -169,28 +275,33 @@ public sealed class ThemeCatalogTests : IDisposable
         ThemeCatalog catalog = CreateCatalog();
         ThemeDefinition paper = catalog.LoadAll()[0].Result.Theme!;
 
+        var trash = new RecordingTrash();
         Assert.Throws<InvalidOperationException>(() => catalog.Save(paper));
-        Assert.Throws<InvalidOperationException>(() => catalog.Delete("paper"));
+        Assert.Throws<InvalidOperationException>(() => catalog.Delete("paper", trash));
+        Assert.Throws<InvalidOperationException>(() => catalog.Rename("paper", "Mine"));
+        Assert.Empty(trash.Paths);
         Assert.False(Directory.Exists(UserFolder));
     }
 
     [Fact]
-    public void Delete_RemovesTheUserFile()
+    public void Delete_MovesTheUserFileToTheTrash()
     {
         string path = WriteUserFile("mine", ValidTheme);
         ThemeCatalog catalog = CreateCatalog();
+        var trash = new RecordingTrash();
 
-        catalog.Delete("mine");
+        catalog.Delete("mine", trash);
 
-        Assert.False(File.Exists(path));
-        Assert.Throws<FileNotFoundException>(() => catalog.Delete("mine"));
+        Assert.Equal([path], trash.Paths);
+        Assert.Throws<FileNotFoundException>(() => catalog.Delete("other", trash));
     }
 
     [Theory]
     [InlineData("../escape")]
     [InlineData("..")]
     [InlineData("")]
-    public void Delete_IdThatIsNotAPlainFileName_Throws(string id) => Assert.Throws<ArgumentException>(() => CreateCatalog().Delete(id));
+    public void Delete_IdThatIsNotAPlainFileName_Throws(string id) =>
+        Assert.Throws<ArgumentException>(() => CreateCatalog().Delete(id, new RecordingTrash()));
 
     [Fact]
     public void Export_OfABuiltIn_IsItsEmbeddedText()
@@ -321,8 +432,8 @@ public sealed class ThemeCatalogTests : IDisposable
 
         ThemeDefinition copy = CreateCatalog().Duplicate(theme);
 
-        Assert.Equal(Path.Combine(UserFolder, "con-copy" + ThemeCatalog.FileSuffix), copy.FilePath);
-        Assert.Equal(["con-copy.yamv-theme.json"], UserFileNames());
+        Assert.Equal(Path.Combine(UserFolder, "con-2" + ThemeCatalog.FileSuffix), copy.FilePath);
+        Assert.Equal(["con-2.yamv-theme.json"], UserFileNames());
     }
 
     public static TheoryData<string, ThemeValue> InvalidValues =>
@@ -383,7 +494,7 @@ public sealed class ThemeCatalogTests : IDisposable
         ThemeDefinition theme = catalog.LoadAll().Single(entry => entry.Id == "mine").Result.Theme!;
 
         Exception exception;
-        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
             exception = Assert.ThrowsAny<Exception>(() => catalog.Save(theme with { Name = "Renamed" }));
         }
@@ -501,6 +612,13 @@ public sealed class ThemeCatalogTests : IDisposable
         File.WriteAllText(path, "partial");
         File.SetLastWriteTimeUtc(path, lastWriteUtc);
         return path;
+    }
+
+    private sealed class RecordingTrash : IFileTrash
+    {
+        public List<string> Paths { get; } = [];
+
+        public void MoveToTrash(string path) => Paths.Add(path);
     }
 
     private string[] UserFileNames() => [.. Directory.GetFiles(UserFolder).Select(path => Path.GetFileName(path)).Order(StringComparer.Ordinal)];

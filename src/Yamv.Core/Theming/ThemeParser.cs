@@ -50,6 +50,35 @@ public static class ThemeParser
         return new ThemeLoadResult(theme, errors, warnings);
     }
 
+    /// <summary>
+    /// The error the parser would report for <paramref name="value"/> set as <paramref name="token"/> in <paramref name="where"/>
+    /// (<c>shared</c>, <c>light</c> or <c>dark</c>), or null when the value is valid there.
+    /// </summary>
+    internal static string? ProblemWith(TokenInfo token, ThemeValue value, string where)
+    {
+        string prefix = $"Token '{token.Name}' in {where}:";
+        if (value is NumberValue number && !double.IsFinite(number.Value))
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"{prefix} {number.Value} is not a finite number.");
+        }
+
+        string text;
+        try
+        {
+            text = ThemeSerializer.ValueText(value);
+        }
+        catch (ArgumentException)
+        {
+            // Only text with an unpaired surrogate reaches here; the parser words that as "is not valid text".
+            return $"{prefix} is not valid text.";
+        }
+
+        using var document = JsonDocument.Parse(text);
+        JsonElement element = document.RootElement;
+        (ThemeValue? read, string? problem) = ReadValue(token, element);
+        return read is null ? $"{prefix} {Describe(element)} {problem}" : null;
+    }
+
     private static ThemeLoadResult Invalid(string error) => new(null, [error], []);
 
     private static void CheckFile(ThemeFileJson file, List<string> errors, List<string> warnings)

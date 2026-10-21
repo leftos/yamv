@@ -3,6 +3,8 @@ namespace Yamv.Core.Theming;
 /// <summary>Turns a theme family into the full token set for one appearance.</summary>
 public static class ThemeResolver
 {
+    private static readonly IReadOnlyDictionary<string, ThemeValue> NoTokens = new Dictionary<string, ThemeValue>();
+
     /// <summary>
     /// Picks the <paramref name="requested"/> variant, or the only one the theme has, then layers the defaults for that variant's
     /// appearance, the shared tokens and the variant's tokens. The css is the shared css followed by the variant's.
@@ -11,19 +13,39 @@ public static class ThemeResolver
     {
         ArgumentNullException.ThrowIfNull(theme);
         (ThemeVariant variant, Appearance appearance) = Pick(theme, requested);
-        var tokens = new Dictionary<string, ThemeValue>(ThemeTokens.DefaultsFor(appearance), StringComparer.Ordinal);
-        foreach ((string name, ThemeValue value) in theme.SharedTokens)
-        {
-            tokens[name] = value;
-        }
-
-        foreach ((string name, ThemeValue value) in variant.Tokens)
-        {
-            tokens[name] = value;
-        }
-
+        var tokens = Layer(appearance, theme.SharedTokens, variant.Tokens)
+            .ToDictionary(pair => pair.Key, pair => pair.Value.Value, StringComparer.Ordinal);
         string css = string.Join("\n", new[] { theme.SharedCss.Trim(), variant.Css.Trim() }.Where(part => part.Length > 0));
         return new ResolvedTheme(theme.Id, theme.Name, appearance, tokens, css);
+    }
+
+    /// <summary>
+    /// The defaults for <paramref name="appearance"/>, overlaid by <paramref name="shared"/> and then by <paramref name="variant"/>,
+    /// with the layer each value came from.
+    /// </summary>
+    internal static Dictionary<string, (ThemeValue Value, TokenLayer Layer)> Layer(
+        Appearance appearance,
+        IReadOnlyDictionary<string, ThemeValue> shared,
+        IReadOnlyDictionary<string, ThemeValue>? variant
+    )
+    {
+        var tokens = new Dictionary<string, (ThemeValue Value, TokenLayer Layer)>(StringComparer.Ordinal);
+        foreach ((string name, ThemeValue value) in ThemeTokens.DefaultsFor(appearance))
+        {
+            tokens[name] = (value, TokenLayer.Default);
+        }
+
+        foreach ((string name, ThemeValue value) in shared)
+        {
+            tokens[name] = (value, TokenLayer.Shared);
+        }
+
+        foreach ((string name, ThemeValue value) in variant ?? NoTokens)
+        {
+            tokens[name] = (value, TokenLayer.Variant);
+        }
+
+        return tokens;
     }
 
     private static (ThemeVariant Variant, Appearance Appearance) Pick(ThemeDefinition theme, Appearance requested)

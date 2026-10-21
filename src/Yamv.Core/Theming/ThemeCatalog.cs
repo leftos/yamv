@@ -46,8 +46,8 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     /// </summary>
     /// <remarks>
     /// First deletes the stale temporary files of interrupted writes from the user folder. A user file named like a Windows device
-    /// (<see cref="ThemeIds.IsDeviceName"/>) is listed as invalid on every platform, since <see cref="Save"/> and
-    /// <see cref="Delete"/> refuse its id.
+    /// (<see cref="ThemeIds.IsDeviceName"/>) is listed as invalid on every platform, since <see cref="Save"/>,
+    /// <see cref="Rename"/> and <see cref="Delete"/> refuse its id.
     /// </remarks>
     public IReadOnlyList<ThemeEntry> LoadAll()
     {
@@ -81,7 +81,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         string baseId = ThemeIds.FromFileName(sourcePath);
         if (!ThemeIds.IsValid(baseId))
         {
-            string error = $"The file name '{Path.GetFileName(sourcePath)}' gives no usable theme id; rename it to <name>{FileSuffix}.";
+            string error = NoUsableIdError(sourcePath);
             throw new ThemeException(error, [error]);
         }
 
@@ -91,10 +91,50 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
             throw new ThemeException($"{sourcePath} is not a valid theme: {string.Join(" ", check.Errors)}", check.Errors);
         }
 
-        string id = CreateNew(baseId, text);
+        string id = CreateNew(baseId, _ => text, []);
         string path = PathFor(id);
         log.LogInfo($"Imported the theme {sourcePath} as {path}.");
         return new ThemeEntry(id, ThemeSource.User, path, ThemeParser.Parse(text, id, ThemeSource.User, path));
+    }
+
+    /// <summary>
+    /// Reads the theme file at <paramref name="path"/> for the Import notice, listing the errors <see cref="Import"/> would fail with,
+    /// without copying it. A file that cannot be read gives the read error.
+    /// </summary>
+    public static ThemeInspection Inspect(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        string fileName = Path.GetFileName(path);
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new ThemeInspection(fileName, null, null, false, false, false, [$"The file cannot be read: {exception.Message}"], []);
+        }
+
+        string id = ThemeIds.FromFileName(path);
+        ThemeLoadResult result = ThemeParser.Parse(text, id, ThemeSource.User, path);
+        List<string> errors = ThemeIds.IsValid(id) ? [] : [NoUsableIdError(path)];
+        errors.AddRange(result.Errors);
+        if (result.Theme is not { } theme)
+        {
+            return new ThemeInspection(fileName, null, null, false, false, false, errors, result.Warnings);
+        }
+
+        bool hasCss = new[] { theme.SharedCss, theme.Light?.Css, theme.Dark?.Css }.Any(css => !string.IsNullOrWhiteSpace(css));
+        return new ThemeInspection(
+            fileName,
+            theme.Name,
+            theme.Author,
+            theme.Light is not null,
+            theme.Dark is not null,
+            hasCss,
+            errors,
+            result.Warnings
+        );
     }
 
     /// <summary>
@@ -111,25 +151,30 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     }
 
     /// <summary>
-    /// Writes an editable copy of <paramref name="theme"/> into the user folder as <c>&lt;id&gt;-copy</c>, named
-    /// "<c>&lt;Name&gt; (copy)</c>".
+    /// Writes an editable copy of <paramref name="theme"/> into the user folder under the first free <c>-2</c>, <c>-3</c>… variant
+    /// of its id, named "<c>&lt;Name&gt; (copy)</c>" for <c>-2</c>, "<c>&lt;Name&gt; (copy 2)</c>" for <c>-3</c>, and so on.
     /// </summary>
     /// <exception cref="ThemeException">The copy would not be a valid theme; nothing is written.</exception>
     public ThemeDefinition Duplicate(ThemeDefinition theme)
     {
         ArgumentNullException.ThrowIfNull(theme);
-        string baseId = theme.Id + "-copy";
-        ThemeDefinition CopyAs(string id) => theme with { Id = id, Name = theme.Name + " (copy)", Source = ThemeSource.User, FilePath = PathFor(id) };
+        ThemeDefinition CopyAs(string id) => theme with { Id = id, Name = CopyName(theme, id), Source = ThemeSource.User, FilePath = PathFor(id) };
 
-        string id = CreateNew(baseId, SerializeValid(CopyAs(baseId)));
+        string id = CreateNew(theme.Id, candidate => SerializeValid(CopyAs(candidate)), [theme.Id]);
         ThemeDefinition copy = CopyAs(id);
         log.LogInfo($"Duplicated the theme '{theme.Id}' as {copy.FilePath}.");
         return copy;
     }
 
-    /// <summary>Writes a user theme to <c>&lt;id&gt;.yamv-theme.json</c> in the user folder, leaving no partial file behind.</summary>
+    /// <summary>
+    /// Writes a user theme to <c>&lt;id&gt;.yamv-theme.json</c> in the user folder, leaving no partial file behind. When the file
+    /// exists, only what changed is rewritten inside its text, so its comments, field order and unknown fields stay; otherwise the
+    /// theme is written whole.
+    /// </summary>
     /// <exception cref="InvalidOperationException"><paramref name="theme"/> is built in.</exception>
-    /// <exception cref="ThemeException"><paramref name="theme"/> is not a valid theme; nothing is written.</exception>
+    /// <exception cref="ThemeException">
+    /// <paramref name="theme"/> is not a valid theme, or the existing file cannot be updated in place; nothing is written.
+    /// </exception>
     public void Save(ThemeDefinition theme)
     {
         ArgumentNullException.ThrowIfNull(theme);
@@ -139,29 +184,163 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         }
 
         string path = PathFor(theme.Id);
-        Replace(path, SerializeValid(theme));
+        string text = SerializeValid(theme);
+        if (File.Exists(path))
+        {
+            (string current, bool bom) = ReadShared(path);
+            text = WithBom(PatchedText(current, path, ParseOnDisk(current, theme.Id, path), theme), bom);
+        }
+
+        Replace(path, text);
         log.LogInfo($"Saved the theme {path}.");
     }
 
-    /// <summary>Deletes the user theme <paramref name="id"/>.</summary>
+    /// <summary>
+    /// Renames the user theme <paramref name="id"/> to <paramref name="newName"/>, patching the name inside its file so it keeps its
+    /// comments, field order and unknown fields, then moves the file to the id <see cref="ThemeIds.Slug"/> gives the name, or the
+    /// first free <c>-2</c>, <c>-3</c>… variant of it. A theme already filed under that slug (<c>mine</c> or <c>mine-3</c> for
+    /// "Mine") keeps its file. When the move fails, the theme stays renamed under its old id and a warning is logged. Returns the
+    /// renamed theme.
+    /// </summary>
     /// <exception cref="InvalidOperationException"><paramref name="id"/> is a built-in theme with no user file shadowing it.</exception>
     /// <exception cref="FileNotFoundException">There is no user theme <paramref name="id"/>.</exception>
-    public void Delete(string id)
+    /// <exception cref="ThemeException">The name is blank, or the file is not a valid theme or cannot be updated in place.</exception>
+    public ThemeDefinition Rename(string id, string newName)
+    {
+        ArgumentNullException.ThrowIfNull(newName);
+        string path = ExistingUserFile(id, "renamed");
+        (string current, bool bom) = ReadShared(path);
+        ThemeDefinition onDisk = ParseOnDisk(current, id, path);
+        ThemeDefinition renamed = onDisk with { Name = newName };
+        SerializeValid(renamed);
+        string text = PatchedText(current, path, onDisk, renamed);
+        if (text != current)
+        {
+            Replace(path, WithBom(text, bom));
+        }
+
+        string slug = ThemeIds.Slug(newName);
+        if (IsFiledUnder(id, slug))
+        {
+            log.LogInfo($"Renamed the theme {path} to '{newName}'.");
+            return renamed;
+        }
+
+        return MoveRenamed(renamed, path, slug);
+    }
+
+    /// <summary>Moves the file of the user theme <paramref name="id"/> to the Recycle Bin or Trash through <paramref name="trash"/>.</summary>
+    /// <exception cref="InvalidOperationException"><paramref name="id"/> is a built-in theme with no user file shadowing it.</exception>
+    /// <exception cref="FileNotFoundException">There is no user theme <paramref name="id"/>.</exception>
+    public void Delete(string id, IFileTrash trash)
+    {
+        ArgumentNullException.ThrowIfNull(trash);
+        string path = ExistingUserFile(id, "deleted");
+        trash.MoveToTrash(path);
+        log.LogInfo($"Moved the theme {path} to the trash.");
+    }
+
+    /// <summary>The path of the user file of theme <paramref name="id"/>, which must exist.</summary>
+    private string ExistingUserFile(string id, string action)
     {
         string path = PathFor(id);
         if (File.Exists(path))
         {
-            File.Delete(path);
-            log.LogInfo($"Deleted the theme {path}.");
-            return;
+            return path;
         }
 
         if (BuiltInIds.Contains(id, ThemeIds.Comparer))
         {
-            throw new InvalidOperationException($"The built-in theme '{id}' cannot be deleted.");
+            throw new InvalidOperationException($"The built-in theme '{id}' cannot be {action}.");
         }
 
-        throw new FileNotFoundException($"There is no user theme '{id}' to delete.", path);
+        throw new FileNotFoundException($"There is no user theme '{id}' to be {action}.", path);
+    }
+
+    /// <summary>Whether <paramref name="id"/> is <paramref name="slug"/> or a numbered variant of it, <c>&lt;slug&gt;-&lt;n&gt;</c>.</summary>
+    private static bool IsFiledUnder(string id, string slug)
+    {
+        if (ThemeIds.Comparer.Equals(id, slug))
+        {
+            return true;
+        }
+
+        return id.Length > slug.Length + 1
+            && id.StartsWith(slug + "-", StringComparison.OrdinalIgnoreCase)
+            && id.AsSpan(slug.Length + 1).IndexOfAnyExceptInRange('0', '9') < 0;
+    }
+
+    /// <summary>Moves the renamed theme's file at <paramref name="path"/> to the first free id from <paramref name="slug"/>.</summary>
+    private ThemeDefinition MoveRenamed(ThemeDefinition renamed, string path, string slug)
+    {
+        HashSet<string> taken = TakenIds();
+        if (ThemeIds.IsDeviceName(slug))
+        {
+            taken.Add(slug);
+        }
+
+        while (true)
+        {
+            string newId = ThemeIds.Unique(slug, taken);
+            string destination = PathFor(newId);
+            try
+            {
+                if (MoveWithRetry(path, destination, overwrite: false))
+                {
+                    log.LogInfo($"Renamed the theme {path} to '{renamed.Name}', now {destination}.");
+                    return renamed with { Id = newId, FilePath = destination };
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                log.LogWarning($"Renamed the theme {path} to '{renamed.Name}' but cannot move it to {destination}; it keeps its file.", exception);
+                return renamed;
+            }
+
+            taken.Add(newId);
+        }
+    }
+
+    private static ThemeDefinition ParseOnDisk(string text, string id, string path) =>
+        ThemeParser.Parse(text, id, ThemeSource.User, path).Theme
+        ?? throw ThemeFilePatch.CannotUpdate(path, "the file on disk is not a valid theme.");
+
+    /// <summary><paramref name="current"/> edited to hold <paramref name="wanted"/>, checked by <see cref="CheckPatch"/>.</summary>
+    private static string PatchedText(string current, string path, ThemeDefinition onDisk, ThemeDefinition wanted) =>
+        CheckPatch(current, ThemeFilePatch.Apply(current, path, onDisk, wanted), path, wanted);
+
+    /// <summary>
+    /// <paramref name="patched"/>, once it reads back as <paramref name="wanted"/> with the same warnings <paramref name="current"/>
+    /// gives, so its unknown fields, <c>$schema</c> and <c>formatVersion</c> came through intact.
+    /// </summary>
+    /// <exception cref="ThemeException">It does not; the file is left as it is.</exception>
+    internal static string CheckPatch(string current, string patched, string path, ThemeDefinition wanted)
+    {
+        ThemeLoadResult before = ThemeParser.Parse(current, wanted.Id, wanted.Source, path);
+        ThemeLoadResult after = ThemeParser.Parse(patched, wanted.Id, wanted.Source, path);
+        bool intact =
+            after.Theme is not null
+            && after.Theme.ContentEquals(wanted)
+            && after.Warnings.Order(StringComparer.Ordinal).SequenceEqual(before.Warnings.Order(StringComparer.Ordinal));
+        return intact ? patched : throw ThemeFilePatch.CannotUpdate(path, "the edited text would not read back as the theme being saved.");
+    }
+
+    private static string WithBom(string text, bool bom) => bom ? "\uFEFF" + text : text;
+
+    /// <summary>
+    /// The text of the user file at <paramref name="path"/>, read with sharing that allows a concurrent write or delete, without its
+    /// UTF-8 byte order mark, and whether it had one.
+    /// </summary>
+    private static (string Text, bool Bom) ReadShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(
+            stream,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            detectEncodingFromByteOrderMarks: false
+        );
+        string text = reader.ReadToEnd();
+        return text.StartsWith('\uFEFF') ? (text[1..], true) : (text, false);
     }
 
     /// <summary>The text of the embedded built-in theme <paramref name="id"/>.</summary>
@@ -174,6 +353,9 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }
+
+    private static string NoUsableIdError(string path) =>
+        $"The file name '{Path.GetFileName(path)}' gives no usable theme id; rename it to <name>{FileSuffix}.";
 
     /// <summary>The manifest resource name the built-in theme <paramref name="id"/> is embedded under.</summary>
     internal static string ResourceName(string id) => ResourcePrefix + id + FileSuffix;
@@ -379,9 +561,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     {
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(stream);
-            return ThemeParser.Parse(reader.ReadToEnd(), id, ThemeSource.User, path);
+            return ThemeParser.Parse(ReadShared(path).Text, id, ThemeSource.User, path);
         }
         catch (IOException exception)
         {
@@ -408,23 +588,27 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         }
     }
 
+    /// <summary>The name of the copy of <paramref name="theme"/> written as <paramref name="copyId"/>, <c>&lt;id&gt;-&lt;n&gt;</c>.</summary>
+    private static string CopyName(ThemeDefinition theme, string copyId)
+    {
+        int number = int.Parse(copyId.AsSpan(theme.Id.Length + 1), NumberStyles.None, CultureInfo.InvariantCulture);
+        return number == 2 ? theme.Name + " (copy)" : string.Create(CultureInfo.InvariantCulture, $"{theme.Name} (copy {number - 1})");
+    }
+
     /// <summary>
     /// Writes a new user theme file under <paramref name="baseId"/> or the first free numbered variant of it, never replacing a file:
-    /// when another writer creates the chosen file first, the next number is tried. Returns the id written.
+    /// when another writer creates the chosen file first, the next number is tried. Ids in <paramref name="alsoTaken"/> are never
+    /// chosen. <paramref name="textFor"/> gives the file text for the id being tried. Returns the id written.
     /// </summary>
-    private string CreateNew(string baseId, string text)
+    private string CreateNew(string baseId, Func<string, string> textFor, IEnumerable<string> alsoTaken)
     {
-        var taken = new HashSet<string>(BuiltInIds, ThemeIds.Comparer);
-        if (Directory.Exists(UserFolder))
-        {
-            taken.UnionWith(UserFiles().Select(ThemeIds.FromFileName));
-        }
-
+        HashSet<string> taken = TakenIds();
+        taken.UnionWith(alsoTaken);
         while (true)
         {
             string id = ThemeIds.Unique(baseId, taken);
             string path = PathFor(id);
-            string temporary = WriteTemporary(path, text);
+            string temporary = WriteTemporary(path, textFor(id));
             try
             {
                 if (MoveWithRetry(temporary, path, overwrite: false))
@@ -439,6 +623,18 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
 
             taken.Add(id);
         }
+    }
+
+    /// <summary>The built-in ids and the ids of every user file.</summary>
+    private HashSet<string> TakenIds()
+    {
+        var taken = new HashSet<string>(BuiltInIds, ThemeIds.Comparer);
+        if (Directory.Exists(UserFolder))
+        {
+            taken.UnionWith(UserFiles().Select(ThemeIds.FromFileName));
+        }
+
+        return taken;
     }
 
     /// <summary>Replaces <paramref name="path"/> with <paramref name="text"/>, leaving no partial file behind.</summary>

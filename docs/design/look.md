@@ -31,8 +31,9 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
 ## Theme settings window
 
 - The **visual editor**:
-  - **Left:** the theme list, in two sections, Built-in and Yours.
+  - **Left:** the theme list, in two sections, Built-in and Yours. Its context menu has Rename and Delete, and the Appearance choice sits at the foot of the list.
   - **Middle:** every token, grouped as in the [token table](themes.md#tokens) (Page, Chrome, Code, Syntax, Type, Layout). It has Shared / Light / Dark tabs, colour swatches with hex fields and a picker, and value fields for fonts and sizes.
   - **Right:** a live preview.
-- Footer: **Import…**, **Export…**, **Edit as text** (opens the file in the default editor), **Revert**, **Save**. A built-in theme is read-only: editing one starts with "Duplicate" into Yours.
+- Unsaved changes are marked with a dot.
+- Footer: **Import…**, **Export…**, **Edit as text** (opens the file in the default editor), **Revert**, **Save**. A built-in theme is read-only and has no file, so it shows **Duplicate** in place of Edit as text: editing one starts with a copy in Yours. Edit as text exists only for user themes.
 - Editing a theme file outside the app re-applies it live.

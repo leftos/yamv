@@ -20,7 +20,8 @@ public enum TokenKind
 /// <param name="Min">The smallest allowed value of a number token; 0 for the other kinds.</param>
 /// <param name="Max">The largest allowed value of a number token; 0 for the other kinds.</param>
 /// <param name="Unit">The CSS unit of a number token, <c>px</c>, <c>em</c> or empty.</param>
-public sealed record TokenInfo(string Name, TokenKind Kind, string Group, string CssVariable, double Min, double Max, string Unit);
+/// <param name="Label">The friendly name the theme editor shows, such as "Selected row".</param>
+public sealed record TokenInfo(string Name, TokenKind Kind, string Group, string CssVariable, double Min, double Max, string Unit, string Label);
 
 /// <summary>The catalogue of theme tokens and their default values.</summary>
 public static class ThemeTokens
@@ -28,41 +29,41 @@ public static class ThemeTokens
     /// <summary>Every token, in the order of the token table in <c>docs/design/themes.md</c>.</summary>
     public static IReadOnlyList<TokenInfo> All { get; } =
     [
-        Color("pageBackground", "Page"),
-        Color("text", "Page"),
-        Color("textSecondary", "Page"),
-        Color("textMuted", "Page"),
-        Color("heading", "Page"),
-        Color("accent", "Page"),
-        Color("accentSoft", "Page"),
-        Color("line", "Page"),
-        Color("quote", "Page"),
-        Color("chromeBackground", "Chrome"),
-        Color("sidebarBackground", "Chrome"),
-        Color("selectionBackground", "Chrome"),
-        Color("selectionText", "Chrome"),
-        Color("hoverBackground", "Chrome"),
-        Color("warning", "Chrome"),
-        Color("warningBackground", "Chrome"),
-        Color("warningLine", "Chrome"),
-        Color("codeBackground", "Code"),
-        Color("codeLine", "Code"),
-        Color("findMatch", "Code"),
-        Color("findCurrent", "Code"),
-        Color("syntaxKeyword", "Syntax"),
-        Color("syntaxString", "Syntax"),
-        Color("syntaxComment", "Syntax"),
-        Color("syntaxType", "Syntax"),
-        Color("syntaxNumber", "Syntax"),
-        Token("uiFont", TokenKind.Font, "Type"),
-        Token("bodyFont", TokenKind.Font, "Type"),
-        Token("headingFont", TokenKind.Font, "Type"),
-        Token("monoFont", TokenKind.Font, "Type"),
-        Number("bodySize", 10, 32, "px"),
-        Number("lineHeight", 1.0, 2.5, ""),
-        Number("h1Size", 1.0, 4.0, "em"),
-        Number("headingWeight", 100, 900, ""),
-        Token("h2Rule", TokenKind.Bool, "Layout"),
+        Color("pageBackground", "Page", "Page background"),
+        Color("text", "Page", "Text"),
+        Color("textSecondary", "Page", "Secondary text"),
+        Color("textMuted", "Page", "Muted text"),
+        Color("heading", "Page", "Headings"),
+        Color("accent", "Page", "Accent"),
+        Color("accentSoft", "Page", "Accent, soft"),
+        Color("line", "Page", "Lines"),
+        Color("quote", "Page", "Quote bar"),
+        Color("chromeBackground", "Chrome", "Title bar and footers"),
+        Color("sidebarBackground", "Chrome", "Sidebar"),
+        Color("selectionBackground", "Chrome", "Selected row"),
+        Color("selectionText", "Chrome", "Selected row text"),
+        Color("hoverBackground", "Chrome", "Hovered row"),
+        Color("warning", "Chrome", "Warning"),
+        Color("warningBackground", "Chrome", "Warning fill"),
+        Color("warningLine", "Chrome", "Warning border"),
+        Color("codeBackground", "Code", "Code background"),
+        Color("codeLine", "Code", "Code block border"),
+        Color("findMatch", "Code", "Find match"),
+        Color("findCurrent", "Code", "Current match"),
+        Color("syntaxKeyword", "Syntax", "Keywords"),
+        Color("syntaxString", "Syntax", "Strings"),
+        Color("syntaxComment", "Syntax", "Comments"),
+        Color("syntaxType", "Syntax", "Types and functions"),
+        Color("syntaxNumber", "Syntax", "Numbers"),
+        Token("uiFont", TokenKind.Font, "Type", "App font"),
+        Token("bodyFont", TokenKind.Font, "Type", "Body font"),
+        Token("headingFont", TokenKind.Font, "Type", "Heading font"),
+        Token("monoFont", TokenKind.Font, "Type", "Code font"),
+        Number("bodySize", "Body size", 10, 32, "px"),
+        Number("lineHeight", "Line height", 1.0, 2.5, ""),
+        Number("h1Size", "H1 size", 1.0, 4.0, "em"),
+        Number("headingWeight", "Heading weight", 100, 900, ""),
+        Token("h2Rule", TokenKind.Bool, "Layout", "Rule under H2"),
     ];
 
     private static readonly Dictionary<string, TokenInfo> ByName = All.ToDictionary(token => token.Name, StringComparer.Ordinal);
@@ -162,12 +163,13 @@ public static class ThemeTokens
         return values.ToFrozenDictionary(StringComparer.Ordinal);
     }
 
-    private static TokenInfo Color(string name, string group) => Token(name, TokenKind.Color, group);
+    private static TokenInfo Color(string name, string group, string label) => Token(name, TokenKind.Color, group, label);
 
-    private static TokenInfo Number(string name, double min, double max, string unit) =>
-        new(name, TokenKind.Number, "Layout", CssVariableFor(name), min, max, unit);
+    private static TokenInfo Number(string name, string label, double min, double max, string unit) =>
+        new(name, TokenKind.Number, "Layout", CssVariableFor(name), min, max, unit, label);
 
-    private static TokenInfo Token(string name, TokenKind kind, string group) => new(name, kind, group, CssVariableFor(name), 0, 0, "");
+    private static TokenInfo Token(string name, TokenKind kind, string group, string label) =>
+        new(name, kind, group, CssVariableFor(name), 0, 0, "", label);
 
     private static string CssVariableFor(string name)
     {

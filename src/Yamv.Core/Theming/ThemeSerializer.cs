@@ -81,21 +81,46 @@ public static class ThemeSerializer
         }
     }
 
+    /// <summary>The JSON text of <paramref name="value"/> as a theme file writes it.</summary>
+    /// <exception cref="ArgumentException">The value cannot be written as JSON: a number that is not finite, or invalid text.</exception>
+    internal static string ValueText(ThemeValue value) => WriteStandalone(writer => WriteValue(writer, value));
+
+    /// <summary>The JSON string literal of <paramref name="text"/> as a theme file writes it.</summary>
+    /// <exception cref="ArgumentException"><paramref name="text"/> is not valid UTF-16.</exception>
+    internal static string StringText(string text) => WriteStandalone(writer => writer.WriteStringValue(text));
+
+    private static string WriteStandalone(Action<Utf8JsonWriter> write)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, WriterOptions))
+        {
+            write(writer);
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
     private static void WriteValue(Utf8JsonWriter writer, string name, ThemeValue value)
+    {
+        writer.WritePropertyName(name);
+        WriteValue(writer, value);
+    }
+
+    private static void WriteValue(Utf8JsonWriter writer, ThemeValue value)
     {
         switch (value)
         {
             case ColorValue color:
-                writer.WriteString(name, color.Hex);
+                writer.WriteStringValue(color.Hex);
                 break;
             case FontValue font:
-                writer.WriteString(name, font.Family);
+                writer.WriteStringValue(font.Family);
                 break;
             case NumberValue number:
-                writer.WriteNumber(name, number.Value);
+                writer.WriteNumberValue(number.Value);
                 break;
             case BoolValue flag:
-                writer.WriteBoolean(name, flag.Value);
+                writer.WriteBooleanValue(flag.Value);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown theme value type.");

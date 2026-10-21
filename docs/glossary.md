@@ -20,3 +20,4 @@
 - **Variant**: the light or dark half of a theme family.
 - **Viewer instance**: a YAMV window started with file arguments (or, on macOS, a Finder open). It shows only those files and remembers nothing.
 - **WebView2 user-data folder**: where WebView2 keeps the document page's browser profile on Windows: `%LOCALAPPDATA%\YAMV\webview2`, shared by every YAMV process, or the folder `WEBVIEW2_USER_DATA_FOLDER` names when set (each hidden run gets its own).
+- **Yours**: the user-themes section of the theme list in the theme settings window, below Built-in.
