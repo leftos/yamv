@@ -42,6 +42,18 @@ public sealed class ContentWidthViewModelTests
         });
 
     [Fact]
+    public Task A_popover_the_fixture_opens_has_finished_its_opening_reads() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+
+            Assert.Equal(1, popover.ClearAllCount);
+        });
+
+    [Fact]
     public Task Opening_shows_the_documents_width_on_its_source_segment() =>
         Headless.RunAsync(async () =>
         {
@@ -397,13 +409,20 @@ public sealed class ContentWidthViewModelTests
             ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
             TaskCompletionSource hold = fixture.HoldQueue();
 
-            popover.SliderPosition = 1;
-            popover.EndDrag();
-            popover.Close();
-            using (new FileStream(fixture.WidthsFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            try
             {
-                hold.SetResult();
-                await fixture.ViewModel.WhenRendersSettled();
+                popover.SliderPosition = 1;
+                popover.EndDrag();
+                popover.Close();
+                using (new FileStream(fixture.WidthsFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    hold.SetResult();
+                    await fixture.ViewModel.WhenRendersSettled();
+                }
+            }
+            finally
+            {
+                hold.TrySetResult();
             }
 
             Assert.Equal(560, fixture.Widths.Get(Docs)?.Px);
@@ -537,15 +556,31 @@ public sealed class ContentWidthViewModelTests
             fixture.ViewModel.Open([DocA, DocB]);
             await fixture.ViewModel.WhenRendersSettled();
             ContentWidthViewModel popover = await fixture.CreateAsync();
+            var docBShown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.Surface.OnShown = shown =>
+            {
+                if (shown.DocumentPath == DocB)
+                {
+                    docBShown.TrySetResult();
+                }
+            };
             TaskCompletionSource hold = fixture.HoldQueue();
 
-            popover.SliderPosition = 1;
-            popover.EndDrag();
-            fixture.ViewModel.SelectNext();
-            using (new FileStream(fixture.WidthsFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            try
             {
-                hold.SetResult();
-                await fixture.ViewModel.WhenRendersSettled();
+                popover.SliderPosition = 1;
+                popover.EndDrag();
+                fixture.ViewModel.SelectNext();
+                await docBShown.Task.WaitAsync(GateBackstop, TestContext.Current.CancellationToken);
+                using (new FileStream(fixture.WidthsFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    hold.SetResult();
+                    await fixture.ViewModel.WhenRendersSettled();
+                }
+            }
+            finally
+            {
+                hold.TrySetResult();
             }
 
             Assert.Equal(DocB, fixture.ViewModel.SelectedPath);
@@ -1008,10 +1043,15 @@ public sealed class ContentWidthViewModelTests
             return await CreateAsync();
         }
 
+        /// <summary>
+        /// Creates the popover over a pane <paramref name="paneWidth"/> wide and waits for the work its opening queued, so a test
+        /// that locks <c>widths.json</c> next meets no store read in flight.
+        /// </summary>
         public async Task<ContentWidthViewModel> CreateAsync(double paneWidth = WidePane)
         {
             ContentWidthViewModel? popover = await ViewModel.CreateContentWidthPopoverAsync(paneWidth);
             Assert.NotNull(popover);
+            await ViewModel.WhenRendersSettled();
             return popover;
         }
 

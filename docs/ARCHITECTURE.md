@@ -180,7 +180,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
   `tests/Yamv.Core.Tests/Settings/SettingsStoreTests.cs` covers the settings store and `SettingsWriterTests.cs` its writer.
 
-  `tests/Yamv.Core.Tests/Widths/WidthScopesTests.cs` covers the Saved for segments, and `tests/Yamv.App.Tests/ViewModels/ContentWidthViewModelTests.cs` the content-width popover's view model over a temporary `widths.json`.
+  `tests/Yamv.Core.Tests/Widths/WidthScopesTests.cs` covers the Saved for segments, and `tests/Yamv.App.Tests/ViewModels/ContentWidthViewModelTests.cs` the content-width popover's view model over a temporary `widths.json`. A test there that locks `widths.json` with `FileShare.None` first lets every store read in flight finish: the fixture's open waits for the work the popover's opening queued, and after a selection change the test waits for the new document's show.
 
   `tests/Yamv.Core.Tests/Platform/RevealCommandTests.cs` covers the reveal command, `OpenFileCommandTests.cs` beside it the open command, and `tests/Yamv.Core.Tests/Theming/ColorMathTests.cs` the colour picker's conversions.
 - `tools/dev/page-check/`: a headless Chromium check of the document page (`npm install`, then `npm run check`), against a stubbed host.
