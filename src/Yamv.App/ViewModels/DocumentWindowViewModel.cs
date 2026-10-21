@@ -304,10 +304,8 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>The session state of this window, with the scroll positions it remembers.</summary>
     /// <param name="bounds">The window's restored rectangle, or null when none is known.</param>
     /// <param name="sidebarWidth">The sidebar width in device-independent pixels.</param>
-    /// <param name="themeId">The id of the theme in use.</param>
-    /// <param name="appearance">The light or dark preference: <c>system</c>, <c>light</c> or <c>dark</c>.</param>
-    public SessionState BuildSession(WindowBounds? bounds, double sidebarWidth, string themeId, string appearance) =>
-        SessionSnapshot.Build(_state, _scrollPositions, bounds, sidebarWidth, themeId, appearance);
+    public SessionState BuildSession(WindowBounds? bounds, double sidebarWidth) =>
+        SessionSnapshot.Build(_state, _scrollPositions, bounds, sidebarWidth);
 
     /// <summary>Stops the missing-file re-check and stops following the state and the surface.</summary>
     public void Dispose()

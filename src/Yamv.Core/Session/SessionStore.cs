@@ -11,8 +11,6 @@ namespace Yamv.Core.Session;
 public sealed class SessionStore(string filePath, IAppLog log)
 {
     private const double DefaultSidebarWidth = 280;
-    private const string DefaultThemeId = "studio";
-    private const string DefaultAppearance = "system";
 
     /// <summary>The JSON file the state lives in.</summary>
     public string FilePath { get; } = filePath;
@@ -20,16 +18,9 @@ public sealed class SessionStore(string filePath, IAppLog log)
     /// <summary>
     /// Loads the stored state with out-of-range scroll positions clamped and entries for files that are not open dropped.
     /// </summary>
-    public SessionState Load() => Read(moveCorruptFileAside: true);
+    public SessionState Load() => Read();
 
-    /// <summary>
-    /// Loads the stored state like <see cref="Load"/>, but never writes or moves the file: a corrupt or unreadable file is
-    /// logged and left exactly where it is, and yields <see cref="SessionState.Empty"/>. A viewer window reads the theme this
-    /// way, so it never changes the main window's session.
-    /// </summary>
-    public SessionState LoadReadOnly() => Read(moveCorruptFileAside: false);
-
-    private SessionState Read(bool moveCorruptFileAside)
+    private SessionState Read()
     {
         string json;
         try
@@ -61,16 +52,8 @@ public sealed class SessionStore(string filePath, IAppLog log)
         }
         catch (JsonException exception)
         {
-            if (moveCorruptFileAside)
-            {
-                log.LogWarning($"The session file {FilePath} is unreadable; moving it to {FilePath}.bad.", exception);
-                MoveCorruptFileAside();
-            }
-            else
-            {
-                log.LogWarning($"The session file {FilePath} is unreadable; leaving it in place.", exception);
-            }
-
+            log.LogWarning($"The session file {FilePath} is unreadable; moving it to {FilePath}.bad.", exception);
+            MoveCorruptFileAside();
             return SessionState.Empty;
         }
 
@@ -114,8 +97,6 @@ public sealed class SessionStore(string filePath, IAppLog log)
             SelectedFile = state.SelectedFile is not null && open.Contains(state.SelectedFile) ? state.SelectedFile : null,
             Window = NormalizeWindow(state.Window),
             SidebarWidth = NormalizeSidebarWidth(state.SidebarWidth),
-            ThemeId = string.IsNullOrWhiteSpace(state.ThemeId) ? DefaultThemeId : state.ThemeId,
-            Appearance = NormalizeAppearance(state.Appearance),
         };
     }
 
@@ -167,8 +148,6 @@ public sealed class SessionStore(string filePath, IAppLog log)
         && bounds.Height > 0;
 
     private static double NormalizeSidebarWidth(double width) => double.IsFinite(width) && width > 0 ? width : DefaultSidebarWidth;
-
-    private static string NormalizeAppearance(string appearance) => appearance is "system" or "light" or "dark" ? appearance : DefaultAppearance;
 
     private void MoveCorruptFileAside()
     {

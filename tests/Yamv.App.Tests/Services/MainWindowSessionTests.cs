@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Interactivity;
@@ -11,7 +10,6 @@ using Yamv.App.Views;
 using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
 using Yamv.Core.Session;
-using Yamv.Core.Theming;
 using Yamv.Core.Widths;
 
 namespace Yamv.App.Tests.Services;
@@ -126,21 +124,6 @@ public sealed class MainWindowSessionTests
         });
 
     [Fact]
-    public Task Saved_theme_is_the_one_the_bridge_was_asked_for() =>
-        Headless.RunAsync(async () =>
-        {
-            await using var fixture = new Fixture();
-            fixture.Bridge.Apply("nope", "system");
-            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
-
-            fixture.ViewModel.SelectNext();
-            await fixture.SettleAsync();
-            fixture.Time.Advance(Delay);
-
-            Assert.Equal("nope", fixture.Saved().ThemeId);
-        });
-
-    [Fact]
     public Task Locate_writes_the_new_path_to_the_session() =>
         Headless.RunAsync(async () =>
         {
@@ -188,8 +171,7 @@ public sealed class MainWindowSessionTests
                 new DocumentWindowServices(widths, File.ReadAllText, new FakeTimeProvider(), Log)
             );
             Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
-            Bridge = new ThemeBridge(new ThemeCatalog(Path.Combine(_root, "themes"), Log), Application.Current!, Log);
-            _session = new MainWindowSession(Window, ViewModel, Bridge, new SessionStore(SessionFile, Log), Time, Log);
+            _session = new MainWindowSession(Window, ViewModel, new SessionStore(SessionFile, Log), Time, Log);
         }
 
         public string DocA { get; }
@@ -209,8 +191,6 @@ public sealed class MainWindowSessionTests
         public DocumentWindowViewModel ViewModel { get; }
 
         public MainWindow Window { get; }
-
-        public ThemeBridge Bridge { get; }
 
         public async Task OpenAsync(params string[] paths)
         {
@@ -242,7 +222,6 @@ public sealed class MainWindowSessionTests
             }
 
             ViewModel.Dispose();
-            Bridge.Dispose();
             await ViewModel.WhenRendersSettled();
             Directory.Delete(_root, recursive: true);
         }

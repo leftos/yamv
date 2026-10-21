@@ -550,7 +550,7 @@ public sealed class DocumentWindowViewModelTests
         {
             await using var fixture = new Fixture();
             SessionState? first = null;
-            fixture.ViewModel.SessionDirty += (_, _) => first ??= fixture.ViewModel.BuildSession(null, 280, "studio", "system");
+            fixture.ViewModel.SessionDirty += (_, _) => first ??= fixture.ViewModel.BuildSession(null, 280);
             var session = new SessionState
             {
                 OpenFiles = [RepoDocA],
@@ -651,7 +651,7 @@ public sealed class DocumentWindowViewModelTests
             fixture.Surface.RaiseScroll(0.4);
 
             Assert.Equal([true], dirty);
-            SessionState session = fixture.ViewModel.BuildSession(null, 280, "studio", "system");
+            SessionState session = fixture.ViewModel.BuildSession(null, 280);
             Assert.Equal(0.4, session.ScrollPositions[RepoDocA]);
         });
 
@@ -671,7 +671,7 @@ public sealed class DocumentWindowViewModelTests
 
             fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
             fixture.Surface.RaiseScroll(0.7);
-            SessionState session = fixture.ViewModel.BuildSession(null, 280, "studio", "system");
+            SessionState session = fixture.ViewModel.BuildSession(null, 280);
             gate.Set();
             await fixture.ViewModel.WhenRendersSettled();
 
@@ -713,7 +713,7 @@ public sealed class DocumentWindowViewModelTests
             fixture.ViewModel.Replace(RepoDocA, RepoDocC);
             await fixture.ViewModel.WhenRendersSettled();
 
-            SessionState session = fixture.ViewModel.BuildSession(null, 280, "studio", "system");
+            SessionState session = fixture.ViewModel.BuildSession(null, 280);
             Assert.Equal(0.5, session.ScrollPositions[RepoDocC]);
             Assert.False(session.ScrollPositions.ContainsKey(RepoDocA));
             Assert.Equal(0.5, fixture.Surface.Shown[^1].Scroll);
@@ -748,15 +748,13 @@ public sealed class DocumentWindowViewModelTests
             GroupRow(fixture.ViewModel, Alpha).IsExpanded = false;
             fixture.ViewModel.ToggleSidebarCommand.Execute(null);
 
-            SessionState session = fixture.ViewModel.BuildSession(new WindowBounds(10, 20, 800, 600, false), 300, "ink", "dark");
+            SessionState session = fixture.ViewModel.BuildSession(new WindowBounds(10, 20, 800, 600, false), 300);
 
             Assert.True(session.SidebarHidden);
             Assert.Equal([Alpha], session.CollapsedGroups);
             Assert.Equal([RepoDocA, AlphaDoc], session.OpenFiles);
             Assert.Equal(RepoDocA, session.SelectedFile);
             Assert.Equal(300, session.SidebarWidth);
-            Assert.Equal("ink", session.ThemeId);
-            Assert.Equal("dark", session.Appearance);
         });
 
     [Fact]

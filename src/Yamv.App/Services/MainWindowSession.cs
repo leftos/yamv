@@ -15,32 +15,21 @@ public sealed class MainWindowSession : IDisposable
 {
     private readonly MainWindow _window;
     private readonly DocumentWindowViewModel _viewModel;
-    private readonly ThemeBridge _bridge;
     private readonly SessionSaver _saver;
     private bool _disposed;
 
     /// <summary>Starts following <paramref name="window"/> and <paramref name="viewModel"/>, saving through <paramref name="store"/>.</summary>
     /// <param name="window">The main window, whose bounds and sidebar width are saved.</param>
     /// <param name="viewModel">The window's view model, which builds the session and reports its changes.</param>
-    /// <param name="bridge">The theme bridge, whose requested theme and appearance are saved.</param>
     /// <param name="store">Where the session is written.</param>
     /// <param name="time">The clock of the save delay; the app passes <see cref="TimeProvider.System"/>.</param>
     /// <param name="log">Where a failed save is reported.</param>
-    public MainWindowSession(
-        MainWindow window,
-        DocumentWindowViewModel viewModel,
-        ThemeBridge bridge,
-        SessionStore store,
-        TimeProvider time,
-        IAppLog log
-    )
+    public MainWindowSession(MainWindow window, DocumentWindowViewModel viewModel, SessionStore store, TimeProvider time, IAppLog log)
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(viewModel);
-        ArgumentNullException.ThrowIfNull(bridge);
         _window = window;
         _viewModel = viewModel;
-        _bridge = bridge;
         _saver = new SessionSaver(store, time, log);
         viewModel.SessionDirty += OnSessionDirty;
         window.SavedBoundsChanged += OnLayoutChanged;
@@ -65,8 +54,7 @@ public sealed class MainWindowSession : IDisposable
         _saver.Dispose();
     }
 
-    private SessionState Snapshot() =>
-        _viewModel.BuildSession(_window.SavedBounds, _window.SidebarWidth, _bridge.RequestedThemeId, _bridge.RequestedAppearance);
+    private SessionState Snapshot() => _viewModel.BuildSession(_window.SavedBounds, _window.SidebarWidth);
 
     private void OnSessionDirty(object? sender, SessionDirtyEventArgs e)
     {

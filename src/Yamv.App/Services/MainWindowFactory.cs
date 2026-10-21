@@ -52,7 +52,7 @@ public static class MainWindowFactory
             viewModel.Restore(session);
             var window = new MainWindow(viewModel, view, view, log);
             RestoreLayout(window, session);
-            var saver = new MainWindowSession(window, viewModel, bridge, store, TimeProvider.System, log);
+            var saver = new MainWindowSession(window, viewModel, store, TimeProvider.System, log);
             return new MainWindowComposition(window, viewModel, bridge, view, saver);
         }
         catch

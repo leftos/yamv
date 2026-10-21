@@ -62,8 +62,9 @@ public sealed class ThemeBridge : IDisposable
     public ResolvedTheme? Current { get; private set; }
 
     /// <summary>
-    /// The theme id the last <see cref="Apply"/> asked for, even when it resolved to Studio; <c>studio</c> before any. The session
-    /// saves this, so a user theme that is invalid for a moment is not rewritten to Studio.
+    /// The theme id the last <see cref="Apply"/> asked for, even when it resolved to Studio; <c>studio</c> before any. This and
+    /// <see cref="RequestedAppearance"/> are the values <c>App</c> writes to <c>settings.json</c> through <see cref="RequestChanged"/>,
+    /// so a user theme that is invalid for a moment is not rewritten to Studio.
     /// </summary>
     public string RequestedThemeId { get; private set; } = FallbackThemeId;
 

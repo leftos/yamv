@@ -28,8 +28,6 @@ public sealed class SessionStoreTests : IDisposable
             Window = new WindowBounds(10, 20, 1200, 800, IsMaximized: true),
             SidebarWidth = 340,
             CollapsedGroups = ["C:/notes"],
-            ThemeId = "noir",
-            Appearance = "dark",
         };
 
         CreateStore().Save(state);
@@ -42,8 +40,6 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal(state.Window, loaded.Window);
         Assert.Equal(340, loaded.SidebarWidth);
         Assert.Equal(state.CollapsedGroups, loaded.CollapsedGroups);
-        Assert.Equal("noir", loaded.ThemeId);
-        Assert.Equal("dark", loaded.Appearance);
         Assert.Empty(_log.Entries);
     }
 
@@ -89,6 +85,7 @@ public sealed class SessionStoreTests : IDisposable
     public void Load_MissingFile_ReturnsEmpty()
     {
         Assert.Same(SessionState.Empty, CreateStore().Load());
+        Assert.False(Directory.Exists(_directory));
         Assert.Empty(_log.Entries);
     }
 
@@ -207,8 +204,6 @@ public sealed class SessionStoreTests : IDisposable
 
     [Theory]
     [InlineData("""{ "openFiles": null }""")]
-    [InlineData("""{ "themeId": null }""")]
-    [InlineData("""{ "appearance": null }""")]
     public void Load_ExplicitNullForANonNullableField_MovesTheFileAside(string json)
     {
         Directory.CreateDirectory(_directory);
@@ -246,18 +241,6 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal(expectedGroups, loaded.CollapsedGroups);
         Assert.Equal(0.5, loaded.ScrollPositions["C:/notes/a.md"]);
         Assert.Empty(_log.Entries);
-    }
-
-    [Fact]
-    public void Load_UnknownAppearanceAndEmptyThemeId_FallBackToDefaults()
-    {
-        Directory.CreateDirectory(_directory);
-        File.WriteAllText(SessionFile, """{ "themeId": "", "appearance": "sepia" }""");
-
-        SessionState loaded = CreateStore().Load();
-
-        Assert.Equal("studio", loaded.ThemeId);
-        Assert.Equal("system", loaded.Appearance);
     }
 
     [Fact]
@@ -330,54 +313,44 @@ public sealed class SessionStoreTests : IDisposable
         Assert.False(File.Exists(SessionFile + ".bad"));
     }
 
-    private SessionStore CreateStore() => new(SessionFile, _log);
-
     [Fact]
-    public void LoadReadOnly_CorruptFile_LeavesItInPlaceAndLogsOneWarning()
+    public void Save_WritesNoThemeMembers()
     {
-        Directory.CreateDirectory(_directory);
-        File.WriteAllText(SessionFile, "{ not json");
+        CreateStore().Save(SessionState.Empty);
 
-        Assert.Same(SessionState.Empty, CreateStore().LoadReadOnly());
+        string json = File.ReadAllText(SessionFile);
 
-        Assert.Equal("{ not json", File.ReadAllText(SessionFile));
-        Assert.False(File.Exists(SessionFile + ".bad"));
-        LogEntry warning = Assert.Single(_log.Entries);
-        Assert.Equal("warning", warning.Level);
-        Assert.Contains(SessionFile, warning.Message);
-        Assert.NotNull(warning.Exception);
+        Assert.DoesNotContain("themeId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("appearance", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void LoadReadOnly_MissingFile_ReturnsEmptyAndCreatesNothing()
+    public void Load_SessionFileThatStillHoldsTheThemeMembers_LoadsTheRest()
     {
-        Assert.Same(SessionState.Empty, CreateStore().LoadReadOnly());
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(
+            SessionFile,
+            """
+            {
+              "openFiles": ["C:/notes/a.md"],
+              "selectedFile": "C:/notes/a.md",
+              "sidebarWidth": 320,
+              "window": { "x": 10, "y": 20, "width": 1200, "height": 800, "isMaximized": false },
+              "themeId": "paper",
+              "appearance": "light"
+            }
+            """
+        );
 
-        Assert.False(Directory.Exists(_directory));
+        SessionState loaded = CreateStore().Load();
+
+        Assert.Equal(["C:/notes/a.md"], loaded.OpenFiles);
+        Assert.Equal("C:/notes/a.md", loaded.SelectedFile);
+        Assert.Equal(320, loaded.SidebarWidth);
+        Assert.Equal(new WindowBounds(10, 20, 1200, 800, IsMaximized: false, Scaling: 1), loaded.Window);
+        Assert.False(File.Exists(SessionFile + ".bad"));
         Assert.Empty(_log.Entries);
     }
 
-    [Fact]
-    public void LoadReadOnly_SavedState_ReturnsTheThemeItHolds()
-    {
-        CreateStore().Save(new SessionState { ThemeId = "ink", Appearance = "dark" });
-
-        SessionState loaded = CreateStore().LoadReadOnly();
-
-        Assert.Equal("ink", loaded.ThemeId);
-        Assert.Equal("dark", loaded.Appearance);
-    }
-
-    [Fact]
-    public void LoadReadOnly_NormalizesTheStateItReads()
-    {
-        Directory.CreateDirectory(_directory);
-        File.WriteAllText(SessionFile, "{}");
-
-        SessionState loaded = CreateStore().LoadReadOnly();
-
-        Assert.Equal(280, loaded.SidebarWidth);
-        Assert.Equal("studio", loaded.ThemeId);
-        Assert.Equal("system", loaded.Appearance);
-    }
+    private SessionStore CreateStore() => new(SessionFile, _log);
 }

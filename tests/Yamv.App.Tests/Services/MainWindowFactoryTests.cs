@@ -86,6 +86,7 @@ public sealed class MainWindowFactoryTests
 
             Assert.Equal("ink", viewer.Bridge.RequestedThemeId);
             Assert.Equal("dark", viewer.Bridge.RequestedAppearance);
+            Assert.False(File.Exists(viewer.SessionFile + ".bad"));
         });
 
     [Fact]
@@ -115,6 +116,22 @@ public sealed class MainWindowFactoryTests
             ShownDocument shown = Assert.Single(viewer.Surface.Shown);
             Assert.Equal(plan, shown.DocumentPath);
             Assert.Equal(720, shown.ContentWidth);
+        });
+
+    [Fact]
+    public Task Main_window_session_file_after_save_has_no_theme() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture();
+            viewer.BuildMain();
+            viewer.ViewModel.ToggleSidebarCommand.Execute(null);
+
+            viewer.Composition.Dispose();
+
+            Assert.True(File.Exists(viewer.SessionFile), "closing the window wrote no session file");
+            string json = File.ReadAllText(viewer.SessionFile);
+            Assert.DoesNotContain("themeId", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("appearance", json, StringComparison.OrdinalIgnoreCase);
         });
 
     /// <summary>

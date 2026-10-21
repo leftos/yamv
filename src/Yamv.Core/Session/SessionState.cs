@@ -6,7 +6,7 @@ namespace Yamv.Core.Session;
 /// </summary>
 public sealed record SessionState
 {
-    /// <summary>The first-run state: nothing open, default sidebar and theme.</summary>
+    /// <summary>The first-run state: nothing open and the default sidebar width.</summary>
     public static SessionState Empty { get; } = new();
 
     /// <summary>The full paths of the open files, in tab order.</summary>
@@ -29,10 +29,4 @@ public sealed record SessionState
 
     /// <summary>The root paths of the tree groups the user collapsed.</summary>
     public IReadOnlyList<string> CollapsedGroups { get; init; } = [];
-
-    /// <summary>The id of the theme the app was using; whether it still exists is the app's business.</summary>
-    public string ThemeId { get; init; } = "studio";
-
-    /// <summary>The light or dark preference: <c>system</c>, <c>light</c> or <c>dark</c>.</summary>
-    public string Appearance { get; init; } = "system";
 }

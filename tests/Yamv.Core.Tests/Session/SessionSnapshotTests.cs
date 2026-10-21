@@ -29,7 +29,7 @@ public sealed class SessionSnapshotTests : IDisposable
         DocumentWindowState state = CreateState();
         state.Add([first, second]);
 
-        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), null, 280, "studio", "system");
+        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), null, 280);
 
         string[] expected = [first, second];
         Assert.Equal(expected, snapshot.OpenFiles);
@@ -45,7 +45,7 @@ public sealed class SessionSnapshotTests : IDisposable
         state.Add([open]);
         var scroll = new Dictionary<string, double> { [open] = 0.5, [closed] = 0.9 };
 
-        SessionState snapshot = SessionSnapshot.Build(state, scroll, null, 280, "studio", "system");
+        SessionState snapshot = SessionSnapshot.Build(state, scroll, null, 280);
 
         Assert.Equal(0.5, snapshot.ScrollPositions[open]);
         Assert.False(snapshot.ScrollPositions.ContainsKey(closed));
@@ -59,7 +59,7 @@ public sealed class SessionSnapshotTests : IDisposable
         state.Add([open]);
         var scroll = new Dictionary<string, double> { [open.ToUpperInvariant()] = 0.5 };
 
-        SessionState snapshot = SessionSnapshot.Build(state, scroll, null, 280, "studio", "system");
+        SessionState snapshot = SessionSnapshot.Build(state, scroll, null, 280);
 
         Assert.Empty(snapshot.ScrollPositions);
     }
@@ -73,15 +73,13 @@ public sealed class SessionSnapshotTests : IDisposable
         state.ToggleSidebar();
         WindowBounds bounds = new(10, 20, 1200, 800, IsMaximized: true);
 
-        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), bounds, 320, "noir", "dark");
+        SessionState snapshot = SessionSnapshot.Build(state, new Dictionary<string, double>(), bounds, 320);
 
         string[] groups = [Repo];
         Assert.Equal(groups, snapshot.CollapsedGroups);
         Assert.Equal(320, snapshot.SidebarWidth);
         Assert.True(snapshot.SidebarHidden);
         Assert.Equal(bounds, snapshot.Window);
-        Assert.Equal("noir", snapshot.ThemeId);
-        Assert.Equal("dark", snapshot.Appearance);
     }
 
     [Fact]
@@ -97,7 +95,7 @@ public sealed class SessionSnapshotTests : IDisposable
         WindowBounds bounds = new(10, 20, 1200, 800, IsMaximized: true);
         var scroll = new Dictionary<string, double> { [first] = 0.25, [second] = 0.75 };
 
-        SessionState snapshot = SessionSnapshot.Build(state, scroll, bounds, 320, "noir", "dark");
+        SessionState snapshot = SessionSnapshot.Build(state, scroll, bounds, 320);
         new SessionStore(SessionFile, _log).Save(snapshot);
 
         SessionState loaded = new SessionStore(SessionFile, _log).Load();
@@ -114,8 +112,6 @@ public sealed class SessionSnapshotTests : IDisposable
         Assert.Equal(snapshot.SidebarWidth, loaded.SidebarWidth);
         Assert.Equal(snapshot.SidebarHidden, loaded.SidebarHidden);
         Assert.Equal(snapshot.CollapsedGroups, loaded.CollapsedGroups);
-        Assert.Equal(snapshot.ThemeId, loaded.ThemeId);
-        Assert.Equal(snapshot.Appearance, loaded.Appearance);
         Assert.Empty(_log.Entries);
     }
 
