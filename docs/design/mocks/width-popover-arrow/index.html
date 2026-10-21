@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV popover arrow</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 2056px; color: #111; }
+h1.page { font: 600 30px/36px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 12px; font-size: 15.5px; max-width: 1640px; line-height: 24px; }
+p.page code, .verdict code { font: 13px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+.anno-key { display: inline-block; width: 22px; height: 12px; border: 2px dashed #ffb27a; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+section { margin: 34px 0 0; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.28); }
+.theme-row { font: 600 11.5px/14px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin: 0 0 10px; }
+.lanes { display: flex; gap: 32px; align-items: flex-start; }
+.lane { width: 470px; flex: none; }
+.lane > h3 { font: 600 16.5px/22px "Inter V"; color: #fff; margin: 0 0 10px; }
+.lane > h3 .q { display: inline-block; min-width: 30px; padding: 1px 7px; margin-right: 8px; border-radius: 5px; background: rgba(0,0,0,.28); font-size: 14px; text-align: center; }
+.zoomcap { color: #f1f3f5; font-size: 12.5px; line-height: 18px; margin: 12px 0 5px; }
+.closeup { display: block; width: 464px; height: 120px; image-rendering: pixelated; border-radius: 4px; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.verdict { margin-top: 12px; font-size: 13px; line-height: 19px; color: #f1f3f5; }
+.verdict p { margin: 0 0 6px; }
+.verdict b { display: inline-block; min-width: 82px; color: #fff; }
+.verdict .worst b { color: #ffd8b0; }
+.verdict .cr { font-variant-numeric: tabular-nums; }
+.verdict .cr strong { font: 700 15px/19px "Inter V"; color: #fff; }
+
+/* ---------- the window crop: every colour is a Studio token ---------- */
+.win { position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 10px; flex: none;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-family: "Inter V", sans-serif; font-size: 13px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; white-space: nowrap; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--yamv-text-muted); margin-right: 6px; flex: none; }
+.wbtn.open { background: var(--yamv-selection-background); color: var(--yamv-accent); }
+.body { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+.side { flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 12px 8px; overflow: hidden; }
+
+/* tree */
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--yamv-text); white-space: nowrap; }
+.grp-h .chev { width: 10px; color: var(--yamv-text-muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; font-size: 13px; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--yamv-text-muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+
+/* ---------- the popover, as ContentWidthPopover.axaml draws it (card at y 41, arrow y 34 to 41) ---------- */
+.pop { position: absolute; top: 41px; right: 144px; width: 300px; z-index: 5; background: var(--yamv-page-background); color: var(--yamv-text);
+       padding: 14px 14px 12px; font-size: 12.5px; border-radius: 8px; filter: drop-shadow(0 10px 22px var(--pop-shadow)) drop-shadow(0 1px 3px var(--pop-shadow-near)); }
+.pop .arrow { position: absolute; top: -7px; right: 7px; width: 14px; height: 7px; background: var(--yamv-page-background); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+/* B and C draw the card and arrow as one SVG path (fill, plus a rim or a ring), behind the card's contents */
+.pop.path { background: transparent; }
+.pop.path .arrow { display: none; }
+.pop .shape { position: absolute; left: 0; top: -7px; overflow: visible; z-index: -1; }
+/* C: a stronger near shadow (the 1 px ring is the path's outside stroke) */
+.pop.near { filter: drop-shadow(0 10px 22px var(--pop-shadow)) drop-shadow(0 2px 6px var(--pop-shadow-strong)); }
+/* D: the card and arrow on a raised fill; the thumb's fill follows the card */
+.pop.raised { --yamv-page-background: var(--raised); }
+.pop .hd { display: flex; align-items: center; justify-content: space-between; }
+.pop .hd b { font-size: 13px; font-weight: 600; }
+.pop .val { font-variant-numeric: tabular-nums; color: var(--yamv-accent); font-weight: 600; font-size: 13px; }
+.track { position: relative; height: 4px; background: var(--yamv-line); border-radius: 2px; margin: 15px 8px 8px; }
+.track .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--yamv-accent); border-radius: 2px; }
+.track .thumb { position: absolute; top: -6px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--yamv-page-background); border: 2px solid var(--yamv-accent); }
+.ticks { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--yamv-text-muted); margin: 0 2px 11px; }
+.scope { font-size: 12px; color: var(--yamv-text-muted); border-top: 1px solid var(--yamv-line); padding-top: 10px; }
+.seg { display: flex; border: 1px solid var(--yamv-line); border-radius: 6px; overflow: hidden; margin: 6px 0 8px; }
+.seg span { flex: 1; text-align: center; padding: 5px 0; font-size: 11.5px; color: var(--yamv-text); border-right: 1px solid var(--yamv-line); white-space: nowrap; }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 600; }
+.links { display: flex; gap: 16px; font-size: 12px; color: var(--yamv-accent); }
+
+/* ---------- annotations: not UI (hidden for the close-up capture) ---------- */
+.anno { position: absolute; color: var(--anno); font: 650 12px "Inter V"; white-space: nowrap; z-index: 6; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV-72: how visible the content-width popover's arrow should be</h1>
+<p class="page">The popover's 14 × 7 arrow points up at ⟷ from the card's top edge. It spans window rows 34 to 40: rows 34–36 sit on the title bar's chrome, row 37 is the bar's 1 px <code>YamvLine</code>, and rows 38–40 sit over the tree, whose <code>sidebarBackground</code> is the chrome colour again. The arrow is filled with <code>pageBackground</code>, which is within a few luminance points of the chrome in both Studio halves, so in lane A, the approved look, the owner sees no arrow.</p>
+<p class="page">Each lane is the popover at 1:1 in a crop of the window's right end, positioned as <code>MainWindow.axaml</code> places it (button bottom at 32, popup 2 px below), then a 4× close-up of the same render with each pixel shown as a 4 × 4 block. Contrast is measured from that 1× render: <b>fill</b> is a pixel inside the arrow on row 36 (on the bar, x 311) against the bar 7 px left of the arrow's edge (x 302), the popover's shadow included; <b>edge</b> is the lightest against the darkest pixel from x 302 to 311 on that row, the widest step the eye meets crossing the arrow's left edge (rim and ring included). For scale, by token value: <code>pageBackground</code> on <code>chromeBackground</code> is 1.05:1 in dark and 1.07:1 in light, the bar's own <code>line</code> on the chrome is 1.48:1 and 1.27:1, and WCAG asks 3:1 of a graphic that carries meaning. <span class="anno-key"></span>Orange marks are annotations, not UI.</p>
+
+<template id="ctl"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<!-- the close-ups, moved into their lanes by the script -->
+<div id="closeups" hidden>
+  <img class="closeup" data-for="dark-a" src="closeup-dark-a.png" alt="4x close-up of the arrow, lane A, Studio dark">
+  <img class="closeup" data-for="dark-b" src="closeup-dark-b.png" alt="4x close-up of the arrow, lane B, Studio dark">
+  <img class="closeup" data-for="dark-c" src="closeup-dark-c.png" alt="4x close-up of the arrow, lane C, Studio dark">
+  <img class="closeup" data-for="dark-d" src="closeup-dark-d.png" alt="4x close-up of the arrow, lane D, Studio dark">
+  <img class="closeup" data-for="light-a" src="closeup-light-a.png" alt="4x close-up of the arrow, lane A, Studio light">
+  <img class="closeup" data-for="light-b" src="closeup-light-b.png" alt="4x close-up of the arrow, lane B, Studio light">
+  <img class="closeup" data-for="light-c" src="closeup-light-c.png" alt="4x close-up of the arrow, lane C, Studio light">
+  <img class="closeup" data-for="light-d" src="closeup-light-d.png" alt="4x close-up of the arrow, lane D, Studio light">
+</div>
+
+<section><div class="theme-row">Studio dark</div><div class="lanes" data-theme="dark"></div></section>
+<section><div class="theme-row">Studio light</div><div class="lanes" data-theme="light"></div></section>
+
+<script>
+const LIGHT = { pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  codeBackground: "#f6f8fa" };
+const DARK = { pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  codeBackground: "#161b22" };
+/* not tokens: the popover's shadows and the annotation colour. --raised is D's fill: codeBackground in dark; light has nothing lighter than the page, so it stays white. */
+const EXTRA = {
+  light: "--pop-shadow:rgba(31,35,40,.26);--pop-shadow-near:rgba(31,35,40,.16);--pop-shadow-strong:rgba(31,35,40,.34);--pop-ring:rgba(31,35,40,.22);--raised:#ffffff;--anno:#d9480f",
+  dark: "--pop-shadow:rgba(0,0,0,.7);--pop-shadow-near:rgba(0,0,0,.55);--pop-shadow-strong:rgba(0,0,0,.9);--pop-ring:rgba(0,0,0,.9);--raised:#161b22;--anno:#ff922b",
+};
+const T = { light: LIGHT, dark: DARK };
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (th) => Object.entries(T[th]).map(([k, v]) => `${kebab(k)}:${v}`).join(";") + ";" + EXTRA[th];
+
+const CTL = document.getElementById("ctl").innerHTML;
+const GLYPH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICO = `<svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+
+/* [fill, edge]: the arrow's contrast against the bar, measured from this page's 1x render (row 36; see the second paragraph) */
+const CR = {
+  dark:  { a: [1.07, 1.076], b: [1.07, 1.349], c: [1.082, 1.12], d: [1.152, 1.159] },
+  light: { a: [1.24, 1.309], b: [1.228, 1.311], c: [1.376, 2.063], d: [1.24, 1.309] },
+};
+
+/* ---------- popover ---------- */
+function pop(cls) {
+  return `<div class="pop ${cls}"><span class="arrow"></span>
+    <div class="hd"><b>Content width</b><span class="val">720 px</span></div>
+    <div class="track"><div class="fill" style="width:62%"></div><div class="thumb" style="left:62%"></div></div><div class="ticks"><span>480</span><span>Full</span></div>
+    <div class="scope">Saved for<div class="seg"><span class="on">docs/plans</span><span>yamv (repo)</span><span>All documents</span></div>
+    <div class="links"><span>Reset to inherited</span><span>Clear all overrides here</span></div></div></div>`;
+}
+
+/* the card and arrow as one outline: card 300 x h with radius 8, arrow base x 279 to 293 on the card's top edge, apex (286, 0); y is shifted down 7 */
+function silhouette(h, d) {
+  const r = 8 - d, top = 7 + d, bot = 7 + h - d;
+  return `M8 ${top} H${279 + d} L286 ${d * 1.4} L${293 - d} ${top} A${r} ${r} 0 0 1 ${300 - d} 15 V${7 + h - 8} A${r} ${r} 0 0 1 292 ${bot}`
+    + ` H8 A${r} ${r} 0 0 1 ${d} ${7 + h - 8} V15 A${r} ${r} 0 0 1 8 ${top} Z`;
+}
+function drawShapes() {
+  for (const el of document.querySelectorAll(".pop.path")) {
+    const h = el.offsetHeight, rim = el.classList.contains("rim");
+    /* B: a 1 px YamvLine stroke inside the edge, as a Border draws one. C: a 2 px ring stroke centred on the edge, its inner half under the fill. */
+    const path = rim
+      ? `<path d="${silhouette(h, 0.5)}" fill="var(--yamv-page-background)" stroke="var(--yamv-line)" stroke-width="1"/>`
+      : `<path d="${silhouette(h, 0)}" fill="var(--yamv-page-background)" stroke="var(--pop-ring)" stroke-width="2" paint-order="stroke"/>`;
+    el.insertAdjacentHTML("afterbegin", `<svg class="shape" width="300" height="${h + 7}">${path}</svg>`);
+  }
+}
+
+/* ---------- window crop: the window's right 470 px, pane on the left, tree on the right ---------- */
+function crop(th, q, cls) {
+  const tree = `<div class="grp"><div class="grp-h"><span class="chev">▾</span>yamv<span class="badge">git</span></div>
+      <div class="row">${ICO}<span>README.md</span></div><div class="row folder"><span class="ico">▾</span>docs/plans</div>
+      <div class="row in sel">${ICO}<span>MAIN.md</span></div><div class="row in">${ICO}<span>v1-build.md</span></div></div>`;
+  const anno = `<div class="anno" style="left:250px;top:30px;line-height:12px">arrow ▸</div>`;
+  return `<div class="win" data-shot="${th}-${q}" style="width:470px;height:270px;${vars(th)}">
+    <div class="titlebar"><span class="name">MAIN.md</span><span>yamv / docs / plans</span><span class="spacer"></span><span class="wbtn open">${GLYPH}</span>${CTL}</div>
+    <div class="body"><div class="pane"></div><div class="side" style="width:280px">${tree}</div></div>${pop(cls)}${anno}</div>`;
+}
+
+const LANES = [
+  { q: "a", cls: "", title: "As approved: the silhouette shadow only",
+    change: () => "No change beyond the fix: one drop-shadow on the card and arrow together (0 10px 22px and 0 1px 3px), no outline.",
+    worst: () => "The arrow is page colour on chrome colour and the shadow falls below it, so on the bar it is all but invisible." },
+  { q: "b", cls: "path rim", title: "A + a 1 px YamvLine rim",
+    change: () => "One 1 px <code>line</code> stroke traces the arrow and the card as a single path, no seam at the arrow's base; shadow as A.",
+    worst: () => "A hard outline in a borderless design, and the card now reads as a bordered box hung from the bar." },
+  { q: "c", cls: "path near", title: "A + a stronger near shadow",
+    change: () => "No rim: a 1 px shadow ring (0 0 0 1px) and a tighter 0 2px 6px at higher alpha, with A's far shadow kept.",
+    worst: (th) => th === "dark" ? "A black ring has almost nothing to darken on a near-black bar, so dark gains little." : "The ring and the tight shadow read as a grey smudge around the arrow's tip." },
+  { q: "d", cls: "raised", title: "A on a raised fill",
+    change: (th) => th === "dark" ? "Card and arrow take <code>codeBackground</code> #161b22 (also <code>hoverBackground</code>), a step lighter than the page." : "Light has no token lighter than the page's #ffffff, so the light half stays exactly as A.",
+    worst: (th) => th === "dark" ? "The card no longer matches the page, and a hovered segment or link (<code>hoverBackground</code>) vanishes into the card." : "The card no longer matches the page in dark, while light gains nothing; the two halves stop agreeing." },
+];
+
+const fmt = (v) => v == null ? "—" : `${v.toFixed(2)}:1`;
+function lanes(th) {
+  return LANES.map((l) => {
+    const [fill, edge] = CR[th][l.q];
+    return `<div class="lane"><h3><span class="q">${l.q.toUpperCase()}</span>${l.title}</h3>${crop(th, l.q, l.cls)}
+      <p class="zoomcap">4× close-up of the same render: ⟷'s bottom edge, the arrow, the bar's line and the card's corner.</p>
+      <span data-closeup="${th}-${l.q}"></span>
+      <div class="verdict"><p><b>Change</b>${l.change(th)}</p><p class="worst"><b>Worst case</b>${l.worst(th)}</p>
+      <p class="cr"><b>Contrast</b>fill <strong>${fmt(fill)}</strong> &nbsp;·&nbsp; edge <strong>${fmt(edge)}</strong> against the bar</p></div></div>`;
+  }).join("");
+}
+for (const el of document.querySelectorAll("[data-theme]")) el.innerHTML = lanes(el.dataset.theme);
+for (const img of document.querySelectorAll("#closeups img")) document.querySelector(`[data-closeup="${img.dataset.for}"]`).replaceWith(img);
+document.fonts.ready.then(drawShapes);
+</script>
+</body>
+</html>
