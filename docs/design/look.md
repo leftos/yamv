@@ -25,7 +25,9 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
 ## Edge states
 
 - **Missing document** (gone on restore or deleted while open): the row stays, greyed and struck through, with a `MISSING` tag. Selecting it shows "This file is no longer there", its full path, **Locate…** and **Remove from list**, and the note that YAMV keeps watching. If the file reappears, it reopens on its own.
-- **Unreadable document** (the file exists but is locked by another program or access is denied; [mock](mocks/unreadable/index.html), option B): the row stays normal, with a 14x14 warning glyph (tooltip "Can't read this file") and no `MISSING` tag. Selecting it shows a warning mark, "This file can't be read", its full path, the reason ("It is in use by another program.", "Access is denied." or "It could not be read."), **Retry** (the same as Ctrl/Cmd+R), **Remove from list** and the note "YAMV tries again when the file changes." If the file goes missing, the missing pane wins.
+- **Unreadable document** (the file exists but is locked by another program or access is denied; [mock](mocks/unreadable/index.html), option B): the row stays normal, with a 14x14 warning glyph (tooltip "Can't read this file") and no `MISSING` tag.
+
+  Selecting it shows a warning mark, "This file can't be read", its full path, the reason ("It is in use by another program.", "Access is denied." or "It could not be read."), **Retry** (the same as Ctrl/Cmd+R), **Remove from list** and the note "YAMV tries again when the file changes." If the file goes missing, the missing pane wins.
 - **Empty main window**: a dashed `md` mark, "No documents open", "Drop markdown files here, or open some. They stay open next time.", an **Open files…** button and the Ctrl/Cmd+O hint.
 - **Find bar**: Ctrl/Cmd+F floats it at the document's top-right, with a field, "n of m", up/down and close. Matches are highlighted and the current one is stronger. Enter and Shift+Enter step through matches; Esc closes and clears.
 
@@ -42,6 +44,10 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
   - A grey value is inherited, from Shared or the defaults (on the Shared tab, from the defaults). A set value has a ↺ that removes it from the tab. A token with unsaved changes shows a dot.
   - When a theme has no dark options, the Dark tab shows an **Add dark options** strip above dimmed rows.
   - Enter in a field commits it, and in an inherited field it sets the shown value in that tab even when it equals the inherited one. Leaving an unchanged field by Tab or a click sets nothing. Esc restores the shown value, and on an inherited token it resets.
+  - Clicking a swatch on an editable tab of a user theme opens the **colour picker**, a 244 px popup under the swatch (built-in themes open none): a saturation/value square, hue and alpha bars, the old and new colours, a hex field and the caption "Was #rrggbb. Esc puts it back."
+    - Every change sets the token live: the row, its dot and the preview follow. Written hex is lowercase, `#rrggbb` when opaque, else `#rrggbbaa`.
+    - In the hex field a full `#rrggbb` or `#rrggbbaa` applies as typed and `#rgb` on Enter. Invalid text shows "'{text}' is not a colour (#rgb, #rrggbb or #rrggbbaa)." and edits nothing.
+    - Esc puts the token back (one inherited when the picker opened is reset, so it stays inherited) and closes. Enter or a click outside closes and keeps the value, except that a token inherited at open whose colour is back at its inherited value stays inherited.
   - A bad number or hex colour shows its error under the field. Text typed but not committed survives flipping the appearance between the Light and Dark tabs.
 - Footer: **Import…**, **Export…**, **Edit as text** (opens the file in the default editor), **Revert**, **Save**. A built-in theme is read-only and has no file, so it shows **Duplicate to edit** in place of Edit as text: editing one starts with a copy in Yours. Edit as text exists only for user themes.
 - Editing a theme file outside the app re-applies it live.

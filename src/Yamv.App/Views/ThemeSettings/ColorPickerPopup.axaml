@@ -1,0 +1,119 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="Yamv.App.Views.ThemeSettings.ColorPickerPopup"
+  Focusable="True"
+>
+  <UserControl.Resources>
+    <!-- The alpha bar's 8 px checkerboard. -->
+    <DrawingBrush x:Key="AlphaChecker" TileMode="Tile" DestinationRect="0,0,8,8" Stretch="None">
+      <DrawingBrush.Drawing>
+        <DrawingGroup>
+          <GeometryDrawing Brush="#BBBBBB" Geometry="M0,0 H8 V8 H0 Z" />
+          <GeometryDrawing Brush="#888888" Geometry="M4,0 H8 V4 H4 Z M0,4 H4 V8 H0 Z" />
+        </DrawingGroup>
+      </DrawingBrush.Drawing>
+    </DrawingBrush>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <!-- A 14 px white-ringed knob with a dark hairline round it, centred on its point by the code-behind. -->
+    <Style Selector="Border.knob">
+      <Setter Property="Width" Value="14" />
+      <Setter Property="Height" Value="14" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="BorderBrush" Value="White" />
+      <Setter Property="BoxShadow" Value="0 0 0 1 #80000000" />
+    </Style>
+    <Style Selector="Panel.area">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+  </UserControl.Styles>
+
+  <Border
+    Width="244"
+    Padding="10"
+    CornerRadius="10"
+    BorderThickness="1"
+    BorderBrush="{DynamicResource YamvLine}"
+    Background="{DynamicResource YamvChromeBackground}"
+    BoxShadow="0 14 36 0 #8C000000"
+  >
+    <StackPanel>
+      <!-- Saturation left to right, value top to bottom, over the hue. -->
+      <Panel x:Name="PickerSquare" Classes="area" Height="92">
+        <Border x:Name="SquareHue" CornerRadius="6">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+              <GradientStop Offset="0" Color="White" />
+              <GradientStop Offset="1" Color="Red" />
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+        <Border CornerRadius="6">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+              <GradientStop Offset="0" Color="#00000000" />
+              <GradientStop Offset="1" Color="#FF000000" />
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+        <Canvas IsHitTestVisible="False">
+          <Border x:Name="SquareKnob" Classes="knob" />
+        </Canvas>
+      </Panel>
+
+      <Panel x:Name="PickerHue" Classes="area" Height="10" Margin="0,9,0,0">
+        <Border CornerRadius="5">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+              <GradientStop Offset="0" Color="#FF0000" />
+              <GradientStop Offset="0.1667" Color="#FFFF00" />
+              <GradientStop Offset="0.3333" Color="#00FF00" />
+              <GradientStop Offset="0.5" Color="#00FFFF" />
+              <GradientStop Offset="0.6667" Color="#0000FF" />
+              <GradientStop Offset="0.8333" Color="#FF00FF" />
+              <GradientStop Offset="1" Color="#FF0000" />
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+        <Canvas IsHitTestVisible="False">
+          <Border x:Name="HueKnob" Classes="knob" Canvas.Top="-2" />
+        </Canvas>
+      </Panel>
+
+      <Panel x:Name="PickerAlpha" Classes="area" Height="10" Margin="0,9,0,0">
+        <Border CornerRadius="5" Background="{StaticResource AlphaChecker}" />
+        <Border x:Name="AlphaRamp" CornerRadius="5">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+              <GradientStop Offset="0" Color="#00000000" />
+              <GradientStop Offset="1" Color="#FF000000" />
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+        <Canvas IsHitTestVisible="False">
+          <Border x:Name="AlphaKnob" Classes="knob" Canvas.Top="-2" />
+        </Canvas>
+      </Panel>
+
+      <DockPanel Margin="0,10,0,0">
+        <Panel DockPanel.Dock="Left" Width="44" Height="24" Margin="0,0,8,0" VerticalAlignment="Center">
+          <Border CornerRadius="5" ClipToBounds="True">
+            <Grid ColumnDefinitions="*,*">
+              <Border x:Name="PickerOld" />
+              <Border x:Name="PickerNew" Grid.Column="1" />
+            </Grid>
+          </Border>
+          <Border CornerRadius="5" BorderThickness="1" BorderBrush="{DynamicResource YamvLine}" />
+        </Panel>
+        <Border Classes="ring">
+          <TextBox x:Name="PickerHex" Classes="fld" AutomationProperties.Name="Hex colour" />
+        </Border>
+      </DockPanel>
+      <TextBlock x:Name="PickerError" Classes="err" Margin="0,6,0,0" IsVisible="False" />
+      <TextBlock x:Name="PickerCaption" Margin="0,6,0,0" FontSize="10.5" Foreground="{DynamicResource YamvTextMuted}" />
+    </StackPanel>
+  </Border>
+</UserControl>

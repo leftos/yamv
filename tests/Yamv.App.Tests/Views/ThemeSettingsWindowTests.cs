@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.LogicalTree;
@@ -447,6 +448,264 @@ public sealed class ThemeSettingsWindowTests
             Assert.Contains("Grey values come from Shared or the defaults. ↺ removes a value from this tab.", VisibleTexts(fixture.Window));
         });
 
+    [Fact]
+    public Task A_swatch_click_opens_the_picker_with_the_old_and_new_colours_and_the_caption() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+
+            fixture.Click(fixture.Swatch("accent"));
+
+            Assert.True(fixture.PickerOpen);
+            Assert.True(fixture.Find<Control>("ColorPicker").IsEffectivelyVisible);
+            Assert.Contains("Was #112233. Esc puts it back.", VisibleTexts(fixture.Find<Control>("ColorPicker")));
+            Assert.Equal(Color.Parse("#112233"), ((ISolidColorBrush)fixture.Find<Border>("PickerOld").Background!).Color);
+            Assert.Equal(Color.Parse("#112233"), ((ISolidColorBrush)fixture.Find<Border>("PickerNew").Background!).Color);
+            Assert.Equal("#112233", fixture.Find<TextBox>("PickerHex").Text);
+        });
+
+    [Fact]
+    public Task A_valid_hex_typed_in_the_picker_sets_the_token_at_once_and_Enter_closes_and_keeps_it() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Click(fixture.Swatch("quote"));
+
+            fixture.TypeInPicker("#3fb950");
+
+            Assert.Equal(new ColorValue("#3fb950"), fixture.ViewModel.WorkingTheme!.Light!.Tokens["quote"]);
+            Assert.True(fixture.Dot("quote").IsEffectivelyVisible);
+            Assert.True(fixture.Reset("quote").IsEffectivelyVisible);
+            Assert.Equal(Color.Parse("#3fb950"), ((ISolidColorBrush)fixture.Find<Border>("PickerNew").Background!).Color);
+            Assert.True(fixture.PickerOpen);
+
+            fixture.Press(Key.Enter);
+
+            Assert.False(fixture.PickerOpen);
+            Assert.Equal(new ColorValue("#3fb950"), fixture.ViewModel.WorkingTheme!.Light!.Tokens["quote"]);
+        });
+
+    [Fact]
+    public Task Esc_in_the_picker_after_a_change_on_an_inherited_token_leaves_it_inherited_and_clean() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Click(fixture.Swatch("quote"));
+            fixture.TypeInPicker("#3fb950");
+            Assert.True(fixture.ViewModel.IsDirty);
+
+            fixture.Press(Key.Escape);
+
+            Assert.False(fixture.PickerOpen);
+            Assert.False(fixture.ViewModel.WorkingTheme!.Light!.Tokens.ContainsKey("quote"));
+            Assert.False(fixture.Reset("quote").IsEffectivelyVisible);
+            Assert.False(fixture.Dot("quote").IsEffectivelyVisible);
+            Assert.False(fixture.Find<Control>("DirtyDot").IsEffectivelyVisible);
+        });
+
+    [Fact]
+    public Task Esc_in_the_picker_after_a_change_on_a_set_token_puts_the_old_value_back() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Click(fixture.Swatch("accent"));
+            fixture.TypeInPicker("#3fb95080");
+            Assert.Equal(new ColorValue("#3fb95080"), fixture.ViewModel.WorkingTheme!.Light!.Tokens["accent"]);
+
+            fixture.Press(Key.Escape);
+
+            Assert.False(fixture.PickerOpen);
+            Assert.Equal(new ColorValue("#112233"), fixture.ViewModel.WorkingTheme!.Light!.Tokens["accent"]);
+            Assert.False(fixture.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task Esc_in_the_picker_closes_only_the_picker_not_the_window_and_asks_no_confirm() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.ViewModel.SetToken(ThemeTab.Light, "quote", new ColorValue("#3fb950"));
+            fixture.Settle();
+            bool closed = false;
+            fixture.Window.Closed += (_, _) => closed = true;
+            fixture.Click(fixture.Swatch("accent"));
+            fixture.TypeInPicker("#abcdef");
+
+            fixture.Press(Key.Escape);
+
+            Assert.False(fixture.PickerOpen);
+            Assert.False(closed);
+            Assert.False(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+            Assert.Equal(new ColorValue("#112233"), fixture.ViewModel.WorkingTheme!.Light!.Tokens["accent"]);
+            Assert.True(fixture.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task Opening_the_picker_and_clicking_outside_it_with_no_change_edits_nothing() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            ThemeDefinition before = fixture.ViewModel.WorkingTheme!;
+            fixture.Click(fixture.Swatch("quote"));
+            Assert.True(fixture.PickerOpen);
+
+            fixture.Click(fixture.Find<Control>("Header"));
+
+            Assert.False(fixture.PickerOpen);
+            Assert.Same(before, fixture.ViewModel.WorkingTheme);
+            Assert.False(fixture.Reset("quote").IsEffectivelyVisible);
+            Assert.False(fixture.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task An_invalid_hex_in_the_picker_shows_the_error_and_edits_nothing() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            ThemeDefinition before = fixture.ViewModel.WorkingTheme!;
+            fixture.Click(fixture.Swatch("accent"));
+
+            fixture.TypeInPicker("#12345");
+
+            TextBlock error = fixture.Find<TextBlock>("PickerError");
+            Assert.True(error.IsEffectivelyVisible);
+            Assert.Equal(ColorValue.NotAColour("#12345"), error.Text);
+            Assert.Same(before, fixture.ViewModel.WorkingTheme);
+
+            fixture.Press(Key.Enter);
+
+            Assert.True(fixture.PickerOpen);
+            Assert.Same(before, fixture.ViewModel.WorkingTheme);
+        });
+
+    [Fact]
+    public Task A_press_on_the_saturation_square_sets_the_colour_of_that_position() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Click(fixture.Swatch("accent"));
+            var old = ColorMath.ToHsv(new ColorValue("#112233"), greyHue: 0);
+
+            fixture.PressAt(fixture.Find<Control>("PickerSquare"), 0.25, 0.25);
+
+            Assert.Equal(ColorMath.FromHsv(old with { S = 0.25, V = 0.75 }, byte.MaxValue), fixture.ViewModel.WorkingTheme!.Light!.Tokens["accent"]);
+            Assert.True(fixture.PickerOpen);
+        });
+
+    [Fact]
+    public Task A_press_on_the_hue_bar_keeps_saturation_and_value_and_the_alpha_bar_sets_alpha() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Click(fixture.Swatch("accent"));
+            var old = ColorMath.ToHsv(new ColorValue("#112233"), greyHue: 0);
+
+            fixture.PressAt(fixture.Find<Control>("PickerHue"), 0.5, 0.5);
+            fixture.PressAt(fixture.Find<Control>("PickerAlpha"), 0, 0.5);
+
+            Assert.Equal(ColorMath.FromHsv(old with { H = 180 }, 0), fixture.ViewModel.WorkingTheme!.Light!.Tokens["accent"]);
+        });
+
+    [Fact]
+    public Task A_built_in_theme_swatch_opens_no_picker_and_edits_nothing() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Click(fixture.Row("studio"));
+            ThemeDefinition before = fixture.ViewModel.WorkingTheme!;
+
+            fixture.Click(fixture.Swatch("accent"));
+
+            Assert.False(fixture.PickerOpen);
+            Assert.Same(before, fixture.ViewModel.WorkingTheme);
+        });
+
+    [Fact]
+    public Task A_short_hex_prefix_typed_in_the_picker_applies_nothing_before_a_click_outside() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            ThemeDefinition before = fixture.ViewModel.WorkingTheme!;
+            fixture.Click(fixture.Swatch("quote"));
+
+            fixture.TypeInPicker("#3fb");
+            fixture.Window.KeyTextInput("9");
+            fixture.Settle();
+            fixture.Click(fixture.Find<Control>("Header"));
+
+            Assert.False(fixture.PickerOpen);
+            Assert.Same(before, fixture.ViewModel.WorkingTheme);
+            Assert.False(fixture.Reset("quote").IsEffectivelyVisible);
+        });
+
+    [Fact]
+    public Task A_short_hex_in_the_picker_applies_on_Enter() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            ThemeDefinition before = fixture.ViewModel.WorkingTheme!;
+            fixture.Click(fixture.Swatch("quote"));
+
+            fixture.TypeInPicker("#3fb");
+
+            Assert.Same(before, fixture.ViewModel.WorkingTheme);
+            Assert.False(fixture.Find<TextBlock>("PickerError").IsEffectivelyVisible);
+
+            fixture.Press(Key.Enter);
+
+            Assert.False(fixture.PickerOpen);
+            Assert.Equal(new ColorValue("#33ffbb"), fixture.ViewModel.WorkingTheme!.Light!.Tokens["quote"]);
+        });
+
+    [Fact]
+    public Task Closing_the_picker_on_an_inherited_token_changed_back_to_its_value_leaves_it_inherited() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            string shown = fixture.Field("quote").Text!;
+            fixture.Click(fixture.Swatch("quote"));
+            fixture.PressAt(fixture.Find<Control>("PickerSquare"), 0.25, 0.25);
+            Assert.True(fixture.ViewModel.WorkingTheme!.Light!.Tokens.ContainsKey("quote"));
+
+            fixture.TypeInPicker(shown);
+            fixture.Click(fixture.Find<Control>("Header"));
+
+            Assert.False(fixture.PickerOpen);
+            Assert.False(fixture.ViewModel.WorkingTheme!.Light!.Tokens.ContainsKey("quote"));
+            Assert.False(fixture.Dot("quote").IsEffectivelyVisible);
+            Assert.False(fixture.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task Esc_in_the_picker_with_no_change_edits_nothing() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            ThemeDefinition before = fixture.ViewModel.WorkingTheme!;
+            fixture.Click(fixture.Swatch("accent"));
+            fixture.Find<TextBox>("PickerHex").Focus();
+            fixture.Settle();
+
+            fixture.Press(Key.Escape);
+
+            Assert.False(fixture.PickerOpen);
+            Assert.Same(before, fixture.ViewModel.WorkingTheme);
+            Assert.False(fixture.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task A_drag_on_the_saturation_square_follows_the_pointer() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Click(fixture.Swatch("accent"));
+            var old = ColorMath.ToHsv(new ColorValue("#112233"), greyHue: 0);
+
+            fixture.Drag(fixture.Find<Control>("PickerSquare"), (0.25, 0.25), (0.75, 0.75));
+
+            Assert.Equal(ColorMath.FromHsv(old with { S = 0.75, V = 0.25 }, byte.MaxValue), fixture.ViewModel.WorkingTheme!.Light!.Tokens["accent"]);
+        });
+
     private static List<string> VisibleTexts(Visual root) =>
         [
             .. root.GetVisualDescendants()
@@ -541,6 +800,52 @@ public sealed class ThemeSettingsWindowTests
             Window.KeyTextInput(text);
             Settle();
         }
+
+        /// <summary>Whether the colour picker's popup is open.</summary>
+        public bool PickerOpen => Find<Popup>("PickerPopup").IsOpen;
+
+        /// <summary>Focuses the colour picker's hex field and types <paramref name="text"/> over its text, in one input.</summary>
+        public void TypeInPicker(string text)
+        {
+            TextBox field = Find<TextBox>("PickerHex");
+            field.Focus();
+            field.SelectAll();
+            Window.KeyTextInput(text);
+            Settle();
+        }
+
+        /// <summary>Presses and releases the left button at a fraction of <paramref name="visual"/>'s width and height.</summary>
+        public void PressAt(Visual visual, double x, double y)
+        {
+            Point point =
+                visual.TranslatePoint(new Point(visual.Bounds.Width * x, visual.Bounds.Height * y), Window)
+                ?? throw new InvalidOperationException("The control is not in the window.");
+            Window.MouseMove(point);
+            Settle();
+            Window.MouseDown(point, MouseButton.Left);
+            Settle();
+            Window.MouseUp(point, MouseButton.Left);
+            Settle();
+        }
+
+        /// <summary>Presses the left button at one fraction of <paramref name="visual"/>'s size, moves to another and releases there.</summary>
+        public void Drag(Visual visual, (double X, double Y) from, (double X, double Y) to)
+        {
+            Point start = PointIn(visual, from);
+            Point end = PointIn(visual, to);
+            Window.MouseMove(start);
+            Settle();
+            Window.MouseDown(start, MouseButton.Left);
+            Settle();
+            Window.MouseMove(end);
+            Settle();
+            Window.MouseUp(end, MouseButton.Left);
+            Settle();
+        }
+
+        private Point PointIn(Visual visual, (double X, double Y) fraction) =>
+            visual.TranslatePoint(new Point(visual.Bounds.Width * fraction.X, visual.Bounds.Height * fraction.Y), Window)
+            ?? throw new InvalidOperationException("The control is not in the window.");
 
         public void Click(Visual visual)
         {

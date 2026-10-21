@@ -2,6 +2,7 @@
   xmlns="https://github.com/avaloniaui"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:vm="using:Yamv.App.ViewModels"
+  xmlns:ts="using:Yamv.App.Views.ThemeSettings"
   x:Class="Yamv.App.Views.ThemeSettings.TokenEditor"
   x:DataType="vm:ThemeSettingsViewModel"
   Classes.ro="{Binding IsBuiltIn}"
@@ -227,6 +228,17 @@
 
   <ScrollViewer x:Name="TokenScroll" HorizontalScrollBarVisibility="Disabled" Padding="16,2,16,8">
     <StackPanel>
+      <!-- The colour picker: on the window's overlay layer under the clicked swatch, so the token list does not clip it. -->
+      <Popup
+        x:Name="PickerPopup"
+        ShouldUseOverlayLayer="True"
+        IsLightDismissEnabled="True"
+        Placement="BottomEdgeAlignedLeft"
+        HorizontalOffset="-8"
+        VerticalOffset="9"
+      >
+        <ts:ColorPickerPopup x:Name="ColorPicker" />
+      </Popup>
       <Border x:Name="MissingHalfStrip" Classes="nohalf" IsVisible="{Binding ShowsMissingHalf}">
         <DockPanel>
           <Button
