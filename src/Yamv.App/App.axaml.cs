@@ -39,6 +39,13 @@ public partial class App : Application
     /// </summary>
     public const string ImportFileVariable = "YAMV_DEV_IMPORT_FILE";
 
+    /// <summary>
+    /// The environment variable that, set to <c>1</c>, has the main or viewer window open its content-width popover once it has
+    /// shown its first document, so a hidden-desktop capture shows the popover; <c>clearall</c> then also asks the Clear all
+    /// question, and <c>folder</c> selects the document's own folder segment.
+    /// </summary>
+    public const string WidthPopoverVariable = "YAMV_DEV_WIDTH_POPOVER";
+
     private MainWindowComposition? _mainWindow;
     private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
@@ -128,6 +135,21 @@ public partial class App : Application
         var widths = new WidthStore(AppPaths.WidthsFile, log);
         _mainWindow =
             ViewerFiles.Count == 0 ? MainWindowFactory.Create(bridge, widths, log) : MainWindowFactory.CreateViewer(bridge, widths, ViewerFiles, log);
+        if (
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
+            && Environment.GetEnvironmentVariable(WidthPopoverVariable) is { Length: > 0 } popoverStart
+            && _mainWindow.Window is MainWindow documentWindow
+        )
+        {
+            documentWindow.WidthPopoverWhenShown = popoverStart switch
+            {
+                "1" => DevWidthPopover.Open,
+                "clearall" => DevWidthPopover.AskClearAll,
+                "folder" => DevWidthPopover.SelectDocumentFolder,
+                _ => throw new InvalidOperationException($"{WidthPopoverVariable} is '{popoverStart}'; use 1, clearall or folder."),
+            };
+        }
+
         if (ViewerFiles.Count == 0 && Activation is { } gate)
         {
             ConnectGate(gate, _mainWindow.Window);

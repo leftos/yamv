@@ -122,6 +122,18 @@ public sealed class WidthStore
         }
     }
 
+    /// <summary>How many folders at or below <paramref name="groupRoot"/> hold a width of their own: what <see cref="ClearAtOrBelow"/> removes.</summary>
+    /// <exception cref="ArgumentException"><paramref name="groupRoot"/> is blank or not a full path.</exception>
+    public int CountAtOrBelow(string groupRoot)
+    {
+        string root = WidthKeys.Normalize(groupRoot, nameof(groupRoot));
+        lock (gate)
+        {
+            ReadForLookup();
+            return widths.Folders.Keys.Count(stored => WidthKeys.IsAtOrBelow(stored, root));
+        }
+    }
+
     /// <summary>Gives <paramref name="folder"/> its own width.</summary>
     /// <returns><see langword="false"/> when the file could not be read or written; the failure is logged.</returns>
     /// <exception cref="ArgumentException"><paramref name="folder"/> is blank or not a full path.</exception>

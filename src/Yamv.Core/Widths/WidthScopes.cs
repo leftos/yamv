@@ -39,6 +39,12 @@ public sealed class WidthScopes
     public string ClearAllRoot { get; }
 
     /// <summary>
+    /// The name of <see cref="ClearAllRoot"/>, spelled as in the document's path and without the "(repo)" mark, as Clear all
+    /// overrides here names it when it asks first.
+    /// </summary>
+    public string ClearAllName => FolderName(Spelled(ClearAllRoot, _documentFolder));
+
+    /// <summary>
     /// Where the selected segment inherits its width from: the folder's name, spelled as in the document's path (the group
     /// root without its "(repo)" mark), or All documents for the app default. <see langword="null"/> when the selected segment
     /// holds the width itself.

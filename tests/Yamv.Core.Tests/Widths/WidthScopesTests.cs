@@ -148,6 +148,18 @@ public sealed class WidthScopesTests
         var scopes = WidthScopes.For(Notes, Downloads, groupIsRepo: false, WidthSource.AppDefault);
 
         Assert.Equal(Downloads, scopes.ClearAllRoot);
+        Assert.Equal("Downloads", scopes.ClearAllName);
+    }
+
+    [Fact]
+    public void Clear_all_name_is_the_group_roots_name_without_the_repo_mark_spelled_as_in_the_document()
+    {
+        Assert.SkipWhen(AppPaths.PathComparison == StringComparison.Ordinal, "This platform's paths are case-sensitive.");
+        string document = Path.Combine(Repo.ToUpperInvariant(), "docs", "plans", "v1-build.md");
+
+        var scopes = WidthScopes.For(document, Repo, groupIsRepo: true, WidthSource.AppDefault);
+
+        Assert.Equal("YAMV", scopes.ClearAllName);
     }
 
     [Fact]

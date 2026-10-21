@@ -6,6 +6,45 @@
   x:Class="Yamv.App.Views.TitleBar"
   x:DataType="vm:DocumentWindowViewModel"
 >
+  <UserControl.Styles>
+    <!-- A title-bar tool: 28 x 26, radius 6. Rest is the muted glyph on the bar; hover, open, disabled and keyboard focus follow the width-popover mock. -->
+    <Style Selector="Button.tool">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="Margin" Value="0,0,6,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+      <Setter Property="FocusAdorner" Value="{x:Null}" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Name="Back" Background="Transparent" CornerRadius="6" BorderBrush="{DynamicResource YamvAccent}" BorderThickness="0">
+            <ContentPresenter Content="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.tool:pointerover">
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+    </Style>
+    <Style Selector="Button.tool:pointerover /template/ Border#Back">
+      <Setter Property="Background" Value="{DynamicResource YamvHoverBackground}" />
+    </Style>
+    <Style Selector="Button.tool.open">
+      <Setter Property="Foreground" Value="{DynamicResource YamvAccent}" />
+    </Style>
+    <Style Selector="Button.tool.open /template/ Border#Back">
+      <Setter Property="Background" Value="{DynamicResource YamvSelectionBackground}" />
+    </Style>
+    <Style Selector="Button.tool:disabled">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <Style Selector="Button.tool:focus-visible /template/ Border#Back">
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="Button.tool Path">
+      <Setter Property="Stroke" Value="{Binding $parent[Button].Foreground}" />
+    </Style>
+  </UserControl.Styles>
   <Border
     x:Name="Bar"
     Height="38"
@@ -21,7 +60,23 @@
         Orientation="Horizontal"
         HorizontalAlignment="Right"
         chrome:WindowDecorationProperties.ElementRole="User"
-      />
+      >
+        <Button
+          x:Name="ContentWidthButton"
+          Classes="tool"
+          IsEnabled="{Binding CanEditContentWidth}"
+          AutomationProperties.Name="Content width"
+        >
+          <Path
+            Width="16"
+            Height="16"
+            Data="M1.8,8 H14.2 M4.6,5.2 L1.8,8 L4.6,10.8 M11.4,5.2 L14.2,8 L11.4,10.8"
+            StrokeThickness="1.4"
+            StrokeLineCap="Round"
+            StrokeJoin="Round"
+          />
+        </Button>
+      </StackPanel>
       <DockPanel x:Name="TitleText" VerticalAlignment="Center" Margin="14,0,0,0" IsHitTestVisible="False">
         <TextBlock
           x:Name="TitleName"

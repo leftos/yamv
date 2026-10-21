@@ -1,6 +1,6 @@
 # Content width
 
-How wide the document's text column is. It is a viewer setting and not part of the theme; theme files have no `measure` token. The reference mock is [mocks/width](mocks/width/index.html) ([screenshot](mocks/width/width.png)), option A.
+How wide the document's text column is. It is a viewer setting and not part of the theme; theme files have no `measure` token. The reference mock is [mocks/width-popover](mocks/width-popover/index.html) ([screenshot](mocks/width-popover/width-popover.png)).
 
 ## Values
 
@@ -18,12 +18,13 @@ How wide the document's text column is. It is a viewer setting and not part of t
 
 ## The control
 
-- A `⟷` button in the custom title bar opens a popover, which is a separate window, so it can sit over the WebView. The popover holds:
+- A `⟷` button in the custom title bar (accessible name "Content width", no tooltip) opens a popover: a native Avalonia Popup anchored to it, which is a separate window, so it can sit over the WebView. The popover holds:
   - **Content width** and the readout;
-  - the slider, labelled 480 … Full;
-  - **Saved for**, a segmented control of two to five segments, deepest folder first. They are the document's folder; the folder the width comes from, when it lies between the document's folder and the group root; the group root (`yamv (repo)`, marked when it is a git work tree), hidden when it is the document's folder; the folder the width comes from, when it lies above the group root; and last **All documents** (the app default). A folder segment below the group root is labelled by its path below the segment above it (`plans`, or `docs/plans`), and one above the group root by its name.
+  - the slider, labelled 480 … Full; its arrow, Page Up/Down, Home and End keys (with or without modifiers) move it on the 40 px grid;
+  - **Saved for**, a segmented control of two to five segments, deepest folder first. They are the document's folder; the folder the width comes from, when it lies between the document's folder and the group root; the group root (`yamv (repo)`, marked when it is a git work tree), hidden when it is the document's folder; the folder the width comes from, when it lies above the group root; and last **All documents** (the app default). A folder segment below the group root is labelled by its path below the segment above it (`plans`, or `docs/plans`), and one above the group root by its name. The segments have equal widths while every label fits an equal share; otherwise each is its label's width plus 6 px a side plus an equal share of the rest.
   - **Reset to inherited**, which removes the selected folder's own width; it is enabled only when the selected segment is a folder that holds a width of its own;
-  - **Clear all overrides here**, which removes every folder width at or below the group root.
+  - **Clear all overrides here**, which removes every folder width at or below the group root. It is enabled only when such a width exists, and asks first, inline: the link is replaced by "Clear N saved width(s) under {group root}?" with **Clear** and **Cancel** in link style. Focus moves to Cancel, and back to the link (or to the selected segment when the link becomes disabled) when the question ends.
+- The popover closes on Esc, on **⟷** again, on a click outside it (light dismiss) and when the window deactivates. Focus returns to the document only on Esc or **⟷**. Of the window's shortcuts only **Ctrl+[** / **Ctrl+]** are forwarded from the popover to the window.
 - The group root is the document's group in the tree. A viewer window with no tree uses the document's own folder as its group root, so Saved for shows that folder and All documents; a viewer window that shows a tree uses the tree's group root.
 - The slider is disabled, with the caption "The window is narrower than 480 px", when the pane leaves less than 480 px of text space.
 - Moving the slider changes the page live and saves nothing; the width is saved for the selected segment when the drag ends. A drag on a segment that cannot reach the document (a folder nearer the document holds its own width, so the document would not change) leaves the page alone and still saves the segment's width when it ends.

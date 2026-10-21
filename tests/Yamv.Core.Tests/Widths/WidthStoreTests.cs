@@ -513,6 +513,29 @@ public sealed class WidthStoreTests : IDisposable
     }
 
     [Fact]
+    public void CountAtOrBelow_CountsTheRootAndFoldersInsideIt_NotSiblingPrefixesOrAncestors()
+    {
+        string b = Path.Combine(FolderA, "b");
+        WidthStore store = CreateStore();
+        Assert.Equal(0, store.CountAtOrBelow(b));
+        Assert.True(store.Set(FolderA, ContentWidth.FromPx(900)));
+        Assert.True(store.Set(b, ContentWidth.FromPx(600)));
+        Assert.True(store.Set(Path.Combine(FolderA, "bc"), ContentWidth.FromPx(700)));
+        Assert.True(store.Set(Path.Combine(b, "c"), ContentWidth.Full));
+        Assert.True(store.SetDefault(ContentWidth.FromPx(640)));
+
+        Assert.Equal(2, store.CountAtOrBelow(b + Path.DirectorySeparatorChar));
+        Assert.Equal(4, CreateStore().CountAtOrBelow(FolderA));
+    }
+
+    [Fact]
+    public void CountAtOrBelow_MissingFile_IsZero()
+    {
+        Assert.Equal(0, CreateStore().CountAtOrBelow(Docs));
+        Assert.False(File.Exists(WidthsFile));
+    }
+
+    [Fact]
     public void ClearAtOrBelow_FileSystemRoot_ClearsEveryEntry()
     {
         WidthStore store = CreateStore();

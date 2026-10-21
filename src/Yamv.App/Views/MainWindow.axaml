@@ -140,7 +140,7 @@
   </Window.Styles>
 
   <DockPanel x:Name="Root">
-    <views:TitleBar DockPanel.Dock="Top" />
+    <views:TitleBar x:Name="WindowTitleBar" DockPanel.Dock="Top" />
     <Grid x:Name="Body" ColumnDefinitions="*,Auto,280">
       <Panel Grid.Column="0" x:Name="DocumentColumn">
         <ContentControl x:Name="DocumentHost">
@@ -155,6 +155,21 @@
         <views:EmptyState x:Name="EmptyState" IsVisible="{Binding IsEmpty}" />
         <views:MissingDocumentPane x:Name="MissingPane" IsVisible="{Binding SelectedIsMissing}" />
         <views:UnreadableDocumentPane x:Name="UnreadablePane" IsVisible="{Binding SelectedIsUnreadable}" />
+        <!--
+          The content-width popover: a native popup (not the overlay layer), so it draws over the web view, hung from the ⟷
+          button. Its content keeps 12 px for the shadow at each side, hence the offset that lines the card up with the button.
+        -->
+        <Popup
+          x:Name="WidthPopup"
+          ShouldUseOverlayLayer="False"
+          IsLightDismissEnabled="True"
+          WindowManagerAddShadowHint="False"
+          Placement="BottomEdgeAlignedRight"
+          HorizontalOffset="12"
+          VerticalOffset="2"
+        >
+          <views:ContentWidthPopover x:Name="WidthPopover" />
+        </Popup>
       </Panel>
       <GridSplitter
         Grid.Column="1"

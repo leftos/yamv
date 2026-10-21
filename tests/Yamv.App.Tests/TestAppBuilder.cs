@@ -6,11 +6,14 @@ using Yamv.App.Tests;
 
 namespace Yamv.App.Tests;
 
-/// <summary>Builds the real <see cref="App"/> on the headless platform, so tests run without a window on the desktop.</summary>
+/// <summary>
+/// Builds the real <see cref="App"/> on the headless platform, so tests run without a window on the desktop. Popups that do
+/// not ask for the overlay layer are top levels of their own, as on the desktop: the content-width popover is one.
+/// </summary>
 public static class TestAppBuilder
 {
     public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = true });
+        AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = true, OverlayPopups = false });
 }
 
 /// <summary>

@@ -50,6 +50,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         _textSpace = ContentWidth.TextSpace(paneWidth);
         _scopes = host.ScopesFor(source);
         ShowSegment(_scopes, width, source);
+        host.Window.QueueWidthWork(ReadClearAllCountAsync);
     }
 
     /// <summary>The document the popover edits the width of.</summary>
@@ -101,6 +102,26 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool DragReachesDocument { get; private set; }
 
+    /// <summary>
+    /// How many folders at or below the group root hold a width of their own: what Clear all overrides here removes. Read when
+    /// the popover opens and after each change it makes.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ClearAllQuestion))]
+    [NotifyCanExecuteChangedFor(nameof(AskClearAllCommand))]
+    public partial int ClearAllCount { get; private set; }
+
+    /// <summary>True while Clear all overrides here asks first: the link is replaced by <see cref="ClearAllQuestion"/>, Clear and Cancel.</summary>
+    [ObservableProperty]
+    public partial bool IsConfirmingClearAll { get; private set; }
+
+    /// <summary>What Clear all overrides here asks first: <c>Clear 3 saved widths under yamv?</c>.</summary>
+    public string ClearAllQuestion =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"Clear {ClearAllCount} saved {(ClearAllCount == 1 ? "width" : "widths")} under {_scopes.ClearAllName}?"
+        );
+
     /// <summary>True when the pane leaves at least 480 px for the text, so the slider can move.</summary>
     public bool IsSliderEnabled => _textSpace >= ContentWidth.MinimumPx;
 
@@ -125,6 +146,55 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         ContentWidth width = _width;
         _host.Window.QueueWidthWork(() => SaveAsync(width));
     }
+
+    /// <summary>
+    /// Moves the slider as a key does: one 40 px grid step narrower or wider (the Ctrl/Cmd+[ and ] step), or to 480 px or Full.
+    /// Like a pointer move it changes the page live and saves nothing; <see cref="EndDrag"/> on the key's release saves it.
+    /// </summary>
+    public void StepSlider(SliderStep step)
+    {
+        if (IsStale || !IsSliderEnabled)
+        {
+            return;
+        }
+
+        ContentWidth width = step switch
+        {
+            SliderStep.Narrower => _width.StepDown(_textSpace),
+            SliderStep.Wider => _width.StepUp(_textSpace),
+            SliderStep.Narrowest => ContentWidth.FromPx(ContentWidth.MinimumPx),
+            SliderStep.Full => ContentWidth.Full,
+            _ => throw new ArgumentOutOfRangeException(nameof(step), step, "Unknown slider step."),
+        };
+        _moved = true;
+        if (width == _width)
+        {
+            return;
+        }
+
+        PlaceSlider(width);
+        if (DragReachesDocument)
+        {
+            SendToPage(width);
+        }
+    }
+
+    /// <summary>Asks before Clear all overrides here: shows <see cref="ClearAllQuestion"/> with Clear and Cancel.</summary>
+    [RelayCommand(CanExecute = nameof(CanClearAll))]
+    public void AskClearAll()
+    {
+        if (!IsStale)
+        {
+            IsConfirmingClearAll = true;
+        }
+    }
+
+    /// <summary>Puts the Clear all overrides here link back without clearing anything.</summary>
+    [RelayCommand]
+    public void CancelClearAll() => IsConfirmingClearAll = false;
+
+    /// <summary>True when Clear all overrides here has a folder width to remove.</summary>
+    public bool CanClearAll => ClearAllCount > 0;
 
     /// <summary>Selects <paramref name="segment"/>, showing its width; later saves go to it.</summary>
     [RelayCommand]
@@ -155,6 +225,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     [RelayCommand]
     public void ClearAll()
     {
+        IsConfirmingClearAll = false;
         if (IsStale)
         {
             return;
@@ -267,6 +338,11 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         {
             SendToPage(result.document.Width);
         }
+
+        if (!unchanged)
+        {
+            await ReadClearAllCountAsync();
+        }
     }
 
     /// <summary>
@@ -333,6 +409,25 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         if (!HoldsSlider)
         {
             SendToPage(width);
+        }
+
+        await ReadClearAllCountAsync();
+    }
+
+    /// <summary>Reads how many folder widths Clear all overrides here would remove; a count of none puts the link back.</summary>
+    private async Task ReadClearAllCountAsync()
+    {
+        string root = _scopes.ClearAllRoot;
+        int count = await Task.Run(() => Widths.CountAtOrBelow(root));
+        if (IsStale)
+        {
+            return;
+        }
+
+        ClearAllCount = count;
+        if (count == 0)
+        {
+            IsConfirmingClearAll = false;
         }
     }
 
@@ -447,6 +542,22 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     }
 
     private static string ReadoutOf(ContentWidth width) => width.Px is double px ? string.Create(CultureInfo.InvariantCulture, $"{px:0} px") : "Full";
+}
+
+/// <summary>How a key moves the content-width slider.</summary>
+public enum SliderStep
+{
+    /// <summary>One 40 px grid step narrower: Left, Down or Page Down.</summary>
+    Narrower,
+
+    /// <summary>One 40 px grid step wider: Right, Up or Page Up.</summary>
+    Wider,
+
+    /// <summary>To 480 px: Home.</summary>
+    Narrowest,
+
+    /// <summary>To Full: End.</summary>
+    Full,
 }
 
 /// <summary>What a <see cref="ContentWidthViewModel"/> uses of its document window.</summary>

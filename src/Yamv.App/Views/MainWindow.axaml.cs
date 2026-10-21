@@ -40,6 +40,8 @@ public partial class MainWindow : Window
     private bool _boundsUpdatePosted;
     private WindowBounds? _normalBounds;
     private double _reportedSidebarWidth;
+    private ContentWidthViewModel? _widthPopover;
+    private bool _creatingWidthPopover;
 
     /// <summary>Creates an empty window; the XAML loader needs it. A real window is made with the other constructor.</summary>
     public MainWindow()
@@ -74,6 +76,13 @@ public partial class MainWindow : Window
         MissingPane.LocateRequested += OnLocateRequested;
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
         Tree.AddHandler(KeyDownEvent, OnTreeKeyDown, RoutingStrategies.Tunnel);
+        WindowTitleBar.ContentWidthButton.Click += OnContentWidthClick;
+        WidthPopup.PlacementTarget = WindowTitleBar.ContentWidthButton;
+        // A press on ⟷ reaches the button instead of light-dismissing the popup, so its click toggles the popover closed.
+        WidthPopup.OverlayInputPassThroughElement = WindowTitleBar.ContentWidthButton;
+        WidthPopup.Closed += OnWidthPopupClosed;
+        WidthPopover.DataContext = null;
+        WidthPopover.AddHandler(KeyDownEvent, OnWidthPopoverKeyDown, RoutingStrategies.Tunnel);
         UpdateSidebar();
         Sidebar.PropertyChanged += OnSidebarPropertyChanged;
         PositionChanged += OnPositionChanged;
@@ -86,6 +95,13 @@ public partial class MainWindow : Window
 
     /// <summary>The pickers, reveal and clipboard the window's menus, buttons and Ctrl/Cmd+O use; tests replace it.</summary>
     internal IFileActions? FileActions { get; set; }
+
+    /// <summary>
+    /// What the window does with its content-width popover once it has shown its first document: nothing, or open it (and then
+    /// ask Clear all, or select the document's own folder), writing <c>Window: width popover shown</c>. The hidden-desktop
+    /// capture sets it to check the popover against its mock.
+    /// </summary>
+    internal DevWidthPopover WidthPopoverWhenShown { get; set; }
 
     /// <summary>Raised when <see cref="SavedBounds"/> may have changed: the window moved, was resized, maximized or restored.</summary>
     public event EventHandler? SavedBoundsChanged;
@@ -275,6 +291,137 @@ public partial class MainWindow : Window
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown shortcut command.");
+        }
+    }
+
+    /// <summary>⟷ toggles the popover: it closes an open one, and a click while one is being made is ignored.</summary>
+    private void OnContentWidthClick(object? sender, RoutedEventArgs e)
+    {
+        if (WidthPopup.IsOpen)
+        {
+            CloseWidthPopover(refocusDocument: true);
+            return;
+        }
+
+        if (!_creatingWidthPopover)
+        {
+            RunLogged(OpenWidthPopoverAsync, "Open the content-width popover");
+        }
+    }
+
+    /// <summary>Opens the popover of the shown document, with the slider focused; nothing when no document's width can be edited.</summary>
+    private async Task OpenWidthPopoverAsync()
+    {
+        _creatingWidthPopover = true;
+        ContentWidthViewModel? popover;
+        try
+        {
+            popover = await _viewModel!.CreateContentWidthPopoverAsync(DocumentColumn.Bounds.Width);
+        }
+        finally
+        {
+            _creatingWidthPopover = false;
+        }
+
+        if (popover is null)
+        {
+            return;
+        }
+
+        if (popover.IsStale || !_opened)
+        {
+            popover.Close();
+            return;
+        }
+
+        _widthPopover = popover;
+        popover.PropertyChanged += OnWidthPopoverPropertyChanged;
+        WidthPopover.DataContext = popover;
+        WidthPopup.IsOpen = true;
+        WindowTitleBar.ContentWidthButton.Classes.Set("open", true);
+        WidthPopover.WidthSlider.Focus(NavigationMethod.Directional);
+    }
+
+    /// <summary>The popover's document stopped being the shown one, or a newer popover replaced it: it closes.</summary>
+    private void OnWidthPopoverPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (
+            e.PropertyName == nameof(ContentWidthViewModel.IsStale)
+            && sender is ContentWidthViewModel { IsStale: true } popover
+            && ReferenceEquals(popover, _widthPopover)
+        )
+        {
+            CloseWidthPopover(refocusDocument: false);
+        }
+    }
+
+    /// <summary>A light dismiss (a click outside) closed the popup, or one of the window's own closers did.</summary>
+    private void OnWidthPopupClosed(object? sender, EventArgs e) => ForgetWidthPopover();
+
+    /// <summary>
+    /// Closes the popover; with <paramref name="refocusDocument"/> (Esc, or ⟷ again) keyboard focus goes back to the document.
+    /// </summary>
+    private void CloseWidthPopover(bool refocusDocument)
+    {
+        WidthPopup.IsOpen = false;
+        ForgetWidthPopover();
+        if (refocusDocument && DocumentHost.Content is InputElement document)
+        {
+            document.Focus();
+        }
+    }
+
+    /// <summary>Closes the popover's view model, which saves nothing more, and puts ⟷ back to rest; runs once per popover.</summary>
+    private void ForgetWidthPopover()
+    {
+        if (_widthPopover is not { } popover)
+        {
+            return;
+        }
+
+        _widthPopover = null;
+        popover.PropertyChanged -= OnWidthPopoverPropertyChanged;
+        popover.Close();
+        WidthPopover.DataContext = null;
+        WindowTitleBar.ContentWidthButton.Classes.Set("open", false);
+    }
+
+    /// <summary>
+    /// Keys typed in the popover, which is a window of its own: Esc puts back the Clear all link when it is asking, else closes
+    /// the popover; Ctrl/Cmd+[ and ] step the width as they do in the window.
+    /// </summary>
+    private void OnWidthPopoverKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _widthPopover is { } popover)
+        {
+            if (popover.IsConfirmingClearAll)
+            {
+                popover.CancelClearAll();
+            }
+            else
+            {
+                CloseWidthPopover(refocusDocument: true);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        KeyModifiers modifiers = e.KeyModifiers;
+        ShortcutCommand? command = KeyName(e) is string key
+            ? Shortcuts.Match(
+                key,
+                modifiers.HasFlag(KeyModifiers.Control),
+                modifiers.HasFlag(KeyModifiers.Meta),
+                modifiers.HasFlag(KeyModifiers.Shift),
+                modifiers.HasFlag(KeyModifiers.Alt),
+                OperatingSystem.IsMacOS()
+            )
+            : null;
+        if (command is ShortcutCommand.NarrowerWidth or ShortcutCommand.WiderWidth)
+        {
+            RunCommand(command.Value);
+            e.Handled = true;
         }
     }
 
@@ -503,6 +650,44 @@ public partial class MainWindow : Window
         _ = LogShownAsync();
     }
 
+    /// <summary>
+    /// Opens the popover for a hidden-desktop capture, puts it in the state <see cref="WidthPopoverWhenShown"/> asks for, and
+    /// logs the popup's transparency (the level it asked for and the one the platform gave) before the line the capture waits for.
+    /// </summary>
+    private async Task ShowDevWidthPopoverAsync()
+    {
+        await OpenWidthPopoverAsync();
+        if (_widthPopover is not { } popover)
+        {
+            _log!.LogInfo("Window: no width popover to show");
+            return;
+        }
+
+        if (WidthPopoverWhenShown == DevWidthPopover.AskClearAll)
+        {
+            if (popover.AskClearAllCommand.CanExecute(null))
+            {
+                popover.AskClearAll();
+            }
+            else
+            {
+                _log!.LogInfo("Window: nothing to clear in the width popover.");
+            }
+        }
+        else if (WidthPopoverWhenShown == DevWidthPopover.SelectDocumentFolder)
+        {
+            popover.SelectSegment(popover.Segments[0]);
+        }
+
+        await _viewModel!.WhenRendersSettled();
+        var popupTop = TopLevel.GetTopLevel(WidthPopover);
+        _log!.LogInfo(
+            $"Window: width popover top level {popupTop?.GetType().Name}, transparency asked {string.Join(", ", popupTop?.TransparencyLevelHint ?? [])}, "
+                + $"given {popupTop?.ActualTransparencyLevel}"
+        );
+        _log.LogInfo("Window: width popover shown");
+    }
+
     /// <summary>Writes <c>Window: shown</c> once the first document has been shown, or at once for the empty state or missing pane.</summary>
     private async Task LogShownAsync()
     {
@@ -510,6 +695,10 @@ public partial class MainWindow : Window
         {
             await _viewModel!.WhenRendersSettled();
             _log!.LogInfo("Window: shown");
+            if (WidthPopoverWhenShown != DevWidthPopover.None)
+            {
+                await ShowDevWidthPopoverAsync();
+            }
         }
         // The log line is a dev aid; a failure is logged rather than lost in a discarded task.
         catch (Exception exception)
@@ -521,6 +710,9 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _opened = false;
+        CloseWidthPopover(refocusDocument: false);
+        WindowTitleBar.ContentWidthButton.Click -= OnContentWidthClick;
+        WidthPopup.Closed -= OnWidthPopupClosed;
         _viewModel!.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.CloseRequested -= OnCloseRequested;
         _surface!.KeyForwarded -= OnKeyForwarded;
@@ -529,4 +721,20 @@ public partial class MainWindow : Window
         PositionChanged -= OnPositionChanged;
         Sidebar.PropertyChanged -= OnSidebarPropertyChanged;
     }
+}
+
+/// <summary>What a document window does with its content-width popover once shown, for a hidden-desktop capture.</summary>
+internal enum DevWidthPopover
+{
+    /// <summary>Nothing: the popover opens only from ⟷.</summary>
+    None,
+
+    /// <summary>Open the popover.</summary>
+    Open,
+
+    /// <summary>Open the popover and ask the Clear all question.</summary>
+    AskClearAll,
+
+    /// <summary>Open the popover and select the document's own folder segment.</summary>
+    SelectDocumentFolder,
 }

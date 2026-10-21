@@ -175,6 +175,40 @@ public sealed class AppStartupTests
         });
 
     [Fact]
+    public Task A_start_without_a_data_folder_ignores_the_width_popover_variable() =>
+        Headless.Run(() =>
+        {
+            string? dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
+            string? harnessBefore = Environment.GetEnvironmentVariable(App.HarnessVariable);
+            string? popoverBefore = Environment.GetEnvironmentVariable(App.WidthPopoverVariable);
+            // A viewer start reads no session and saves none, so the missing data folder never falls back to the owner's own.
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, null);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, null);
+            Environment.SetEnvironmentVariable(App.WidthPopoverVariable, "bogus");
+            App.ViewerFiles = [Path.Combine(Path.GetTempPath(), "yamv-gone-" + Guid.NewGuid().ToString("N") + ".md")];
+            App app = Assert.IsType<App>(Application.Current);
+            App.ProcessLog = new RecordingAppLog();
+            app.ResetLog();
+            try
+            {
+                Window window = app.CreateStartWindow();
+
+                MainWindow main = Assert.IsType<MainWindow>(window);
+                Assert.Equal(DevWidthPopover.None, main.WidthPopoverWhenShown);
+            }
+            finally
+            {
+                app.ReleaseMainWindow();
+                app.ResetLog();
+                App.ViewerFiles = [];
+                App.ProcessLog = null;
+                Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
+                Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
+                Environment.SetEnvironmentVariable(App.WidthPopoverVariable, popoverBefore);
+            }
+        });
+
+    [Fact]
     public Task Releasing_the_app_disposes_the_bridge_it_created() =>
         Headless.Run(() =>
         {
