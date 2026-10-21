@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV theme settings window</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1500px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 36px; font-size: 16px; max-width: 1380px; line-height: 1.5; }
+section { margin-bottom: 60px; }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > p { color: #eef0f2; margin: 0 0 16px; font-size: 15px; max-width: 1380px; line-height: 1.5; }
+.pair { display: flex; gap: 36px; align-items: flex-start; }
+.notes { width: 380px; flex: none; color: #fff; font-size: 14px; line-height: 1.5; padding-top: 4px; }
+.notes ul { margin: 0; padding-left: 18px; }
+.notes li { margin-bottom: 9px; }
+.notes b { font-weight: 650; }
+
+/* window: every colour is a theme token, set inline from the token table in the script */
+.win { width: 980px; height: 640px; flex: none; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; position: relative;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-size: 13px; font-family: "Inter V", sans-serif; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .dot { color: var(--yamv-accent); margin-left: 6px; font-size: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbody { flex: 1; display: flex; min-height: 0; }
+.foot { height: 52px; flex: none; border-top: 1px solid var(--yamv-line); display: flex; align-items: center; gap: 8px; padding: 0 16px; background: var(--yamv-chrome-background); }
+.foot .spacer { flex: 1; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--yamv-line); border-radius: 6px;
+       background: var(--yamv-page-background); color: var(--yamv-text); font: 550 12.5px "Inter V"; white-space: nowrap; }
+.btn.primary { background: var(--yamv-accent); border-color: var(--yamv-accent); color: #fff; }
+.btn.off { opacity: .45; }
+.btn.sm { height: 26px; font-size: 12px; padding: 0 10px; }
+
+/* left: theme list */
+.tlist { width: 190px; flex: none; border-right: 1px solid var(--yamv-line); background: var(--yamv-sidebar-background); padding: 12px 8px; display: flex; flex-direction: column; }
+.sh { font: 600 10.5px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: var(--yamv-text-muted); padding: 6px 8px; }
+.row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+.row.bad .nm { color: var(--yamv-text-muted); }
+.row.bad.sel .nm { color: var(--yamv-selection-text); }
+.row .glyph { margin-left: auto; color: var(--yamv-warning); display: grid; place-items: center; }
+.chip { width: 22px; height: 14px; flex: none; display: flex; border-radius: 3px; overflow: hidden; box-shadow: 0 0 0 1px var(--yamv-line); }
+.chip span { flex: 1; position: relative; }
+.chip span i { position: absolute; left: 3px; right: 3px; bottom: 2px; height: 2px; border-radius: 1px; }
+.chip.empty { box-shadow: 0 0 0 1px var(--yamv-line); background: repeating-linear-gradient(45deg, transparent 0 3px, var(--yamv-line) 3px 4px); }
+.tlist .grow { flex: 1; }
+.appear { border-top: 1px solid var(--yamv-line); padding: 10px 8px 2px; }
+.appear .lbl { font-size: 11.5px; color: var(--yamv-text-muted); margin-bottom: 5px; }
+.select { height: 28px; border: 1px solid var(--yamv-line); border-radius: 6px; background: var(--yamv-page-background); display: flex; align-items: center;
+          padding: 0 8px; font-size: 12.5px; color: var(--yamv-text); }
+.select .caret { margin-left: auto; color: var(--yamv-text-muted); font-size: 10px; }
+
+/* middle: tokens */
+.tokens { width: 350px; flex: none; border-right: 1px solid var(--yamv-line); display: flex; flex-direction: column; min-height: 0; position: relative; background: var(--yamv-page-background); }
+.thead { padding: 14px 16px 10px; border-bottom: 1px solid var(--yamv-line); flex: none; }
+.thead .t { display: flex; align-items: center; gap: 8px; }
+.thead .t b { font: 650 15px "Inter V"; color: var(--yamv-heading); }
+.badge { font: 600 9.5px "Inter V"; letter-spacing: .05em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; }
+.badge.mute { color: var(--yamv-text-muted); border-color: var(--yamv-line); }
+.thead .d { font-size: 11.5px; color: var(--yamv-text-muted); margin: 3px 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg { display: flex; border: 1px solid var(--yamv-line); border-radius: 7px; overflow: hidden; }
+.seg span { flex: 1; text-align: center; padding: 5px 0; font-size: 12.5px; color: var(--yamv-text-secondary); border-right: 1px solid var(--yamv-line); }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 600; }
+.hint { font-size: 11.5px; color: var(--yamv-text-muted); margin-top: 8px; line-height: 1.4; }
+.lock { display: flex; gap: 7px; align-items: flex-start; font-size: 11.5px; color: var(--yamv-text-secondary); margin-top: 8px; line-height: 1.4; }
+.lock svg { flex: none; color: var(--yamv-text-muted); margin-top: 1px; }
+.tscroll { flex: 1; min-height: 0; overflow: hidden; padding: 2px 16px 0; position: relative; display: flex; flex-direction: column; }
+.tscroll.end { justify-content: flex-end; padding-bottom: 8px; }
+.tscroll > * { flex: none; }
+.sbar { position: absolute; right: 3px; width: 4px; border-radius: 2px; background: var(--yamv-text-muted); opacity: .35; }
+.gh { font: 600 10.5px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: var(--yamv-text-muted); margin: 12px 0 3px; }
+.tok { display: flex; align-items: center; gap: 9px; height: 28px; font-size: 12.5px; color: var(--yamv-text-secondary); position: relative; }
+.tok .sw { width: 18px; height: 18px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(127,127,127,.35); flex: none;
+           background-image: linear-gradient(var(--c), var(--c)), repeating-conic-gradient(#ccc 0 25%, #fff 0 50%); background-size: auto, 8px 8px; }
+.tok .lab { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tok .mod { color: var(--yamv-accent); font-size: 9px; margin-left: 4px; }
+.fld { height: 24px; border: 1px solid var(--yamv-line); border-radius: 5px; background: var(--yamv-page-background); display: flex; align-items: center;
+       padding: 0 7px; font: 11.5px "JetBrains Mono V"; color: var(--yamv-text); flex: none; }
+.fld.hex { width: 92px; }
+.fld.font { width: 140px; font-family: "Inter V"; font-size: 12px; }
+.fld.font .caret { margin-left: auto; color: var(--yamv-text-muted); font-size: 9px; }
+.fld.num { width: 58px; justify-content: flex-end; }
+.unit { width: 18px; font-size: 11px; color: var(--yamv-text-muted); margin-left: -4px; }
+.inh .fld { color: var(--yamv-text-muted); }
+.fld.focus { border-color: var(--yamv-accent); box-shadow: 0 0 0 3px var(--yamv-accent-soft); color: var(--yamv-text); }
+.check { width: 16px; height: 16px; border-radius: 4px; background: var(--yamv-accent); display: grid; place-items: center; flex: none; margin-right: 1px; }
+.reset { width: 16px; flex: none; color: var(--yamv-text-muted); display: grid; place-items: center; }
+.ro .tok > *:not(.lab) { opacity: .55; }
+.ro .tok .fld { background: var(--yamv-chrome-background); }
+
+/* colour picker popover */
+.picker { position: absolute; width: 244px; z-index: 5; background: var(--yamv-chrome-background); border: 1px solid var(--yamv-line);
+          border-radius: 10px; padding: 10px; box-shadow: 0 14px 36px rgba(0,0,0,.55); }
+.picker .sv { height: 92px; border-radius: 6px; position: relative;
+              background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(128 60% 50%)); }
+.picker .knob { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); transform: translate(-50%, -50%); }
+.picker .bar { height: 10px; border-radius: 5px; margin-top: 9px; position: relative; }
+.picker .hue { background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.picker .alpha { background-image: linear-gradient(to right, transparent, #3fb950), repeating-conic-gradient(#888 0 25%, #bbb 0 50%); background-size: auto, 8px 8px; }
+.picker .bar .knob { top: 50%; }
+.picker .row2 { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.picker .cmp { display: flex; width: 44px; height: 24px; border-radius: 5px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--yamv-line); flex: none; }
+.picker .cmp span { flex: 1; }
+.picker .fld { flex: 1; width: auto; }
+.picker .cap { font-size: 10.5px; color: var(--yamv-text-muted); margin-top: 6px; }
+
+/* right: live preview */
+.prev { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--yamv-page-background); position: relative; }
+.pv { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--yamv-page-background); color: var(--yamv-text); }
+.pv .ptb { height: 28px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--yamv-chrome-background);
+           border-bottom: 1px solid var(--yamv-line); font: 500 11px "Inter V"; color: var(--yamv-text-muted); }
+.pv .ptb b { color: var(--yamv-text); font-weight: 600; }
+.pv .ptb .tag { margin-left: auto; font: 600 9.5px "Inter V"; letter-spacing: .06em; text-transform: uppercase; color: var(--yamv-text-muted); }
+.pv .pbody { flex: 1; display: flex; min-height: 0; }
+.pv .pdoc { flex: 1; min-width: 0; overflow: hidden; padding: 22px 20px 0; }
+.pv .ptree { width: 104px; flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 10px 0 0 6px; overflow: hidden; font-size: 11.5px; }
+.pv .ptree .g { display: flex; align-items: center; gap: 5px; padding: 4px 6px; font-weight: 650; color: var(--yamv-text); white-space: nowrap; }
+.pv .ptree .r { display: flex; align-items: center; gap: 5px; height: 23px; padding: 0 6px 0 18px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; border-radius: 5px 0 0 5px; }
+.pv .ptree .r.f { color: var(--yamv-text-muted); padding-left: 6px; }
+.pv .ptree .r.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.pv .ptree .r.sel::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+.pv .ptree .r.hov { background: var(--yamv-hover-background); }
+.pv .ptree .r svg { flex: none; opacity: .7; }
+.md { font-family: var(--yamv-body-font), "Inter V", sans-serif; font-size: 13px; line-height: var(--yamv-line-height); color: var(--yamv-text); }
+.md h1 { font-family: "Inter V"; font-weight: var(--yamv-heading-weight); font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .45em; color: var(--yamv-heading); }
+.md h2 { font-family: "Inter V"; font-weight: var(--yamv-heading-weight); font-size: 1.32em; line-height: 1.25; margin: 1.1em 0 .5em; padding-bottom: .3em; border-bottom: 1px solid var(--yamv-line); color: var(--yamv-heading); }
+.md p { margin: 0 0 .9em; }
+.md a { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; }
+.md code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md pre { background: var(--yamv-code-background); border: 1px solid var(--yamv-code-line); border-radius: 7px; padding: 10px 12px; font: 10.8px/1.6 "JetBrains Mono V"; margin: 0 0 1em; white-space: pre; overflow: hidden; }
+.md pre code { background: none; padding: 0; font-size: inherit; }
+.md blockquote { margin: 0; padding: .1em 0 .1em 1em; border-left: 3px solid var(--yamv-quote); color: var(--yamv-text-muted); }
+.md mark { background: var(--yamv-find-match); color: inherit; border-radius: 2px; }
+.k { color: var(--yamv-syntax-keyword); } .s { color: var(--yamv-syntax-string); } .c { color: var(--yamv-syntax-comment); font-style: italic; }
+.ty { color: var(--yamv-syntax-type); } .n { color: var(--yamv-syntax-number); }
+
+/* D: theme that failed to load */
+.errpane { padding: 22px 18px; }
+.errbox { border: 1px solid var(--yamv-warning-line); background: var(--yamv-warning-background); border-radius: 8px; padding: 12px 14px; }
+.errbox .h { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13px; color: var(--yamv-text); margin-bottom: 8px; }
+.errbox .h svg { color: var(--yamv-warning); }
+.errbox ul { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.45; color: var(--yamv-text-secondary); }
+.errbox li { margin-bottom: 6px; }
+.errbox code { font: 11px "JetBrains Mono V"; }
+.errpane .after { font-size: 12px; color: var(--yamv-text-muted); line-height: 1.5; margin: 12px 0 14px; }
+.noprev { flex: 1; display: grid; place-items: center; text-align: center; color: var(--yamv-text-muted); font-size: 12.5px; background: var(--yamv-chrome-background); }
+.noprev .mk { width: 44px; height: 44px; border-radius: 12px; border: 1.5px dashed var(--yamv-text-muted); margin: 0 auto 12px; opacity: .6; }
+
+/* C: import notice */
+.scrim { position: absolute; inset: 0; background: rgba(15,18,22,.42); display: grid; place-items: center; z-index: 10; }
+.dialog { width: 470px; background: var(--yamv-page-background); border-radius: 10px; box-shadow: 0 24px 60px rgba(0,0,0,.4), 0 0 0 1px rgba(0,0,0,.18); overflow: hidden; }
+.dialog .dt { height: 38px; display: flex; align-items: center; padding-left: 16px; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line); font: 600 12.5px "Inter V"; color: var(--yamv-text); }
+.dialog .dt .spacer { flex: 1; }
+.dialog .dt .ctl { width: 46px; height: 38px; display: grid; place-items: center; }
+.dialog .dt .ctl svg { stroke: var(--yamv-text-muted); }
+.dialog .db { padding: 18px 20px 6px; font-size: 13px; line-height: 1.5; color: var(--yamv-text); }
+.file { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--yamv-line); border-radius: 8px; background: var(--yamv-chrome-background); margin-bottom: 14px; }
+.file .chip { width: 30px; height: 20px; }
+.file b { font-weight: 600; font-size: 13px; display: block; }
+.file span { font: 11px "JetBrains Mono V"; color: var(--yamv-text-muted); }
+.dialog p { margin: 0 0 10px; }
+.dialog ul { margin: 0 0 12px; padding-left: 18px; }
+.dialog li { margin-bottom: 4px; }
+.dialog .safe { display: flex; gap: 9px; align-items: flex-start; padding: 9px 11px; border-radius: 8px; background: var(--yamv-code-background); margin-bottom: 10px; }
+.dialog .safe svg { flex: none; margin-top: 2px; color: var(--yamv-accent); }
+.dialog .warn { display: flex; gap: 9px; align-items: flex-start; padding: 9px 11px; border-radius: 8px; background: var(--yamv-warning-background); border: 1px solid var(--yamv-warning-line); margin-bottom: 8px; }
+.dialog .warn svg { flex: none; margin-top: 2px; color: var(--yamv-warning); }
+.dialog .df { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--yamv-line); background: var(--yamv-chrome-background); margin-top: 10px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: theme settings window</h1>
+<p class="page">The visual editor from look.md, in four states. Each lane is the whole window at 980 × 640. The window's own chrome takes the theme in use; the right pane is the live preview of the theme being edited. Every colour, font and size here is a real Studio token from ThemeTokens.cs unless a note says otherwise.</p>
+
+<template id="ctl"><span class="spacer"></span><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+<template id="warn"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1.6 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12.1" r=".9" fill="currentColor"/></svg></template>
+
+<section>
+  <h2>A · A built-in theme: Studio, light</h2>
+  <p>Built-in themes are read-only. Every field is disabled, and the footer offers <b>Duplicate to edit</b> where Save would be.</p>
+  <div class="pair"><div data-lane="a"></div>
+    <div class="notes"><ul>
+      <li>The token list is shown <b>scrolled to the end</b> (Syntax, Type, Layout) to show every kind of field: colour swatch with a hex field, a font box, a number box with its unit, and a checkbox. Lane B shows the top.</li>
+      <li>Studio sets no tokens of its own, so every value is a default, drawn in grey as an inherited value.</li>
+      <li><b>Duplicate to edit</b> writes <code>studio-2.yamv-theme.json</code> named "Studio (copy)" into Yours and selects it, ready to edit.</li>
+      <li>Edit as text is off: a built-in theme has no file on disk to open.</li>
+      <li>Clicking a theme in the list makes it the theme in use. Appearance (Match system / Light / Dark) sits at the foot of the list, since it picks which half of the theme the app shows.</li>
+    </ul></div></div>
+</section>
+
+<section>
+  <h2>B · Your theme: My Studio, dark, with an unsaved change</h2>
+  <p>A user theme in Yours is editable. The Dark tab is open, and the accent's picker is open with a new green. Revert and Save are on because the change is not saved yet.</p>
+  <div class="pair"><div data-lane="b"></div>
+    <div class="notes"><ul>
+      <li>Each tab shows the full resolved value of every token. <b>Grey</b> values come from Shared or the Studio defaults; <b>bright</b> values are set in this tab and have a ↺ that removes them from the tab.</li>
+      <li>An <b>unsaved</b> token gets an accent dot after its name, and the title bar gets one after the theme name.</li>
+      <li>Clicking a swatch opens the picker: a saturation square, hue, alpha (themes accept <code>#rrggbbaa</code>), the hex field and the old/new colours side by side.</li>
+      <li>The preview follows every keystroke (the green link and the green selection bar in the tree). The window's own chrome keeps the saved theme until Save.</li>
+      <li>Revert drops every unsaved change back to the file on disk. Save writes the file; the folder watcher then re-applies it like any outside edit.</li>
+    </ul></div></div>
+</section>
+
+<section>
+  <h2>C · The Import notice</h2>
+  <p>Import… opens a file picker, then this notice before anything is copied into the themes folder. The wording comes from the trust model in themes.md.</p>
+  <div class="pair"><div data-lane="c"></div>
+    <div class="notes"><ul>
+      <li>It shows <b>every time</b>, whether or not the file holds css; the header line says whether it does.</li>
+      <li>The file card reads the theme's name, author, halves and whether it has css from the file before import.</li>
+      <li>Import is the default button. A taken id is imported as <code>&lt;id&gt;-2</code> without asking, as themes.md says.</li>
+      <li>Drawn as a modal over the settings window, in the window's own theme.</li>
+    </ul></div></div>
+</section>
+
+<section>
+  <h2>D · A user theme that failed to load</h2>
+  <p>nord.yamv-theme.json in the themes folder has two bad tokens. The list marks it with a warning glyph; selecting it shows its errors and Edit as text instead of the token editor.</p>
+  <div class="pair"><div data-lane="d"></div>
+    <div class="notes"><ul>
+      <li>The row is greyed with the warning glyph in every state (lanes A to C show it too). Selecting it <b>inspects</b> it but does not make it the theme in use; the app stays on the last good theme.</li>
+      <li>The errors are the parser's own messages, one per line.</li>
+      <li>The watcher re-reads the file on every save, so fixing it in the editor turns the row normal and brings the token editor back.</li>
+      <li>No tabs, no preview, and Export, Revert and Save are off: there is no valid theme to show or write.</li>
+    </ul></div></div>
+</section>
+
+<script>
+const TOKENS = [
+  ["pageBackground", "Page background", "Page"], ["text", "Text", "Page"], ["textSecondary", "Secondary text", "Page"], ["textMuted", "Muted text", "Page"],
+  ["heading", "Headings", "Page"], ["accent", "Accent", "Page"], ["accentSoft", "Accent, soft", "Page"], ["line", "Lines", "Page"], ["quote", "Quote bar", "Page"],
+  ["chromeBackground", "Title bar and footers", "Chrome"], ["sidebarBackground", "Sidebar", "Chrome"], ["selectionBackground", "Selected row", "Chrome"],
+  ["selectionText", "Selected row text", "Chrome"], ["hoverBackground", "Hovered row", "Chrome"], ["warning", "Warning", "Chrome"],
+  ["warningBackground", "Warning fill", "Chrome"], ["warningLine", "Warning border", "Chrome"],
+  ["codeBackground", "Code background", "Code"], ["codeLine", "Code block border", "Code"], ["findMatch", "Find match", "Code"], ["findCurrent", "Current match", "Code"],
+  ["syntaxKeyword", "Keywords", "Syntax"], ["syntaxString", "Strings", "Syntax"], ["syntaxComment", "Comments", "Syntax"], ["syntaxType", "Types and functions", "Syntax"],
+  ["syntaxNumber", "Numbers", "Syntax"],
+  ["uiFont", "App font", "Type", "font"], ["bodyFont", "Body font", "Type", "font"], ["headingFont", "Heading font", "Type", "font"], ["monoFont", "Code font", "Type", "font"],
+  ["bodySize", "Body size", "Layout", "num", "px"], ["lineHeight", "Line height", "Layout", "num", ""], ["h1Size", "H1 size", "Layout", "num", "em"],
+  ["headingWeight", "Heading weight", "Layout", "num", ""], ["h2Rule", "Rule under H2", "Layout", "bool"],
+];
+const COMMON = { uiFont: "Inter", bodyFont: "Inter", headingFont: "Inter", monoFont: "JetBrains Mono", bodySize: "15.5", lineHeight: "1.62", h1Size: "2.05", headingWeight: "700", h2Rule: true };
+const LIGHT = { ...COMMON, pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", quote: "#d0d7de", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  warning: "#9a6700", warningBackground: "#fff8c5", warningLine: "#e5d17b", codeBackground: "#f6f8fa", codeLine: "#e4e8ec", findMatch: "#fff1a8", findCurrent: "#ffb340",
+  syntaxKeyword: "#cf222e", syntaxString: "#0a3069", syntaxComment: "#6e7781", syntaxType: "#8250df", syntaxNumber: "#0550ae" };
+const DARK = { ...COMMON, pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", quote: "#3d444d", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  warning: "#d29922", warningBackground: "#bb800926", warningLine: "#9e6a03", codeBackground: "#161b22", codeLine: "#262c34", findMatch: "#5c4813", findCurrent: "#9e6a03",
+  syntaxKeyword: "#ff7b72", syntaxString: "#a5d6ff", syntaxComment: "#8b949e", syntaxType: "#d2a8ff", syntaxNumber: "#79c0ff" };
+/* My Studio: a duplicate of Studio whose saved dark half sets quote and codeBackground; accent is the unsaved change */
+const MY_DARK_SAVED = { ...DARK, quote: "#4493f8", codeBackground: "#131a22" };
+const MY_DARK_EDIT = { ...MY_DARK_SAVED, accent: "#3fb950" };
+
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (v) => Object.entries(v).filter(([k]) => typeof v[k] === "string" && v[k].startsWith("#")).map(([k, x]) => `${kebab(k)}:${x}`).join(";")
+  + `;--yamv-line-height:${v.lineHeight};--yamv-heading-weight:${v.headingWeight};--yamv-body-font:"${v.bodyFont} V"`;
+const ctl = document.getElementById("ctl").innerHTML;
+const warn = document.getElementById("warn").innerHTML;
+const fileIco = `<svg width="11" height="11" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+const resetIco = `<svg width="12" height="12" viewBox="0 0 16 16"><path d="M3.5 8a4.5 4.5 0 1 0 1.4-3.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M4.5 2v3h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const lockIco = `<svg width="13" height="13" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`;
+
+const THEMES = {
+  paper: ["Paper", ["#fbf8f2", "#a4542a"], ["#1d1a17", "#df9a6b"]], studio: ["Studio", ["#ffffff", "#0969da"], ["#0f1318", "#4493f8"]],
+  ink: ["Ink", ["#f7f6f3", "#0d7c6c"], ["#0e1013", "#5eead4"]], my: ["My Studio", ["#ffffff", "#0969da"], ["#0f1318", "#4493f8"]],
+  sol: ["Solarized", ["#fdf6e3", "#268bd2"], ["#002b36", "#268bd2"]], nord: ["Nord", null, null],
+};
+const chip = (l, d) => l ? `<span class="chip"><span style="background:${l[0]}"><i style="background:${l[1]}"></i></span><span style="background:${d[0]}"><i style="background:${d[1]}"></i></span></span>` : `<span class="chip empty"></span>`;
+function themeList(sel, appearance) {
+  const r = (id) => { const [n, l, d] = THEMES[id]; const bad = id === "nord";
+    return `<div class="row ${sel === id ? "sel" : ""} ${bad ? "bad" : ""}">${chip(l, d)}<span class="nm">${n}</span>${bad ? `<span class="glyph" title="This theme didn't load">${warn}</span>` : ""}</div>`; };
+  return `<div class="tlist"><div class="sh">Built-in</div>${r("paper")}${r("studio")}${r("ink")}<div class="sh" style="margin-top:10px">Yours</div>${r("my")}${r("sol")}${r("nord")}
+    <div class="grow"></div><div class="appear"><div class="lbl">Appearance</div><div class="select">${appearance}<span class="caret">▼</span></div></div></div>`;
+}
+
+function tokRow(t, cfg) {
+  const [name, label, , kind = "color", unit] = t;
+  const v = cfg.values[name];
+  const set = cfg.set.includes(name);
+  const unsaved = cfg.unsaved === name;
+  const reset = `<span class="reset">${set ? resetIco : ""}</span>`;
+  const lab = `<span class="lab">${label}${unsaved ? '<span class="mod">●</span>' : ""}</span>`;
+  let field;
+  if (kind === "font") field = `<span class="fld font">${v}<span class="caret">▼</span></span>`;
+  else if (kind === "num") field = `<span class="fld num">${v}</span><span class="unit">${unit}</span>`;
+  else if (kind === "bool") field = `<span class="check"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5.2 4 7.5 8.5 2.5" fill="none" stroke="#fff" stroke-width="1.6"/></svg></span>`;
+  else field = `<span class="fld hex ${unsaved ? "focus" : ""}">${v}</span>`;
+  const sw = kind === "color" ? `<span class="sw" style="--c:${v}"></span>` : "";
+  const pick = unsaved ? ` data-pick="${cfg.saved[name]}|${v}"` : "";
+  return `<div class="tok ${set || unsaved ? "" : "inh"}"${pick}>${sw}${lab}${field}${reset}</div>`;
+}
+function picker(oldC, newC) {
+  return `<div class="picker"><div class="sv"><span class="knob" style="left:62%;top:28%;background:${newC}"></span></div>
+    <div class="bar hue"><span class="knob" style="left:35.5%;background:hsl(128 100% 50%)"></span></div>
+    <div class="bar alpha"><span class="knob" style="left:100%;background:${newC}"></span></div>
+    <div class="row2"><span class="cmp"><span style="background:${oldC}"></span><span style="background:${newC}"></span></span><span class="fld hex focus">${newC}</span></div>
+    <div class="cap">Was ${oldC}. Esc puts it back.</div></div>`;
+}
+function tokenPane(cfg) {
+  const groups = cfg.groups;
+  let html = "";
+  for (const g of groups) {
+    html += `<div class="gh">${g}</div>`;
+    for (const t of TOKENS.filter((x) => x[2] === g)) html += tokRow(t, cfg);
+  }
+  const tabs = ["Shared", "Light", "Dark"].map((n) => `<span class="${n === cfg.tab ? "on" : ""}">${n}</span>`).join("");
+  return `<div class="tokens ${cfg.ro ? "ro" : ""}"><div class="thead">
+      <div class="t"><b>${cfg.name}</b><span class="badge ${cfg.ro ? "mute" : ""}">${cfg.ro ? "Built-in" : "Yours"}</span></div>
+      <div class="d">${cfg.desc}</div><div class="seg">${tabs}</div>${cfg.note}</div>
+    <div class="tscroll ${cfg.end ? "end" : ""}">${html}<span class="sbar" style="top:${cfg.sbar[0]}px;height:${cfg.sbar[1]}px"></span></div></div>`;
+}
+
+function previewDoc(label, values) {
+  return `<div class="pv" style='${vars(values)}'><div class="ptb"><b>Release checklist.md</b><span>yamv / docs</span><span class="tag">${label}</span></div>
+    <div class="pbody"><div class="pdoc"><div class="md">
+      <h1>Release checklist</h1>
+      <p>YAMV ships as one executable. Read <a>the release notes</a> before tagging, then run <code>publish.ps1</code> from the repo root.</p>
+      <h2>Build</h2>
+<pre><code><span class="c">// Publish both targets</span>
+<span class="k">foreach</span> (<span class="k">var</span> rid <span class="k">in</span> Rids)
+    <span class="ty">Publish</span>(rid, <span class="s">"Release"</span>, <span class="n">3</span>);</code></pre>
+      <blockquote>Tag only from main, after CI is green.</blockquote>
+    </div></div>
+    <div class="ptree"><div class="g">▾ yamv</div><div class="r f">▾ docs</div><div class="r">${fileIco}README.md</div><div class="r sel">${fileIco}Release che</div><div class="r hov">${fileIco}notes.md</div><div class="r">${fileIco}plans.md</div></div></div></div>`;
+}
+
+function footer(kind) {
+  const off = (b) => kind[b] === 0 ? " off" : "";
+  const last = kind.dup ? `<span class="btn primary">Duplicate to edit</span>` : `<span class="btn primary${off("save")}">Save</span>`;
+  return `<div class="foot"><span class="btn">Import…</span><span class="btn${off("export")}">Export…</span><span class="btn${off("text")}">Edit as text</span><span class="spacer"></span><span class="btn${off("revert")}">Revert</span>${last}</div>`;
+}
+function win(values, title, sub, body, foot, extra = "") {
+  return `<div class="win" style='${vars(values)}'><div class="titlebar"><span class="name">${title}</span>${sub}${ctl}</div><div class="wbody">${body}</div>${foot}${extra}</div>`;
+}
+
+const laneA = () => win(LIGHT, "Themes", "<span>Studio · light</span>",
+  themeList("studio", "Light") + tokenPane({ name: "Studio", desc: "Neutral and GitHub-like: Inter sans, crisp hairlines, ruled H2s and a blue accent.", tab: "Light", ro: true,
+    note: `<div class="lock">${lockIco}<span>Built-in themes are read-only. Duplicate this one to edit a copy in Yours.</span></div>`,
+    values: LIGHT, set: [], groups: ["Code", "Syntax", "Type", "Layout"], end: true, sbar: [300, 120] })
+  + `<div class="prev">${previewDoc("Light", LIGHT)}</div>`,
+  footer({ text: 0, revert: 0, dup: 1 }));
+
+const laneB = () => win(MY_DARK_SAVED, "Themes", `<span>My Studio · dark</span><span class="dot">●</span>`,
+  themeList("my", "Dark") + tokenPane({ name: "My Studio", desc: "my-studio.yamv-theme.json · light and dark", tab: "Dark", ro: false,
+    note: `<div class="hint">Grey values come from Shared or the defaults. ↺ removes a value from this tab.</div>`,
+    values: MY_DARK_EDIT, saved: MY_DARK_SAVED, set: ["quote", "codeBackground"], unsaved: "accent", groups: ["Page", "Chrome"], sbar: [2, 150] })
+  + `<div class="prev">${previewDoc("Dark", MY_DARK_EDIT)}</div>`,
+  footer({}));
+
+const dialog = `<div class="scrim"><div class="dialog"><div class="dt">Import a theme<span class="spacer"></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></div>
+  <div class="db">
+    <div class="file">${chip(["#fdf6e3", "#b58900"], ["#073642", "#b58900"])}<div><b>Warm Solar <span style="font:400 12px 'Inter V';color:var(--yamv-text-muted)">by Ana · light and dark · has css</span></b><span>Downloads\\warm-solar.yamv-theme.json</span></div></div>
+    <p>A theme file can change:</p>
+    <ul><li>colours, fonts and sizes, in the document and in the app's title bar, tree and dialogs;</li>
+        <li>the document page, with its own css, added after YAMV's stylesheet. It styles the document only, not the app.</li></ul>
+    <div class="safe"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1.5 13.5 3.5v4c0 3.4-2.4 5.8-5.5 7-3.1-1.2-5.5-3.6-5.5-7v-4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      <span>Theme css can't run code: the page's Content-Security-Policy blocks scripts.</span></div>
+    <div class="warn">${warn}<span>Theme css can make the page load images from the web, which can reveal that you opened a document and which links it holds. Import a theme from someone you trust, as you would a browser extension's styles.</span></div>
+  </div>
+  <div class="df"><span class="btn">Cancel</span><span class="btn primary">Import</span></div></div></div>`;
+const laneC = () => win(LIGHT, "Themes", "<span>Studio · light</span>",
+  themeList("studio", "Light") + tokenPane({ name: "Studio", desc: "Neutral and GitHub-like: Inter sans, crisp hairlines, ruled H2s and a blue accent.", tab: "Light", ro: true,
+    note: `<div class="lock">${lockIco}<span>Built-in themes are read-only. Duplicate this one to edit a copy in Yours.</span></div>`,
+    values: LIGHT, set: [], groups: ["Page", "Chrome"], sbar: [2, 120] })
+  + `<div class="prev">${previewDoc("Light", LIGHT)}</div>`,
+  footer({ text: 0, revert: 0, dup: 1 }), dialog);
+
+const laneD = () => win(LIGHT, "Themes", "<span>Nord · didn't load</span>",
+  themeList("nord", "Light") + `<div class="tokens"><div class="thead"><div class="t"><b>Nord</b><span class="badge">Yours</span></div>
+      <div class="d" style="margin-bottom:0">nord.yamv-theme.json</div></div>
+    <div class="errpane"><div class="errbox"><div class="h">${warn}This theme didn't load</div><ul>
+      <li><code>Token 'accent' in dark: '#88c0d' is not a colour (#rgb, #rrggbb or #rrggbbaa).</code></li>
+      <li><code>Token 'bodySize' in shared: 40 is out of range (10–32).</code></li></ul></div>
+      <p class="after">Fix the file and save it: YAMV watches the themes folder and loads it again by itself. Until then the app stays on Studio.</p>
+      <span class="btn primary">Edit as text</span></div></div>
+  <div class="prev"><div class="noprev"><div><div class="mk"></div>No preview<br>until the theme loads.</div></div></div>`,
+  footer({ export: 0, revert: 0, save: 0 }));
+
+const lanes = { a: laneA, b: laneB, c: laneC, d: laneD };
+for (const el of document.querySelectorAll("[data-lane]")) el.outerHTML = lanes[el.dataset.lane]();
+/* the picker is a popover: it sits on the window, under its swatch, so the token list does not clip it */
+for (const row of document.querySelectorAll("[data-pick]")) {
+  const w = row.closest(".win"), wr = w.getBoundingClientRect(), sw = row.querySelector(".sw").getBoundingClientRect();
+  const [oldC, newC] = row.dataset.pick.split("|");
+  w.insertAdjacentHTML("beforeend", picker(oldC, newC));
+  const p = w.lastElementChild;
+  p.style.left = `${sw.left - wr.left - 8}px`;
+  p.style.top = `${sw.bottom - wr.top + 9}px`;
+}
+</script>
+</body>
+</html>
