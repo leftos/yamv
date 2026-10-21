@@ -9,6 +9,7 @@ using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.App.Views;
 using Yamv.Core;
+using Yamv.Core.Diagnostics;
 using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
 using Yamv.Core.Launch;
@@ -476,6 +477,93 @@ public sealed class AppStartupTests
             }
         });
 
+    [Fact]
+    public Task Main_start_creates_one_themes_watcher_and_release_disposes_it_before_the_bridge() =>
+        Headless.Run(() =>
+        {
+            using var syncs = new ThemesSyncRecorder();
+            using var start = new SettingsStart();
+
+            start.App.CreateStartWindow();
+
+            Assert.Equal(1, syncs.Created);
+            Assert.NotNull(start.App.ThemesSync);
+
+            start.App.ReleaseMainWindow();
+
+            Assert.Equal([false], syncs.BridgeDisposedAtEachDispose);
+            Assert.Null(start.App.ThemesSync);
+        });
+
+    [Fact]
+    public Task Main_start_watches_the_themes_folder_under_the_data_dir() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+
+            start.App.CreateStartWindow();
+
+            ThemeFolderSync sync = Assert.IsType<ThemeFolderSync>(start.App.ThemesSync);
+            Assert.Equal(AppPaths.ThemesDirectory, sync.Folder);
+            Assert.StartsWith(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable)!, sync.Folder, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task Viewer_start_creates_a_themes_watcher_too() =>
+        Headless.Run(() =>
+        {
+            using var syncs = new ThemesSyncRecorder();
+            using var start = new SettingsStart();
+            App.ViewerFiles = [Path.Combine(Path.GetTempPath(), "yamv-gone-" + Guid.NewGuid().ToString("N") + ".md")];
+
+            start.App.CreateStartWindow();
+
+            Assert.Equal(1, syncs.Created);
+            Assert.NotNull(start.App.ThemesSync);
+        });
+
+    [Fact]
+    public Task Harness_starts_create_no_themes_watcher() =>
+        Headless.Run(() =>
+        {
+            using var syncs = new ThemesSyncRecorder();
+            using var start = new SettingsStart();
+            string? settingsBefore = Environment.GetEnvironmentVariable(App.ThemeSettingsHarnessVariable);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, "1");
+            try
+            {
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, "1");
+                Assert.IsType<ThemeSettingsWindow>(start.App.CreateStartWindow());
+                Assert.Null(start.App.ThemesSync);
+
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, null);
+                Assert.IsType<HarnessWindow>(start.App.CreateStartWindow());
+                Assert.Null(start.App.ThemesSync);
+
+                Assert.Equal(0, syncs.Created);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, settingsBefore);
+            }
+        });
+
+    [Fact]
+    public Task Releasing_twice_after_a_watcher_start_is_safe() =>
+        Headless.Run(() =>
+        {
+            using var syncs = new ThemesSyncRecorder();
+            using var start = new SettingsStart();
+            start.App.CreateStartWindow();
+
+            start.App.ReleaseMainWindow();
+            start.App.ReleaseMainWindow();
+
+            Assert.Single(syncs.BridgeDisposedAtEachDispose);
+            Assert.Null(start.App.ThemesSync);
+            Assert.Null(start.App.Bridge);
+        });
+
     /// <summary>Records the stop and changes what the session stores, so a later flush is the only way that change reaches disk.</summary>
     private static void StopAnsweringAndHideSidebar(Window main, List<string> order)
     {
@@ -485,6 +573,37 @@ public sealed class AppStartupTests
 
     private static bool IsBridgeDisposed(ThemeBridge bridge) =>
         (bool)typeof(ThemeBridge).GetField("_disposed", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge)!;
+
+    /// <summary>
+    /// Wraps each themes sync the app creates while it lives, counting them and recording, at each one's dispose, whether the
+    /// bridge it serves was already disposed; disposing it restores <see cref="App.CreateThemesSync"/>.
+    /// </summary>
+    private sealed class ThemesSyncRecorder : IDisposable
+    {
+        private readonly Func<ThemeBridge, IAppLog, IDisposable> _before = App.CreateThemesSync;
+
+        public ThemesSyncRecorder() =>
+            App.CreateThemesSync = (bridge, log) =>
+            {
+                Created++;
+                return new Recorded(_before(bridge, log), bridge, BridgeDisposedAtEachDispose);
+            };
+
+        public int Created { get; private set; }
+
+        public List<bool> BridgeDisposedAtEachDispose { get; } = [];
+
+        public void Dispose() => App.CreateThemesSync = _before;
+
+        private sealed class Recorded(IDisposable inner, ThemeBridge bridge, List<bool> disposals) : IDisposable
+        {
+            public void Dispose()
+            {
+                disposals.Add(IsBridgeDisposed(bridge));
+                inner.Dispose();
+            }
+        }
+    }
 
     /// <summary>
     /// A main start over a fresh data folder whose <c>settings.json</c> a test may seed before it calls

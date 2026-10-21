@@ -50,6 +50,7 @@ public partial class App : Application
     private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
     private SettingsWriter? _settingsWriter;
+    private IDisposable? _themesSync;
     private IAppLog? _log;
     private ActivationGate? _connectedGate;
 
@@ -79,6 +80,16 @@ public partial class App : Application
     /// launches. Run once when the main window has closed, before the app's exit saves the session. Set before Avalonia starts.
     /// </summary>
     internal static Action? StopAnswering { get; set; }
+
+    /// <summary>
+    /// Makes the one watcher of the themes folder that has the bridge reload after a change, for a main or viewer start; a test
+    /// wraps it to see when the app creates and disposes it.
+    /// </summary>
+    internal static Func<ThemeBridge, IAppLog, IDisposable> CreateThemesSync { get; set; } =
+        (bridge, log) => new ThemeFolderSync(bridge, AppPaths.ThemesDirectory, TimeProvider.System, log);
+
+    /// <summary>What <see cref="CreateThemesSync"/> made for the current start; null for a harness start and after it is released.</summary>
+    internal IDisposable? ThemesSync => _themesSync;
 
     /// <summary>The one theme bridge the app applies through; null before the first window is built and after it is released.</summary>
     internal ThemeBridge? Bridge => _bridge;
@@ -127,6 +138,7 @@ public partial class App : Application
         IAppLog log = Log;
         ThemeBridge bridge = MainWindowFactory.CreateBridge(this, log);
         _bridge = bridge;
+        _themesSync = CreateThemesSync(bridge, log);
         var settings = new SettingsStore(AppPaths.SettingsFile, log);
         AppSettings saved = settings.Load();
         bridge.Apply(saved.ThemeId, saved.Appearance);
@@ -233,8 +245,8 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Disposes what the start window owns, then the settings writer, waiting up to 2 s for the theme picks still being saved,
-    /// then the bridge the app owns, once the app exits.
+    /// Disposes what the start window owns, then the themes folder watcher, then the settings writer, waiting up to 2 s for the
+    /// theme picks still being saved, then the bridge the app owns, once the app exits.
     /// </summary>
     internal void ReleaseMainWindow()
     {
@@ -247,6 +259,8 @@ public partial class App : Application
         _mainWindow?.Dispose();
         _mainWindow = null;
         _mainWindowClosed = null;
+        _themesSync?.Dispose();
+        _themesSync = null;
         _bridge?.RequestChanged -= OnThemeRequestChanged;
         _settingsWriter?.Dispose();
         _settingsWriter = null;

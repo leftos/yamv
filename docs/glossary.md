@@ -4,6 +4,7 @@
 - **App default**: the content width a document uses when no folder at or above it has its own width; set from the popover's All documents segment ([content-width.md](design/content-width.md)).
 - **Appearance**: Match system, Light or Dark — which half of the current theme family is shown.
 - **Asset cache**: the versioned folder under the local app-data dir (`YAMV/web/{assembly version id}/`) that the document page's template, CSS, JS, fonts and vendored libraries are extracted to, so the page loads over `file://`.
+- **Bad streak**: the run of theme reloads during which the theme in use has no valid file (invalid, deleted or renamed); `ThemeBridge` logs one warning for it, and one line when the file loads again.
 - **Chrome**: the app's own UI around the document (title bar, sidebar tree, dialogs), drawn with Avalonia from the theme's chrome tokens, as opposed to the document page.
 - **Content width**: how wide the document's text column is: a px text measure from 480, or Full; set per folder or for all documents ([content-width.md](design/content-width.md)).
 - **Debounce**: waiting for a burst of events to go quiet before acting once: `DocumentFileWatcher` reports a batch 150 ms after the last event naming an open document, at most 1 s after the first; the session saver and the theme folder watcher wait 500 ms and 300 ms the same way.
@@ -19,6 +20,7 @@
 - **Harness window**: the development window (`HarnessWindow`) that hosts a bare `DocumentView` with `--theme`, `--find`, `--scroll` and similar switches; opened instead of the main window when `YAMV_DEV_HARNESS=1`.
 - **Import notice**: the modal an Import shows before copying a theme file, with a card for the file (name, author, halves, whether it has css, its path, its errors and warnings) and the warning about css that loads from the web; the card is read by `ThemeCatalog.Inspect` into a `ThemeInspection` ([themes.md](design/themes.md)).
 - **Inherited value**: a token's value in the token editor when the tab sets none: shown grey, taken from Shared or the defaults (on the Shared tab, from the defaults). Setting it, even to the same value, makes it set; ↺ removes a set value.
+- **Last good version**: the version of the theme in use that `ThemeBridge` keeps applying while its file is invalid or gone, even when a built-in has the same id.
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.
 - **Link policy**: the Core rule (`LinkPolicy.Decide`) that turns a clicked link, or a dropped file's path, into a `LinkDecision`: open externally, open as a document, open with the default app, ask first, or ignore.
 - **Live reload**: re-reading and redrawing an open document when its file changes on disk; Core's `DocumentFileWatcher` reports which open documents may have changed, watching each folder once and polling a folder that cannot be watched, where only a changed length or write time counts.

@@ -259,7 +259,374 @@ public sealed class ThemeBridgeTests : IDisposable
             Assert.Equal([("nope", "studio")], seen);
         });
 
+    [Fact]
+    public Task Reload_applies_a_changed_good_file_to_brushes_and_css() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            using ThemeBridge bridge = CreateBridge();
+            var surface = new FakeDocumentSurface();
+            bridge.Register(surface);
+            bridge.Apply("mine", "light");
+
+            WriteTheme("mine", "#445566");
+            bridge.Reload();
+
+            ResolvedTheme expected = Resolve("mine", Appearance.Light);
+            AssertColoursOf(expected);
+            Assert.Equal(Color.Parse("#445566"), Assert.IsType<SolidColorBrush>(Lookup("YamvAccent")).Color);
+            Assert.Equal(2, surface.ThemeCss.Count);
+            Assert.Equal(ThemeCss.Build(expected), surface.ThemeCss[^1]);
+            Assert.Equal("mine", bridge.Current!.Id);
+        });
+
+    [Fact]
+    public Task Reload_with_unchanged_content_swaps_no_brushes_and_sends_no_css() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            using ThemeBridge bridge = CreateBridge();
+            var surface = new FakeDocumentSurface();
+            bridge.Register(surface);
+            bridge.Apply("mine", "light");
+            ResolvedTheme? current = bridge.Current;
+            object? brush = Lookup("YamvAccent");
+
+            WriteTheme("mine", "#112233");
+            bridge.Reload();
+
+            Assert.Same(current, bridge.Current);
+            Assert.Same(brush, Lookup("YamvAccent"));
+            Assert.Single(surface.ThemeCss);
+        });
+
+    [Fact]
+    public Task Reload_keeps_the_last_good_theme_when_the_file_turns_invalid() =>
+        Headless.Run(() => AssertKeepsLastGood("mine", () => File.WriteAllText(ThemePath("mine"), "{ this is not a theme")));
+
+    [Fact]
+    public Task Reload_keeps_the_last_good_theme_when_the_file_is_deleted() =>
+        Headless.Run(() => AssertKeepsLastGood("mine", () => File.Delete(ThemePath("mine"))));
+
+    [Fact]
+    public Task Reload_keeps_the_last_good_theme_when_the_themes_folder_is_deleted() =>
+        Headless.Run(() => AssertKeepsLastGood("mine", () => Directory.Delete(_themesFolder, recursive: true)));
+
+    [Fact]
+    public Task Reload_switches_to_the_requested_theme_when_it_appears_after_a_studio_fallback() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge bridge = CreateBridge();
+            var surface = new FakeDocumentSurface();
+            bridge.Register(surface);
+            bridge.Apply("mine", "light");
+            Assert.Equal("studio", bridge.Current!.Id);
+
+            WriteTheme("mine", "#445566");
+            bridge.Reload();
+
+            ResolvedTheme expected = Resolve("mine", Appearance.Light);
+            Assert.Equal("mine", bridge.Current!.Id);
+            AssertColoursOf(expected);
+            Assert.Equal(ThemeCss.Build(expected), surface.ThemeCss[^1]);
+            Assert.Equal("mine", bridge.RequestedThemeId);
+        });
+
+    [Fact]
+    public Task Reload_falls_back_to_studio_only_for_an_id_with_no_good_version() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge unknown = CreateBridge();
+            unknown.Apply("nope", "light");
+
+            unknown.Reload();
+
+            Assert.Equal("studio", unknown.Current!.Id);
+            AssertColoursOf(Resolve("studio", Appearance.Light));
+            Assert.Single(_log.Entries, entry => entry.Level == "warning" && entry.Message.Contains("nope", StringComparison.Ordinal));
+
+            WriteTheme("mine", "#112233");
+            using ThemeBridge known = CreateBridge();
+            known.Apply("mine", "light");
+            File.Delete(ThemePath("mine"));
+
+            known.Reload();
+
+            Assert.Equal("mine", known.Current!.Id);
+            Assert.Equal(Color.Parse("#112233"), Assert.IsType<SolidColorBrush>(Lookup("YamvAccent")).Color);
+        });
+
+    [Fact]
+    public Task Reload_keeps_a_user_override_of_a_builtin_when_it_turns_invalid() =>
+        Headless.Run(() => AssertKeepsLastGood("paper", () => File.WriteAllText(ThemePath("paper"), "{ this is not a theme")));
+
+    [Fact]
+    public Task Reload_keeps_a_user_override_of_a_builtin_when_it_is_deleted() =>
+        Headless.Run(() => AssertKeepsLastGood("paper", () => File.Delete(ThemePath("paper"))));
+
+    [Fact]
+    public Task Reload_logs_one_warning_per_bad_streak_and_a_recovery_line() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            using ThemeBridge bridge = CreateBridge();
+            bridge.Apply("mine", "light");
+
+            File.WriteAllText(ThemePath("mine"), "{ this is not a theme");
+            bridge.Reload();
+            bridge.Reload();
+            File.Delete(ThemePath("mine"));
+            bridge.Reload();
+            Assert.Equal(1, MineEntries("warning"));
+            Assert.Equal(0, MineEntries("info"));
+
+            WriteTheme("mine", "#445566");
+            bridge.Reload();
+            bridge.Reload();
+            Assert.Equal(1, MineEntries("warning"));
+            Assert.Equal(1, MineEntries("info"));
+
+            File.Delete(ThemePath("mine"));
+            bridge.Reload();
+            Assert.Equal(2, MineEntries("warning"));
+
+            // A valid version applied through Apply ends the streak with the same line.
+            WriteTheme("mine", "#778899");
+            bridge.Apply("mine", "dark");
+            Assert.Equal(2, MineEntries("warning"));
+            Assert.Equal(2, MineEntries("info"));
+        });
+
+    [Fact]
+    public Task Reload_does_not_raise_RequestChanged_nor_change_the_requested_values() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            using ThemeBridge bridge = CreateBridge();
+            bridge.Apply("mine", "dark");
+            int raised = 0;
+            bridge.RequestChanged += (_, _) => raised++;
+
+            WriteTheme("mine", "#112233");
+            bridge.Reload();
+            WriteTheme("mine", "#445566");
+            bridge.Reload();
+            File.WriteAllText(ThemePath("mine"), "{ this is not a theme");
+            bridge.Reload();
+            File.Delete(ThemePath("mine"));
+            bridge.Reload();
+
+            Assert.Equal(0, raised);
+            Assert.Equal("mine", bridge.RequestedThemeId);
+            Assert.Equal("dark", bridge.RequestedAppearance);
+            Assert.Equal("mine", bridge.Current!.Id);
+        });
+
+    [Fact]
+    public Task ThemesReloaded_is_raised_after_every_reload_with_the_new_current_theme() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            using ThemeBridge bridge = CreateBridge();
+            bridge.Apply("mine", "light");
+            List<ResolvedTheme?> seen = [];
+            bridge.ThemesReloaded += (_, _) => seen.Add(bridge.Current);
+
+            WriteTheme("mine", "#445566");
+            bridge.Reload();
+
+            ResolvedTheme shown = Assert.Single(seen)!;
+            Assert.Equal(ThemeCss.Build(Resolve("mine", Appearance.Light)), ThemeCss.Build(shown));
+
+            bridge.Reload();
+            File.Delete(ThemePath("mine"));
+            bridge.Reload();
+
+            Assert.Equal(3, seen.Count);
+            Assert.All(seen, current => Assert.Same(shown, current));
+        });
+
+    [Fact]
+    public Task Reload_after_Dispose_does_nothing() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            ThemeBridge bridge = CreateBridge();
+            bridge.Apply("mine", "light");
+            ResolvedTheme? current = bridge.Current;
+            object? brush = Lookup("YamvAccent");
+            int raised = 0;
+            bridge.ThemesReloaded += (_, _) => raised++;
+            bridge.Dispose();
+
+            WriteTheme("mine", "#445566");
+            bridge.Reload();
+
+            Assert.Same(current, bridge.Current);
+            Assert.Same(brush, Lookup("YamvAccent"));
+            Assert.Equal(0, raised);
+        });
+
+    [Fact]
+    public Task Reload_keeps_following_the_system_appearance() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            using ThemeBridge bridge = CreateBridge(() => Appearance.Dark);
+            bridge.Apply("mine", "system");
+
+            WriteTheme("mine", "#445566");
+            bridge.Reload();
+
+            Assert.Equal(Appearance.Dark, bridge.Current!.Appearance);
+            AssertColoursOf(Resolve("mine", Appearance.Dark));
+            Assert.Equal(Color.Parse("#ddeeff"), Assert.IsType<SolidColorBrush>(Lookup("YamvAccent")).Color);
+            Assert.Equal("system", bridge.RequestedAppearance);
+        });
+
+    [Fact]
+    public Task Reload_keeps_a_fixed_dark_appearance() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            using ThemeBridge bridge = CreateBridge(() => Appearance.Light);
+            bridge.Apply("mine", "dark");
+
+            WriteTheme("mine", "#445566");
+            bridge.Reload();
+
+            Assert.Equal(Appearance.Dark, bridge.Current!.Appearance);
+            AssertColoursOf(Resolve("mine", Appearance.Dark));
+            Assert.Equal(Color.Parse("#ddeeff"), Assert.IsType<SolidColorBrush>(Lookup("YamvAccent")).Color);
+            Assert.Equal("dark", bridge.RequestedAppearance);
+        });
+
+    [Fact]
+    public Task FollowPlatform_reresolves_the_kept_theme_when_the_platform_flips() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            Appearance platform = Appearance.Light;
+            using ThemeBridge bridge = CreateBridge(() => platform);
+            bridge.Apply("mine", "system");
+            ResolvedTheme keptDark = Resolve("mine", Appearance.Dark);
+            File.WriteAllText(ThemePath("mine"), "{ this is not a theme");
+            bridge.Reload();
+
+            platform = Appearance.Dark;
+            bridge.FollowPlatform();
+
+            Assert.Equal("mine", bridge.Current!.Id);
+            Assert.Equal(Appearance.Dark, bridge.Current.Appearance);
+            AssertColoursOf(keptDark);
+        });
+
+    [Fact]
+    public Task Apply_of_the_kept_id_during_a_bad_streak_keeps_the_last_good_version() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("mine", "#112233");
+            using ThemeBridge bridge = CreateBridge(() => Appearance.Light);
+            bridge.Apply("mine", "light");
+            ResolvedTheme keptDark = Resolve("mine", Appearance.Dark);
+            File.WriteAllText(ThemePath("mine"), "{ this is not a theme");
+            bridge.Reload();
+
+            bridge.Apply("mine", "dark");
+
+            Assert.Equal("mine", bridge.Current!.Id);
+            Assert.Equal(Appearance.Dark, bridge.Current.Appearance);
+            AssertColoursOf(keptDark);
+            Assert.Equal("dark", bridge.RequestedAppearance);
+            Assert.DoesNotContain(_log.Entries, entry => entry.Message.Contains("instead", StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task Apply_of_a_kept_builtin_override_during_a_bad_streak_keeps_the_users_version() =>
+        Headless.Run(() =>
+        {
+            RemoveYamvResources();
+            WriteTheme("paper", "#112233");
+            using ThemeBridge bridge = CreateBridge(() => Appearance.Light);
+            bridge.Apply("paper", "light");
+            ResolvedTheme keptDark = Resolve("paper", Appearance.Dark);
+            File.Delete(ThemePath("paper"));
+            bridge.Reload();
+
+            bridge.Apply("paper", "dark");
+
+            Assert.Equal(Appearance.Dark, bridge.Current!.Appearance);
+            AssertColoursOf(keptDark);
+            Assert.Equal(Color.Parse("#ddeeff"), Assert.IsType<SolidColorBrush>(Lookup("YamvAccent")).Color);
+        });
+
+    /// <summary>
+    /// Applies a user theme <paramref name="id"/>, breaks it on disk with <paramref name="breakIt"/>, reloads, and checks that the
+    /// theme in use, its brushes, the css sent and the requested values are all as before.
+    /// </summary>
+    private void AssertKeepsLastGood(string id, Action breakIt)
+    {
+        RemoveYamvResources();
+        WriteTheme(id, "#123456");
+        using ThemeBridge bridge = CreateBridge();
+        var surface = new FakeDocumentSurface();
+        bridge.Register(surface);
+        bridge.Apply(id, "light");
+        ResolvedTheme expected = Resolve(id, Appearance.Light);
+        ResolvedTheme? current = bridge.Current;
+        object? brush = Lookup("YamvAccent");
+        Assert.Equal(Color.Parse("#123456"), Assert.IsType<SolidColorBrush>(brush).Color);
+
+        breakIt();
+        bridge.Reload();
+
+        Assert.Same(current, bridge.Current);
+        Assert.Same(brush, Lookup("YamvAccent"));
+        AssertColoursOf(expected);
+        Assert.Single(surface.ThemeCss);
+        Assert.Equal(id, bridge.RequestedThemeId);
+        Assert.Equal("light", bridge.RequestedAppearance);
+    }
+
+    /// <summary>Counts the bridge's streak lines about <c>mine</c> at <paramref name="level"/>: the kept-version warning and the recovery line.</summary>
+    private int MineEntries(string level) =>
+        _log.Entries.Count(entry =>
+            entry.Level == level
+            && entry.Message
+                is "The theme 'mine' is invalid or gone from the themes folder; keeping its last good version."
+                    or "The theme 'mine' loads from the themes folder; using it."
+        );
+
+    private string ThemePath(string id) => Path.Combine(_themesFolder, id + ThemeCatalog.FileSuffix);
+
+    /// <summary>Writes a valid user theme <paramref name="id"/> whose light accent is <paramref name="lightAccent"/>.</summary>
+    private void WriteTheme(string id, string lightAccent)
+    {
+        Directory.CreateDirectory(_themesFolder);
+        File.WriteAllText(
+            ThemePath(id),
+            "{ \"name\": \"Mine\", \"light\": { \"tokens\": { \"accent\": \""
+                + lightAccent
+                + "\" } }, \"dark\": { \"tokens\": { \"accent\": \"#ddeeff\" } } }"
+        );
+    }
+
     private ThemeBridge CreateBridge() => new(new ThemeCatalog(_themesFolder, _log), Application.Current!, _log);
+
+    /// <summary>A bridge that reads the platform's light or dark setting from <paramref name="platformAppearance"/>.</summary>
+    private ThemeBridge CreateBridge(Func<Appearance> platformAppearance) =>
+        new(new ThemeCatalog(_themesFolder, _log), Application.Current!, _log, platformAppearance);
 
     private ResolvedTheme Resolve(string id, Appearance appearance)
     {
