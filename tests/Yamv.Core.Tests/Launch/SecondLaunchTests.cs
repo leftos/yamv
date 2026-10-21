@@ -250,6 +250,26 @@ public sealed class SecondLaunchTests
     }
 
     [Fact]
+    public async Task Open_Closing_LogsThatTheAppIsClosing()
+    {
+        await Open(pids: [42], replies: [InstanceRequestOutcome.Closing], locks: [Acquired]);
+
+        LogEntry entry = _log.Entries[0];
+        Assert.Equal("info", entry.Level);
+        Assert.Equal("Second launch: the app is closing; waiting up to 5 s for it to exit.", entry.Message);
+    }
+
+    [Fact]
+    public async Task Open_NoServerNoPid_LogsThatNoAppIsAnswering()
+    {
+        await Open(pids: [null, null, null], replies: [InstanceRequestOutcome.NoServer], locks: [Held, Acquired]);
+
+        LogEntry entry = _log.Entries[0];
+        Assert.Equal("info", entry.Level);
+        Assert.Equal("Second launch: no app is answering; waiting up to 5 s for one to take the lock.", entry.Message);
+    }
+
+    [Fact]
     public async Task Open_ClosingThenNewPid_SendsAgainAndConfirms()
     {
         SecondLaunchResult result = await Open(
@@ -295,6 +315,55 @@ public sealed class SecondLaunchTests
         Assert.Equal(SecondLaunchResult.Failed(SecondLaunchFailure.Unsendable), result);
         Assert.Empty(_calls);
     }
+
+    [Fact]
+    public async Task Open_RelativePath_ReturnsUnsendableWithoutConnecting()
+    {
+        SecondLaunchResult result = await Open(pids: [], replies: [], files: ["notes/readme.md"]);
+
+        Assert.Equal(SecondLaunchResult.Failed(SecondLaunchFailure.Unsendable), result);
+        Assert.Empty(_calls);
+        Assert.Equal(
+            "Second launch: the 1 file path(s) cannot be sent in an open message: a path is not a full path.",
+            Assert.Single(_log.Entries).Message
+        );
+    }
+
+    [Fact]
+    public async Task OpenAsync_WithADeadlineOverIntMaxMilliseconds_ThrowsBeforeAnyAction()
+    {
+        ArgumentOutOfRangeException ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            NewOpenLaunch().OpenAsync([Path.Combine(Path.GetTempPath(), "notes.md")], AboveIntMax(), SecondLaunch.OpenOverallCap)
+        );
+
+        Assert.Equal("openDeadline", ex.ParamName);
+        Assert.Empty(_calls);
+    }
+
+    [Fact]
+    public async Task OpenAsync_WithAnOverallCapOverIntMaxMilliseconds_ThrowsBeforeAnyAction()
+    {
+        ArgumentOutOfRangeException ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            NewOpenLaunch().OpenAsync([Path.Combine(Path.GetTempPath(), "notes.md")], SecondLaunch.OpenDeadline, AboveIntMax())
+        );
+
+        Assert.Equal("overallCap", ex.ParamName);
+        Assert.Empty(_calls);
+    }
+
+    [Fact]
+    public async Task OpenAsync_WithNullFiles_ThrowsNamingFiles()
+    {
+        ArgumentNullException ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            NewOpenLaunch().OpenAsync(null!, SecondLaunch.OpenDeadline, SecondLaunch.OpenOverallCap)
+        );
+
+        Assert.Equal("files", ex.ParamName);
+        Assert.Empty(_calls);
+    }
+
+    /// <summary>One millisecond past the longest time a timer or a cancellation delay accepts.</summary>
+    private static TimeSpan AboveIntMax() => TimeSpan.FromMilliseconds((double)int.MaxValue + 1);
 
     [Theory]
     [InlineData(0d)]

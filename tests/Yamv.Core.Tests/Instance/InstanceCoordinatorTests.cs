@@ -534,6 +534,20 @@ public sealed class InstanceCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Request_HandlerThrows_ClientGetsRefused()
+    {
+        using InstanceCoordinator main = StartRequestServer(_ => throw new InvalidOperationException("handler failure under test"));
+
+        InstanceRequestOutcome outcome = await InstanceCoordinator
+            .RequestAsync(_lockPath, "open-x", HangGuard, _log, Token)
+            .WaitAsync(HangGuard, Token);
+
+        Assert.Equal(InstanceRequestOutcome.Refused, outcome);
+        (string Message, Exception? Exception) error = Assert.Single(_log.Errors);
+        Assert.IsType<InvalidOperationException>(error.Exception);
+    }
+
+    [Fact]
     public async Task Server_SecondClientConnectsWhileAFrameIsMidRead_BothArrive()
     {
         ConcurrentQueue<string> arrived = new();
@@ -687,6 +701,31 @@ public sealed class InstanceCoordinatorTests : IDisposable
         Assert.Equal(InstanceRequestOutcome.NoServer, outcome);
         Assert.Single(_log.Warnings);
     }
+
+    [Fact]
+    public async Task SignalAsync_TimeoutOverIntMaxMilliseconds_ThrowsNamingTimeout()
+    {
+        ArgumentOutOfRangeException ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, AboveIntMax(), _log, Token)
+        );
+
+        Assert.Equal("timeout", ex.ParamName);
+        Assert.StartsWith("The signal timeout is Timeout.InfiniteTimeSpan or positive and at most 2147483647 ms.", ex.Message);
+    }
+
+    [Fact]
+    public async Task RequestAsync_BudgetOverIntMaxMilliseconds_ThrowsNamingBudget()
+    {
+        ArgumentOutOfRangeException ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            InstanceCoordinator.RequestAsync(_lockPath, "open-x", AboveIntMax(), _log, Token)
+        );
+
+        Assert.Equal("budget", ex.ParamName);
+        Assert.StartsWith("The request budget is Timeout.InfiniteTimeSpan or positive and at most 2147483647 ms.", ex.Message);
+    }
+
+    /// <summary>One millisecond past the longest time a timer or a cancellation delay accepts.</summary>
+    private static TimeSpan AboveIntMax() => TimeSpan.FromMilliseconds((double)int.MaxValue + 1);
 
     [Fact]
     public async Task Request_HandlerNeverCompletes_ClientGetsNoReplyAndServerSeesHangUp()

@@ -47,6 +47,24 @@ public sealed class OpenMessageTests
     }
 
     [Fact]
+    public void TryEncode_EmptyList_ReturnsEmptyProblem()
+    {
+        Assert.False(OpenMessage.TryEncode([], out string message, out OpenMessageProblem problem));
+
+        Assert.Equal(string.Empty, message);
+        Assert.Equal(OpenMessageProblem.Empty, problem);
+    }
+
+    [Fact]
+    public void TryEncode_RelativePath_ReturnsNotFullPathProblem()
+    {
+        Assert.False(OpenMessage.TryEncode(["notes/readme.md"], out string message, out OpenMessageProblem problem));
+
+        Assert.Equal(string.Empty, message);
+        Assert.Equal(OpenMessageProblem.NotFullPath, problem);
+    }
+
+    [Fact]
     public void TryEncode_EscapedPathNearTheFrameCap_IsMeasuredOnTheEscapedJson()
     {
         // Each "é\" is 3 UTF-8 bytes as text but 8 once JSON escapes it as é\\, so only the escaped size meets the cap.
@@ -61,17 +79,14 @@ public sealed class OpenMessageTests
     }
 
     [Fact]
-    public void TryEncode_UnpairedSurrogate_RoundTripsOrReturnsFalseWithoutThrowing()
+    public void TryEncode_UnpairedSurrogate_ReturnsNotWellFormedProblem()
     {
         string path = Path.Combine(Path.GetTempPath(), "lone\uD800surrogate.md");
 
-        bool encoded = OpenMessage.TryEncode([path], out string message, out _);
+        Assert.False(OpenMessage.TryEncode([path], out string message, out OpenMessageProblem problem));
 
-        if (encoded)
-        {
-            Assert.True(OpenMessage.TryDecode(message, out IReadOnlyList<string> decoded));
-            Assert.Equal(path, Assert.Single(decoded));
-        }
+        Assert.Equal(string.Empty, message);
+        Assert.Equal(OpenMessageProblem.NotWellFormed, problem);
     }
 
     [Theory]

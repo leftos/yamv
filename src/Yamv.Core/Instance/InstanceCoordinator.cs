@@ -335,7 +335,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         CancellationToken cancellationToken = default
     )
     {
-        ValidateTimeout(timeout);
+        ValidateTimeout(timeout, nameof(timeout), "signal timeout");
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(log);
         byte[] frame = InstanceFrame.Encode(message);
@@ -428,7 +428,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         CancellationToken cancellationToken
     )
     {
-        ValidateTimeout(budget.Length);
+        ValidateTimeout(budget.Length, nameof(budget), "request budget");
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(log);
         byte[] frame = InstanceFrame.Encode(message);
@@ -940,14 +940,18 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         return (fullLockPath, PidPathFor(fullLockPath), InstanceEndpoint.Resolve(fullLockPath, EndpointEnvironment.ForCurrentProcess(), log));
     }
 
-    private static void ValidateTimeout(TimeSpan timeout)
+    /// <summary>
+    /// Throws unless <paramref name="value"/> is <see cref="Timeout.InfiniteTimeSpan"/> or positive and at most
+    /// <see cref="int.MaxValue"/> ms; the exception names the caller's own parameter and describes it.
+    /// </summary>
+    private static void ValidateTimeout(TimeSpan value, string name, string description)
     {
-        if (timeout != Timeout.InfiniteTimeSpan && (timeout <= TimeSpan.Zero || timeout.TotalMilliseconds > int.MaxValue))
+        if (value != Timeout.InfiniteTimeSpan && (value <= TimeSpan.Zero || value.TotalMilliseconds > int.MaxValue))
         {
             throw new ArgumentOutOfRangeException(
-                nameof(timeout),
-                timeout,
-                $"The signal timeout is Timeout.InfiniteTimeSpan or positive and at most {int.MaxValue} ms."
+                name,
+                value,
+                $"The {description} is Timeout.InfiniteTimeSpan or positive and at most {int.MaxValue} ms."
             );
         }
     }
