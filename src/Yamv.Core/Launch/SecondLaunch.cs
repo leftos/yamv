@@ -135,12 +135,17 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
     /// request the app has begun may close with no reply and the files be sent twice.
     /// </param>
     /// <param name="overallCap">The bound on the whole launch; the app passes <see cref="OpenOverallCap"/>.</param>
-    /// <exception cref="ArgumentOutOfRangeException">Either time is not positive and finite.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="files"/> is null; nothing is read, sent or waited for.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Either time is not positive and finite, or is over <see cref="int.MaxValue"/> ms, which a timer or a cancellation delay
+    /// refuses.
+    /// </exception>
     /// <returns>Opened (exit 0), BecameMain (start as the app with the files), or Failed with its reason (show the error, exit 1).</returns>
     public async Task<SecondLaunchResult> OpenAsync(IReadOnlyList<string> files, TimeSpan openDeadline, TimeSpan overallCap)
     {
-        RequirePositiveAndFinite(openDeadline, nameof(openDeadline));
-        RequirePositiveAndFinite(overallCap, nameof(overallCap));
+        ArgumentNullException.ThrowIfNull(files);
+        RequirePositiveAndFinite(openDeadline, nameof(openDeadline), "An open launch's deadline");
+        RequirePositiveAndFinite(overallCap, nameof(overallCap), "An open launch's overall cap");
         if (!OpenMessage.TryEncode(files, out string message, out OpenMessageProblem problem))
         {
             log.LogWarning($"Second launch: the {files.Count} file path(s) cannot be sent in an open message: {Describe(problem)}.");
@@ -169,7 +174,13 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
                 return settled;
             }
 
-            (SecondLaunchResult? ended, int? newPid) = await WaitForLockOrNewAppAsync(pid, start, overallCap).ConfigureAwait(false);
+            (SecondLaunchResult? ended, int? newPid) = await WaitForLockOrNewAppAsync(
+                    pid,
+                    start,
+                    overallCap,
+                    outcome == InstanceRequestOutcome.Closing
+                )
+                .ConfigureAwait(false);
             if (ended is not null)
             {
                 return ended;
@@ -210,11 +221,17 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
     /// <summary>
     /// Retries the lock every <see cref="LockRetryInterval"/> for up to <see cref="LockWaitTimeout"/>, within the overall cap,
     /// reading the pid between tries: the result once the lock is taken or the wait is over, or the pid of a new app (one that
-    /// is not <paramref name="closingPid"/>) to send the request to.
+    /// is not <paramref name="closingPid"/>) to send the request to. <paramref name="closing"/> says which wait this is: the app
+    /// answered <c>closing</c>, or nothing answered at all.
     /// </summary>
-    private async Task<(SecondLaunchResult? Ended, int? NewPid)> WaitForLockOrNewAppAsync(int? closingPid, long start, TimeSpan overallCap)
+    private async Task<(SecondLaunchResult? Ended, int? NewPid)> WaitForLockOrNewAppAsync(
+        int? closingPid,
+        long start,
+        TimeSpan overallCap,
+        bool closing
+    )
     {
-        log.LogInfo($"Second launch: the app is closing; waiting up to {LockWaitTimeout.TotalSeconds:0} s for it to exit.");
+        LogWaitingForTheNextApp(closing);
         for (TimeSpan waited = TimeSpan.Zero; ; waited += LockRetryInterval)
         {
             MainLockAttempt attempt = actions.RetryLock();
@@ -245,6 +262,15 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
         }
     }
 
+    /// <summary>The wait's opening line: an app that is closing exits, while one that never answered may let a new app take the lock.</summary>
+    private void LogWaitingForTheNextApp(bool closing)
+    {
+        string state = closing
+            ? $"the app is closing; waiting up to {LockWaitTimeout.TotalSeconds:0} s for it to exit."
+            : $"no app is answering; waiting up to {LockWaitTimeout.TotalSeconds:0} s for one to take the lock.";
+        log.LogInfo($"Second launch: {state}");
+    }
+
     private SecondLaunchResult GaveUp(TimeSpan overallCap)
     {
         log.LogWarning($"Second launch: no app took the files within {overallCap.TotalSeconds:0} s or the lock wait; giving up.");
@@ -253,12 +279,15 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
 
     private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
 
-    /// <summary>Throws unless <paramref name="value"/> is positive; <see cref="Timeout.InfiniteTimeSpan"/> is negative, so it throws too.</summary>
-    private static void RequirePositiveAndFinite(TimeSpan value, string name)
+    /// <summary>
+    /// Throws unless <paramref name="value"/> is positive and at most <see cref="int.MaxValue"/> milliseconds, the longest delay a
+    /// timer or a cancellation accepts; <see cref="Timeout.InfiniteTimeSpan"/> is negative, so it throws too.
+    /// </summary>
+    private static void RequirePositiveAndFinite(TimeSpan value, string name, string description)
     {
-        if (value <= TimeSpan.Zero)
+        if (value <= TimeSpan.Zero || value.TotalMilliseconds > int.MaxValue)
         {
-            throw new ArgumentOutOfRangeException(name, value, "An open launch's deadline and overall cap are positive and finite.");
+            throw new ArgumentOutOfRangeException(name, value, $"{description} is positive, finite and at most {int.MaxValue} ms.");
         }
     }
 
