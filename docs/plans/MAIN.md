@@ -37,6 +37,14 @@
 - [ ] YAMV-41 Launch arguments: trim trailing separators before de-duplicating and classifying paths
 - [ ] YAMV-32 Register: flush the shell's association-change notice before exit
 
+### No milestone
+- [/] YAMV-53 Settings file: app-wide settings in one shared, watched settings.json
+- [ ] YAMV-54 Single instance: every window in one process; file launches open viewer windows in it
+- [ ] YAMV-55 ThemeFolderWatcher: ObjectDisposedException escapes Start after a concurrent Dispose
+- [ ] YAMV-56 Width popover: preview an unreachable width on an example document, with a toast
+- [ ] YAMV-58 Document watcher follow-ups: vanished folder, symlinked documents, Debouncer reuse, shared folder-event types
+- [ ] YAMV-59 Width and settings stores: cross-process lock; settings store id and appearance checks
+
 ## Ship v1
 
 - [ ] YAMV-14 Docs: ARCHITECTURE filled in, README usage, CHANGELOG
@@ -53,3 +61,4 @@
 - [ ] YAMV-42 Summarize a document or selection through cloud models (bring-your-own-key / OAuth)
 - [!] YAMV-51 Adopt the shared Avalonia driver (agents drive the real window; queued file picks)
 - [ ] YAMV-52 Shared driver: drive the real OS file dialog
+- [ ] YAMV-57 Core: one shared atomic-file helper for the five temp-then-replace stores
