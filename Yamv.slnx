@@ -4,6 +4,7 @@
     <Project Path="src/Yamv.Core/Yamv.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Yamv.App.Tests/Yamv.App.Tests.csproj" />
     <Project Path="tests/Yamv.Core.Tests/Yamv.Core.Tests.csproj" />
   </Folder>
 </Solution>

@@ -17,6 +17,7 @@ Every busy command goes through `pwsh -NoProfile -File tools/gate.ps1`, written 
 - Build: `gate.ps1 run --log .tmp/build.log --slot heavy --timeout 600 -- dotnet build Yamv.slnx -c Release` (warnings are errors, analyzers at `latest-recommended`, set in `Directory.Build.props`).
 - Test: `gate.ps1 run --log .tmp/test.log --slot heavy --timeout 600 -- dotnet test --solution Yamv.slnx -c Release --no-build`. Tests are xUnit v3 on Microsoft.Testing.Platform (`global.json`).
 - One test class or method: `gate.ps1 run --log .tmp/test-one.log --slot light --timeout 300 -- dotnet test --project tests/Yamv.Core.Tests -c Release --no-build --filter-class "*TitleTextTests"` (or `--filter-method "*Name*"`).
+- App tests (headless Avalonia) are their own project; one class: `gate.ps1 run --log .tmp/test-one.log --slot light --timeout 300 -- dotnet test --project tests/Yamv.App.Tests -c Release --no-build --filter-class "*ThemeBridgeTests"`.
 - Page check (headless Chromium against a stubbed host): in `tools/dev/page-check/`, `npm install` then `npm run check`.
 - Screenshot of the real app: `pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ArgLine '--theme dark' -Out .tmp/shot.png`.
 - Format: `dotnet csharpier format .`; style: `dotnet format style Yamv.slnx --severity info --include <files>`.

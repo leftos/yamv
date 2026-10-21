@@ -14,7 +14,7 @@ namespace Yamv.App.Controls;
 /// again and the latest document, theme and content width are replayed into it. Every public member must be called on
 /// the UI thread, and every event is raised there.
 /// </summary>
-public sealed class DocumentView : UserControl
+public sealed class DocumentView : UserControl, IDocumentSurface
 {
     private readonly IAppLog _log;
     private readonly NativeWebView _webView;

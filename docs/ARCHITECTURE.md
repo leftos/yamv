@@ -13,6 +13,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Change how documents are grouped in the tree | `src/Yamv.Core/Grouping/` → `tests/Yamv.Core.Tests/Grouping/` | |
 | Change the theme file format, a token, or a built-in theme | `src/Yamv.Core/Theming/ThemeTokens.cs` → `ThemeParser.cs` → `ThemeSerializer.cs` → `themes/yamv-theme.schema.json` → `src/Yamv.Core/Theming/BuiltIn/` → `tests/Yamv.Core.Tests/Theming/` | [themes.md](design/themes.md) |
 | Change how a document looks or behaves in the page (rendering, find, links, images) | `src/Yamv.App/Web/yamv.js` → `Web/yamv.css` → `Web/template.html` → `src/Yamv.App/Controls/DocumentView.cs` → `tools/dev/page-check/` | |
+| Change the window's view model (selection, rendering, session restore, shortcuts' commands) | `src/Yamv.App/ViewModels/DocumentWindowViewModel.cs` → `src/Yamv.Core/Documents/DocumentWindowState.cs` → `tests/Yamv.App.Tests/ViewModels/` | |
+| Change how a theme reaches the window chrome | `src/Yamv.App/Services/ThemeBridge.cs` → `src/Yamv.Core/Theming/ChromePalette.cs` → `tests/Yamv.App.Tests/Services/ThemeBridgeTests.cs` | [themes.md](design/themes.md) |
 | Change how themes are listed, imported, saved or deleted | `src/Yamv.Core/Theming/ThemeCatalog.cs` → `ThemeIds.cs` → `tests/Yamv.Core.Tests/Theming/ThemeCatalogTests.cs` | [themes.md](design/themes.md) |
 
 ## Layers
@@ -21,6 +23,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 - **`Yamv.App`** (`src/Yamv.App/`): owns windows, the tree, the document page (`Web/`, embedded as `Web/...` resources) and platform glue (macOS activation, Windows registration). References Core.
   - `Controls/DocumentView` hosts the page in Avalonia's `NativeWebView`. The package's `WebResourceRequested` is observe-only and `NavigateToString` ignores its base URI, so `WebAssets` extracts the page to the [asset cache](glossary.md) and the page loads over `file://`. Two instances extracting at once race safely: the final folder only appears by renaming a complete staging copy.
   - The page's CSP is `script-src 'self'` with no inline script and no eval. Document HTML is inserted with `innerHTML` (so its scripts never run) after losing `style`, `style=`, `meta`, `base`, `link`, frames, objects and embeds; every image-like URL (`src`, `srcset`, `poster`, SVG `href`) must be http(s), a `data:image/` URL, or a host-less `file:` path inside the group root, so a document cannot reach a network share.
+  - `Controls/IDocumentSurface` is the slice of `DocumentView` the window logic uses (show a document, theme CSS, content width, find, and the scroll, link and key events), so `ViewModels/DocumentWindowViewModel` and `Services/ThemeBridge` run against a fake in tests. The view model wraps Core's `DocumentWindowState`, renders the selection off the UI thread (a stale render is dropped by generation), keeps scroll per shown document, re-checks missing files every 2 s, and builds and restores the session. `ThemeBridge` picks the session's theme, sets the Avalonia theme variant, swaps one merged resource dictionary of chrome brushes (`YamvChromeBackground` … `YamvWarningLine`) and font (`YamvUiFont`, from Core's `ChromePalette`), and sends the theme CSS to every registered surface.
   - The find bar lives inside the page, because Avalonia cannot draw over a native web view (airspace). For the same reason an empty or missing state hides the web view rather than covering it.
 
 ## Integration Footguns
@@ -36,6 +39,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 ## Test locations
 
 - `tests/Yamv.Core.Tests`: everything in Core. A new Core type gets a test file at the mirrored path.
+- `tests/Yamv.App.Tests`: App logic that needs Avalonia types (view model, `ThemeBridge`), run headless as plain `[Fact]`s through `HeadlessUnitTestSession` (`Avalonia.Headless.XUnit` fails discovery under xunit.v3). `Fakes/` holds the fake surface and log; `Yamv.App` exposes its internals to it.
 - `tools/dev/page-check/`: a headless Chromium check of the document page (`npm install`, then `npm run check`), against a stubbed host.
 - `tools/dev/run-hidden.ps1` with `tools/dev/capture-window.ps1`, both run under `tools/hidden-desktop.ps1`: screenshots of the real app off the owner's desktop. `docs/design/fixtures/sample.md` is the sample document.
 

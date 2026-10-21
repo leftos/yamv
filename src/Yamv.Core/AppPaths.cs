@@ -33,6 +33,9 @@ public static class AppPaths
 
     public static string LogFile => Path.Combine(DataDirectory, "logs", "yamv.log");
 
+    /// <summary>The folder the user's own theme files live in.</summary>
+    public static string ThemesDirectory => Path.Combine(DataDirectory, "themes");
+
     /// <summary>
     /// The path comparison of the platform's default file system: case-insensitive on Windows and macOS.
     /// </summary>

@@ -3,6 +3,8 @@
 - **Activation gate**: holds an `activate` request that arrives before the main window exists and delivers it once the window is shown, coalescing duplicates.
 - **Appearance**: Match system, Light or Dark — which variant of the current theme family is shown.
 - **Asset cache**: the versioned folder under the local app-data dir (`YAMV/web/{assembly version id}/`) that the document page's template, CSS, JS, fonts and vendored libraries are extracted to, so the page loads over `file://`.
+- **Chrome**: the app's own UI around the document (title bar, sidebar tree, dialogs), drawn with Avalonia from the theme's chrome tokens, as opposed to the document page.
+- **Document surface**: what the window logic sees of the document page (`IDocumentSurface`, implemented by `DocumentView`); tests substitute a fake.
 - **Grace period**: the 300 ms after framework initialization on macOS during which launch-time file opens may arrive, before the main window is created.
 - **Group root**: the folder a document is grouped under in the tree: its git work-tree root, or its parent folder when it is not in a repo.
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.

@@ -31,4 +31,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Yamv.Core\Yamv.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Yamv.App.Tests" />
+  </ItemGroup>
 </Project>
