@@ -1,3 +1,4 @@
+using System.Text;
 using Yamv.Core.Tests.Session;
 using Yamv.Core.Theming;
 
@@ -6,6 +7,8 @@ namespace Yamv.Core.Tests.Theming;
 public sealed class ThemeCatalogTests : IDisposable
 {
     private const string ValidTheme = """{ "name": "Mine", "light": { "tokens": { "accent": "#123456" } } }""";
+
+    private const string SizeError = "The file is larger than 1 MB; a theme file is a few KB.";
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "yamv-themes-" + Guid.NewGuid().ToString("N"));
     private readonly RecordingAppLog _log = new();
@@ -604,6 +607,231 @@ public sealed class ThemeCatalogTests : IDisposable
         {
             File.Delete(devicePath);
         }
+    }
+
+    [Fact]
+    public void LoadAll_FileOverTheCap_IsInvalidWithTheSizeError()
+    {
+        string big = ThemeOverTheCap();
+        Assert.Equal(ThemeCatalog.MaxFileBytes + 1, Encoding.UTF8.GetByteCount(big));
+        string path = WriteUserFile("big", big);
+
+        IReadOnlyList<ThemeEntry> entries = CreateCatalog().LoadAll();
+
+        ThemeEntry entry = Assert.Single(entries, entry => entry.Id == "big");
+        Assert.Null(entry.Result.Theme);
+        Assert.Equal([$"The file cannot be read: {SizeError}"], entry.Result.Errors);
+        Assert.Contains(
+            _log.Entries,
+            logged => logged.Level == "warning" && logged.Message == $"Cannot read the theme file {path}: it is larger than 1 MB."
+        );
+        Assert.DoesNotContain(_log.Entries, logged => logged.Level == "error");
+    }
+
+    [Fact]
+    public void LoadAll_FileExactlyAtTheCap_IsRead()
+    {
+        string padded = ValidTheme + new string(' ', ThemeCatalog.MaxFileBytes - ValidTheme.Length);
+        Assert.Equal(ThemeCatalog.MaxFileBytes, Encoding.UTF8.GetByteCount(padded));
+        WriteUserFile("mine", padded);
+
+        ThemeEntry entry = Assert.Single(CreateCatalog().LoadAll(), entry => entry.Id == "mine");
+
+        Assert.Empty(entry.Result.Errors);
+        Assert.Equal("Mine", entry.Result.Theme!.Name);
+    }
+
+    [Fact]
+    public void LoadAll_FileOverTheCapInBytesOnly_IsInvalidWithTheSizeError()
+    {
+        string padded = ValidTheme + new string('é', (ThemeCatalog.MaxFileBytes - ValidTheme.Length) / 2 + 1);
+        Assert.True(padded.Length < ThemeCatalog.MaxFileBytes);
+        Assert.True(Encoding.UTF8.GetByteCount(padded) > ThemeCatalog.MaxFileBytes);
+        WriteUserFile("wide", padded);
+
+        ThemeEntry entry = Assert.Single(CreateCatalog().LoadAll(), entry => entry.Id == "wide");
+
+        Assert.Null(entry.Result.Theme);
+        Assert.Equal([$"The file cannot be read: {SizeError}"], entry.Result.Errors);
+    }
+
+    [Fact]
+    public void Import_SourceOpenForWritingByAnotherHandle_StillImports()
+    {
+        string source = WriteSourceFile("mine.yamv-theme.json", ValidTheme);
+
+        ThemeEntry entry;
+        using (new FileStream(source, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+        {
+            entry = CreateCatalog().Import(source);
+        }
+
+        Assert.Equal("mine", entry.Id);
+        Assert.Equal(ValidTheme, File.ReadAllText(Path.Combine(UserFolder, "mine.yamv-theme.json")));
+    }
+
+    [Fact]
+    public void Import_FileWithABom_ImportsItWithoutTheBom()
+    {
+        string source = WriteSourceFile("mine.yamv-theme.json", ValidTheme);
+        File.WriteAllBytes(source, [.. Encoding.UTF8.GetPreamble(), .. Encoding.UTF8.GetBytes(ValidTheme)]);
+
+        ThemeEntry entry = CreateCatalog().Import(source);
+
+        Assert.Equal(Encoding.UTF8.GetBytes(ValidTheme), File.ReadAllBytes(entry.FilePath!));
+    }
+
+    [Fact]
+    public void Import_FileOverTheCap_ThrowsAndWritesNothing()
+    {
+        string source = WriteSourceFile("big.yamv-theme.json", ThemeOverTheCap());
+
+        ThemeException exception = Assert.Throws<ThemeException>(() => CreateCatalog().Import(source));
+
+        string error = $"{source} is larger than 1 MB; a theme file is a few KB.";
+        Assert.Equal(error, exception.Message);
+        Assert.Equal([error], exception.Errors);
+        Assert.False(Directory.Exists(UserFolder));
+    }
+
+    [Fact]
+    public void Inspect_FileOverTheCap_ReportsTheSizeError()
+    {
+        ThemeInspection inspection = ThemeCatalog.Inspect(WriteSourceFile("big.yamv-theme.json", ThemeOverTheCap()));
+
+        Assert.Equal("big.yamv-theme.json", inspection.FileName);
+        Assert.Null(inspection.Name);
+        Assert.Equal([$"The file cannot be read: {SizeError}"], inspection.Errors);
+    }
+
+    [Fact]
+    public void LoadAll_FileThatVanishesBeforeItIsRead_IsSkipped()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Only Unix lets a symbolic link point at a file that is not there.");
+        Directory.CreateDirectory(UserFolder);
+        string gone = Path.Combine(UserFolder, "gone" + ThemeCatalog.FileSuffix);
+        File.CreateSymbolicLink(gone, Path.Combine(UserFolder, "missing" + ThemeCatalog.FileSuffix));
+
+        IReadOnlyList<ThemeEntry> entries = CreateCatalog().LoadAll();
+
+        Assert.DoesNotContain(entries, entry => entry.Id == "gone");
+        Assert.Contains(
+            _log.Entries,
+            logged => logged.Level == "info" && logged.Message == $"The theme file {gone} went away while it was being read; skipping it."
+        );
+        Assert.DoesNotContain(_log.Entries, logged => logged.Level == "error");
+    }
+
+    [Fact]
+    public void LoadAll_IdWithBackslash_IsInvalidWithTheRenameError()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Only Unix lets a file name hold a backslash.");
+        Directory.CreateDirectory(UserFolder);
+        File.WriteAllText(Path.Combine(UserFolder, "a\\b" + ThemeCatalog.FileSuffix), ValidTheme);
+
+        ThemeEntry entry = Assert.Single(CreateCatalog().LoadAll(), entry => entry.Source == ThemeSource.User);
+
+        Assert.Equal("a\\b", entry.Id);
+        Assert.Null(entry.Result.Theme);
+        Assert.StartsWith(
+            "The file name 'a\\b.yamv-theme.json' gives no usable theme id",
+            Assert.Single(entry.Result.Errors),
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
+    public void LoadAll_IdWithControlCharacter_IsInvalidWithTheRenameError()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Only Unix lets a file name hold a control character.");
+        Directory.CreateDirectory(UserFolder);
+        File.WriteAllText(Path.Combine(UserFolder, "a\u0001b" + ThemeCatalog.FileSuffix), ValidTheme);
+
+        ThemeEntry entry = Assert.Single(CreateCatalog().LoadAll(), entry => entry.Source == ThemeSource.User);
+
+        Assert.Equal("a\u0001b", entry.Id);
+        Assert.Null(entry.Result.Theme);
+        Assert.StartsWith(
+            "The file name 'a\u0001b.yamv-theme.json' gives no usable theme id",
+            Assert.Single(entry.Result.Errors),
+            StringComparison.Ordinal
+        );
+    }
+
+    [Theory]
+    [InlineData(".yamv-theme.json", "")]
+    [InlineData("..yamv-theme.json", ".")]
+    public void LoadAll_FileWhoseIdIsNotValid_IsInvalidWithTheRenameError(string fileName, string id)
+    {
+        Directory.CreateDirectory(UserFolder);
+        File.WriteAllText(Path.Combine(UserFolder, fileName), "not a theme");
+
+        ThemeEntry entry = Assert.Single(CreateCatalog().LoadAll(), entry => entry.Source == ThemeSource.User);
+
+        Assert.Equal(id, entry.Id);
+        Assert.Null(entry.Result.Theme);
+        Assert.StartsWith($"The file name '{fileName}' gives no usable theme id", Assert.Single(entry.Result.Errors), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReadAtMost_EndlessStream_StopsOneByteOverTheCap()
+    {
+        var stream = new EndlessStream();
+
+        Assert.Throws<ThemeFileTooLargeException>(() => ThemeCatalog.ReadAtMost(stream));
+
+        Assert.Equal(ThemeCatalog.MaxFileBytes + 1L, stream.BytesServed);
+    }
+
+    [Fact]
+    public void ReadAtMost_StreamOfExactlyTheCap_ReturnsEveryByte()
+    {
+        byte[] content = new byte[ThemeCatalog.MaxFileBytes];
+
+        Assert.Equal(content, ThemeCatalog.ReadAtMost(new MemoryStream(content)));
+    }
+
+    /// <summary>A stream that hands out its byte forever and cannot tell its length or seek.</summary>
+    private sealed class EndlessStream : Stream
+    {
+        public long BytesServed { get; private set; }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Array.Fill(buffer, (byte)'x', offset, count);
+            BytesServed += count;
+            return count;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush() { }
+    }
+
+    /// <summary>A valid theme file text one byte over the cap, its description carrying the padding.</summary>
+    private static string ThemeOverTheCap()
+    {
+        const string Prefix = "{ \"name\": \"Big\", \"description\": \" ";
+        const string Suffix = "\", \"light\": {} }";
+        return Prefix + new string('x', ThemeCatalog.MaxFileBytes + 1 - Prefix.Length - Suffix.Length) + Suffix;
     }
 
     private string WriteTempFile(string fileName, DateTime lastWriteUtc)

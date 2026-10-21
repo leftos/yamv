@@ -29,6 +29,12 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
 {
     public const string FileSuffix = ".yamv-theme.json";
 
+    /// <summary>The most bytes a theme file is read for; a theme file is a few KB.</summary>
+    internal const int MaxFileBytes = 1024 * 1024;
+
+    /// <summary><see cref="MaxFileBytes"/> written out, as the messages about a file over it report it.</summary>
+    internal static readonly string MaxFileSizeText = MaxFileBytes / (1024 * 1024) + " MB";
+
     private const string ResourcePrefix = "Yamv.Core.Theming.BuiltIn.";
     private const int MoveAttempts = 5;
     private static readonly TimeSpan MoveRetryDelay = TimeSpan.FromMilliseconds(50);
@@ -45,9 +51,11 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     /// file that shadows a built-in is listed beside the built-in. Look a theme up by id preferring the valid entry.
     /// </summary>
     /// <remarks>
-    /// First deletes the stale temporary files of interrupted writes from the user folder. A user file named like a Windows device
-    /// (<see cref="ThemeIds.IsDeviceName"/>) is listed as invalid on every platform, since <see cref="Save"/>,
-    /// <see cref="Rename"/> and <see cref="Delete"/> refuse its id.
+    /// First deletes the stale temporary files of interrupted writes from the user folder. A user file whose name gives an id
+    /// <see cref="ThemeIds.IsValid"/> rejects, a Windows device name (<see cref="ThemeIds.IsDeviceName"/>) included, is listed as
+    /// invalid on every platform without being read, since <see cref="Save"/>, <see cref="Rename"/> and <see cref="Delete"/> refuse
+    /// its id. A file larger than <see cref="MaxFileBytes"/> is listed as invalid with a read error, and one that goes away between
+    /// the listing and the read is skipped.
     /// </remarks>
     public IReadOnlyList<ThemeEntry> LoadAll()
     {
@@ -71,13 +79,17 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
 
     /// <summary>
     /// Copies the theme file at <paramref name="sourcePath"/> into the user folder, verbatim, under its own id or, when that is a
-    /// user or built-in theme already, the first free <c>-2</c>, <c>-3</c>… variant of it.
+    /// user or built-in theme already, the first free <c>-2</c>, <c>-3</c>… variant of it. The source is read with sharing that
+    /// allows a concurrent write, so a file an editor holds open imports as it stands.
     /// </summary>
-    /// <exception cref="ThemeException">The file is not a valid theme, or its name gives no usable id; nothing is written.</exception>
+    /// <exception cref="ThemeException">
+    /// The file is not a valid theme, its name gives no usable id, or it is larger than <see cref="MaxFileBytes"/>; nothing is
+    /// written.
+    /// </exception>
     public ThemeEntry Import(string sourcePath)
     {
         ArgumentNullException.ThrowIfNull(sourcePath);
-        string text = File.ReadAllText(sourcePath);
+        string text = ReadImportedText(sourcePath);
         string baseId = ThemeIds.FromFileName(sourcePath);
         if (!ThemeIds.IsValid(baseId))
         {
@@ -99,7 +111,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
 
     /// <summary>
     /// Reads the theme file at <paramref name="path"/> for the Import notice, listing the errors <see cref="Import"/> would fail with,
-    /// without copying it. A file that cannot be read gives the read error.
+    /// without copying it. A file that cannot be read, or is larger than <see cref="MaxFileBytes"/>, gives the read error.
     /// </summary>
     public static ThemeInspection Inspect(string path)
     {
@@ -108,7 +120,7 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         string text;
         try
         {
-            text = File.ReadAllText(path);
+            text = ReadShared(path).Text;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -331,16 +343,56 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     /// The text of the user file at <paramref name="path"/>, read with sharing that allows a concurrent write or delete, without its
     /// UTF-8 byte order mark, and whether it had one.
     /// </summary>
+    /// <exception cref="ThemeFileTooLargeException">The file is larger than <see cref="MaxFileBytes"/>.</exception>
     private static (string Text, bool Bom) ReadShared(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var reader = new StreamReader(
-            stream,
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            detectEncodingFromByteOrderMarks: false
-        );
-        string text = reader.ReadToEnd();
+        string text = Encoding.UTF8.GetString(ReadAtMost(stream));
         return text.StartsWith('\uFEFF') ? (text[1..], true) : (text, false);
+    }
+
+    /// <summary>The bytes of <paramref name="stream"/>, read no further than one byte past <see cref="MaxFileBytes"/>.</summary>
+    /// <exception cref="ThemeFileTooLargeException">There is that one byte, so the file is larger than the cap.</exception>
+    internal static byte[] ReadAtMost(Stream stream)
+    {
+        using var bytes = new MemoryStream();
+        byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            while (true)
+            {
+                int read = stream.Read(chunk, 0, Math.Min(chunk.Length, MaxFileBytes + 1 - (int)bytes.Length));
+                if (read == 0)
+                {
+                    return bytes.ToArray();
+                }
+
+                bytes.Write(chunk, 0, read);
+                if (bytes.Length > MaxFileBytes)
+                {
+                    throw new ThemeFileTooLargeException();
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(chunk);
+        }
+    }
+
+    /// <summary>The text of the file at <paramref name="sourcePath"/> being imported.</summary>
+    /// <exception cref="ThemeException">The file is larger than <see cref="MaxFileBytes"/>.</exception>
+    private static string ReadImportedText(string sourcePath)
+    {
+        try
+        {
+            return ReadShared(sourcePath).Text;
+        }
+        catch (ThemeFileTooLargeException exception)
+        {
+            string error = $"{sourcePath} is larger than {MaxFileSizeText}; a theme file is a few KB.";
+            throw new ThemeException(error, [error], exception);
+        }
     }
 
     /// <summary>The text of the embedded built-in theme <paramref name="id"/>.</summary>
@@ -494,14 +546,28 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         foreach (string path in paths)
         {
             string id = ThemeIds.FromFileName(path);
-            ThemeLoadResult result = ThemeIds.IsDeviceName(id)
-                ? new ThemeLoadResult(null, [$"\"{Path.GetFileName(path)}\" uses a name Windows reserves for a device; rename the file."], [])
-                : ReadUserTheme(id, path);
+            ThemeLoadResult? result = LoadUserFile(id, path);
+            if (result is null)
+            {
+                continue;
+            }
+
             Report(id, path, result);
             entries.Add(new ThemeEntry(id, ThemeSource.User, path, result));
         }
 
         return entries;
+    }
+
+    /// <summary>The outcome of reading the user file at <paramref name="path"/>, or null when it went away before it could be read.</summary>
+    private ThemeLoadResult? LoadUserFile(string id, string path)
+    {
+        if (ThemeIds.IsDeviceName(id))
+        {
+            return new ThemeLoadResult(null, [$"\"{Path.GetFileName(path)}\" uses a name Windows reserves for a device; rename the file."], []);
+        }
+
+        return ThemeIds.IsValid(id) ? ReadUserTheme(id, path) : new ThemeLoadResult(null, [NoUsableIdError(path)], []);
     }
 
     /// <summary>Deletes the temporary files in the user folder that are older than <see cref="StaleTemporaryAge"/>.</summary>
@@ -557,11 +623,22 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         }
     }
 
-    private ThemeLoadResult ReadUserTheme(string id, string path)
+    /// <summary>The parsed user file at <paramref name="path"/>, or null when it went away before it could be read.</summary>
+    private ThemeLoadResult? ReadUserTheme(string id, string path)
     {
         try
         {
             return ThemeParser.Parse(ReadShared(path).Text, id, ThemeSource.User, path);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            log.LogInfo($"The theme file {path} went away while it was being read; skipping it.");
+            return null;
+        }
+        catch (ThemeFileTooLargeException exception)
+        {
+            log.LogWarning($"Cannot read the theme file {path}: it is larger than {MaxFileSizeText}.", exception);
+            return new ThemeLoadResult(null, [$"The file cannot be read: {exception.Message}"], []);
         }
         catch (IOException exception)
         {

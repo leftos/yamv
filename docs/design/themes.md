@@ -34,6 +34,8 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
 - **Resolution** for a variant: the default token values (Studio light for a light variant, Studio dark for a dark one), then the file's shared `tokens`, then the variant's `tokens`. The result always holds every token.
 - **Errors**:
   - A file that won't parse, a colour that isn't `#rgb`, `#rrggbb` or `#rrggbbaa`, a number out of range, a font name that is empty, only whitespace or holds a control character, or a token string that isn't valid text (an unpaired surrogate such as `"\ud800"`) makes the theme invalid. It is listed with the error. It can be selected in the theme settings window to inspect its errors, but is never applied.
+
+    A theme file over 1 MB is listed as invalid without being read, and a file that disappears while the folder is read is skipped.
   - An unknown token name is a warning; the token is ignored.
   - An unknown field (`"Light"`, `"token"`) is a warning; the field is ignored. `$schema` is allowed.
   - A `formatVersion` other than `1` is a warning, and so is one that isn't an integer (`2.0`, `"2"`); the file still loads.
@@ -43,7 +45,9 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
   - Rename changes the theme's name and the file follows it: the file name is the name lower-cased, with each run of characters other than ASCII letters and digits turned into `-`, cut to 64 characters (`theme` when nothing is left). A taken or device name gets the `-2` suffix. A file already named for the new name, or `<name>-<n>`, keeps its name. If the file cannot be moved, the theme keeps its old id with the new name.
   - Save of an existing file changes only the edited values in the file's text, so comments, key order, unknown fields and a BOM survive. It is refused ("could not be updated in place") when the file on disk is not a valid theme, when an edited key appears twice in it, or when the patched text would not read back as the saved theme.
   - Delete moves the file to the Recycle Bin (Trash on macOS) rather than erasing it.
-  - A user file named like a Windows device (`con`, `prn`, `aux`, `nul`, `com1`, `lpt1`…, in any case, with or without a further extension, such as `con.yamv-theme.json`) is listed as invalid on every platform, with the error `"<file name>" uses a name Windows reserves for a device; rename the file.`
+  - A user file whose name gives no valid theme id is listed as invalid on every platform without being read, with a "rename the file" error.
+
+    A Windows device name (`con`, `prn`, `aux`, `nul`, `com1`, `lpt1`…, in any case, with or without a further extension, such as `con.yamv-theme.json`) gives `"<file name>" uses a name Windows reserves for a device; rename the file.`, and any other — an empty name, `.`, `..`, a slash, a backslash or a control character — gives `The file name '<file name>' gives no usable theme id; rename it to <name>.yamv-theme.json.`
   - The app never falls back silently. If the selected theme turns invalid, the window keeps the last valid version and shows the error in the theme settings window.
 - `css` is appended to the document page after YAMV's own stylesheet. It styles the document only, not the app chrome. Scripts can't run in the page (the page's Content-Security-Policy blocks them), so `css` can't run code.
 
