@@ -495,12 +495,25 @@
     return command && (/^[\p{L}\p{Nd}]$/u.test(key) || key === "[" || key === "]" || key === "Tab");
   }
 
+  // `key` follows the keyboard layout and `code` names the physical key, so a Greek or Cyrillic layout
+  // reports its own letter where the host's shortcuts and the page's own keys know the Latin one.
+  function shortcutKey(event) {
+    if (/^\p{L}$/u.test(event.key) && !/^[a-zA-Z]$/.test(event.key)) {
+      const physical = /^Key([A-Z])$/.exec(event.code);
+      if (physical) {
+        return physical[1].toLowerCase();
+      }
+    }
+    return event.key;
+  }
+
   window.addEventListener("keydown", (event) => {
     // AltGr typing (Ctrl+Alt on Windows) and navigation or editing keys always reach the page as they are.
     if (event.getModifierState("AltGraph") || navigationKeys.has(event.key)) {
       return;
     }
-    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    const forwarded = shortcutKey(event);
+    const key = forwarded.length === 1 ? forwarded.toLowerCase() : forwarded;
     const command = event.ctrlKey || event.metaKey;
     if (command && key === "f") {
       event.preventDefault();
@@ -520,7 +533,7 @@
     }
     if (isShortcut(key, command)) {
       event.preventDefault();
-      post({ type: "key", key: event.key, ctrl: event.ctrlKey, meta: event.metaKey, shift: event.shiftKey, alt: event.altKey });
+      post({ type: "key", key: forwarded, ctrl: event.ctrlKey, meta: event.metaKey, shift: event.shiftKey, alt: event.altKey });
     }
   }, true);
 

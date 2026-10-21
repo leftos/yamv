@@ -205,6 +205,25 @@ try {
     document.body.dispatchEvent(new KeyboardEvent("keydown", init));
   }));
   check("AltGr+E is neither forwarded nor blocked", keys.seen.at(-1)?.altGraph === true && keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
+
+  // A non-Latin layout reports its own letter in `key`; the physical key's Latin letter is `code`.
+  const pressLayout = (init) => press(() => page.evaluate((settings) => {
+    document.body.dispatchEvent(new KeyboardEvent("keydown", settings));
+  }, { bubbles: true, cancelable: true, ...init }));
+  keys = await pressLayout({ key: "ς", code: "KeyW", ctrlKey: true });
+  check("Ctrl+W on a Greek layout is forwarded as w", keys.forwarded.length === 1 && keys.forwarded[0].key === "w" && keys.seen.at(-1).prevented, keys);
+  keys = await pressLayout({ key: "щ", code: "KeyO", ctrlKey: true });
+  check("Ctrl+O on a Cyrillic layout is forwarded as o", keys.forwarded.length === 1 && keys.forwarded[0].key === "o" && keys.seen.at(-1).prevented, keys);
+  keys = await pressLayout({ key: "ψ", code: "KeyC", ctrlKey: true });
+  check("Ctrl+C on a Greek layout is left to the page", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
+  keys = await pressLayout({ key: "φ", code: "KeyF", ctrlKey: true });
+  const findBarShown = await page.evaluate(() => !document.getElementById("yamv-findbar").hidden);
+  check("Ctrl+F on a Greek layout opens the find bar", keys.forwarded.length === 0 && keys.seen.at(-1).prevented && findBarShown, { ...keys, findBarShown });
+  await page.keyboard.press("Escape");
+  keys = await pressLayout({ key: "ě", code: "Digit2", ctrlKey: true });
+  check("A letter on a digit key is forwarded unchanged", keys.forwarded.length === 1 && keys.forwarded[0].key === "ě", keys);
+  keys = await pressLayout({ key: "ς", code: "KeyW", ctrlKey: false });
+  check("Without Ctrl a Greek letter is neither forwarded nor blocked", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
 } finally {
   await browser.close();
 }
