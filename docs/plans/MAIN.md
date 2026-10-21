@@ -9,7 +9,7 @@
 - [/] YAMV-8 Launch modes: main vs viewer, activating the main instance, macOS file activation
 
 ### Features (1/4 done)
-- [ ] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
+- [/] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
 - [/] YAMV-10 Content width: per-folder slider (480 px to Full) in a title-bar popover
 - [/] YAMV-11 Theme settings window, Import notice and a watcher on the user themes folder
 
@@ -24,6 +24,11 @@
 - [ ] YAMV-39 Can't-read pane: map the macOS file-in-use errno to "in use by another program"
 - [ ] YAMV-40 ThemeBridge: remove its merged dictionary on dispose; expose IsDisposed for tests
 - [ ] YAMV-41 Launch arguments: trim trailing separators before de-duplicating and classifying paths
+- [ ] YAMV-43 App log: lines lost when two YAMV processes write at once
+- [ ] YAMV-44 CSharpier: three .axaml files on main are unformatted; ThemePreview's reformat changes its text
+- [ ] YAMV-45 Second launch: a launch between the main window's Closing and Closed is lost
+- [ ] YAMV-46 Theme Import/Export: notice name drift, export into the themes folder, picker exceptions, export temp file
+- [ ] YAMV-47 Instance shutdown: stuck-handler waits, late pid delete on Dispose, lock-race and clock in the second launch
 
 ## Ship v1
 
