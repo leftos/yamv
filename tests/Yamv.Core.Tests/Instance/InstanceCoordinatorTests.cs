@@ -510,6 +510,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
     {
         const string Poison = "poison";
         TaskCompletionSource<string> received = NewSource<string>();
+        TaskCompletionSource poisonLogged = WhenErrorLogged("The handler for instance message 'poison' threw");
         using InstanceCoordinator main = new(_lockPath, _log);
         Assert.True(main.TryAcquireMainLock());
         main.StartServer(message =>
@@ -526,6 +527,9 @@ public sealed class InstanceCoordinatorTests : IDisposable
         Assert.True(await InstanceCoordinator.SignalAsync(_lockPath, InstanceMessages.Activate, HangGuard, _log, Token));
 
         Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(HangGuard, Token));
+        // The two frames arrive on connections read on separate tasks, so the later message can reach its handler before
+        // the poisoned one has thrown and been logged.
+        await poisonLogged.Task.WaitAsync(HangGuard, Token);
         (string Message, Exception? Exception) error = Assert.Single(_log.Errors);
         Assert.IsType<InvalidOperationException>(error.Exception);
     }
@@ -1060,6 +1064,20 @@ public sealed class InstanceCoordinatorTests : IDisposable
     {
         TaskCompletionSource logged = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _log.WarningLogged = message =>
+        {
+            if (message.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                logged.TrySetResult();
+            }
+        };
+        return logged;
+    }
+
+    /// <summary>Completes when an error whose message starts with <paramref name="prefix"/> is logged.</summary>
+    private TaskCompletionSource WhenErrorLogged(string prefix)
+    {
+        TaskCompletionSource logged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _log.ErrorLogged = message =>
         {
             if (message.StartsWith(prefix, StringComparison.Ordinal))
             {
