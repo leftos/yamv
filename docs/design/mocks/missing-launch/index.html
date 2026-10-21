@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV missing launch file</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 2124px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 36px; font-size: 16px; max-width: 1500px; line-height: 1.5; }
+p.page code, .opt-h code { font: 13.5px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 6px; border-radius: 4px; color: #fff; }
+.lanes { display: flex; gap: 40px; align-items: flex-start; }
+.lane { width: 648px; flex: none; }
+.lane > h2 { font: 650 22px "Inter V"; color: #fff; margin: 0 0 14px; }
+.opt-h { font: 600 15px "Inter V"; color: #fff; margin: 0 0 10px; }
+.opt-h small { display: block; font-weight: 450; color: #e3e6e9; font-size: 13px; margin-top: 5px; }
+.opt-h.second { margin-top: 30px; }
+.after { margin: 18px 0 0; color: #fff; font-size: 14.5px; line-height: 1.5; }
+.after b { font-weight: 650; }
+
+/* Studio dark tokens (ThemeTokens.cs); warningBackground is #rrggbbaa, CSS order */
+.dark { --doc-bg: #0f1318; --chrome-bg: #0a0d11; --side-bg: #0a0d11; --line: #2a3139; --text: #e6edf3; --text-2: #c9d1d9; --muted: #8b949e;
+        --heading: #f0f6fc; --accent: #4493f8; --accent-soft: #1f3b5e; --sel-bg: #182a40; --sel-text: #e6edf3; --hover-bg: #161b22;
+        --warn: #d29922; --warn-bg: #bb800926; --warn-line: #9e6a03; --code-bg: #161b22; }
+
+/* Windows 11 desktop: wallpaper and taskbar */
+.desk { position: relative; width: 648px; height: 500px; overflow: hidden; border-radius: 6px; box-shadow: 0 0 0 1px rgba(0,0,0,.25);
+        background: radial-gradient(ellipse 70% 60% at 62% 58%, #cfe4fb 0%, #7fb2ee 28%, #3c7ad8 55%, #1a4fae 78%, #0d3279 100%); }
+.half { width: 648px; height: 410px; }
+.half > .scale { zoom: .5; width: 1296px; height: 820px; position: relative; }
+.taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 48px; background: rgba(238,242,247,.86); border-top: 1px solid rgba(0,0,0,.08);
+           display: flex; align-items: center; justify-content: center; gap: 4px; font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif; }
+.taskbar .tile { width: 40px; height: 40px; border-radius: 4px; display: grid; place-items: center; position: relative; }
+.taskbar .tile.run::after { content: ""; position: absolute; bottom: 2px; left: 17px; width: 6px; height: 3px; border-radius: 2px; background: #8a8a8a; }
+.taskbar .tile.active { background: rgba(255,255,255,.65); }
+.taskbar .tile.active::after { left: 13px; width: 14px; background: #0067c0; }
+.taskbar .clock { position: absolute; right: 12px; top: 7px; text-align: right; font-size: 12px; line-height: 17px; color: #1a1a1a; }
+.app-y { width: 24px; height: 24px; border-radius: 5px; background: #0f1318; display: grid; place-items: center; }
+
+/* YAMV window chrome (TitleBar.axaml) */
+.win { position: absolute; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; background: var(--doc-bg); color: var(--text);
+       font-size: 13px; box-shadow: 0 0 0 1px rgba(0,0,0,.55), 0 18px 48px rgba(0,0,0,.45); }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--chrome-bg); border-bottom: 1px solid var(--line);
+            font: 500 12.5px "Inter V"; color: var(--muted); padding-left: 14px; white-space: nowrap; }
+.titlebar .name { color: var(--text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 45px; height: 37px; display: grid; place-items: center; margin-left: 2px; }
+.titlebar .ctl svg { stroke: var(--muted); }
+.body { flex: 1; display: flex; min-height: 0; }
+.doc { flex: 1; overflow: hidden; position: relative; background: var(--doc-bg); color: var(--text); display: flex; flex-direction: column; }
+.doc .scroll { flex: 1; overflow: hidden; padding: 34px 44px 0; }
+.side { width: 280px; flex: none; background: var(--side-bg); border-left: 1px solid var(--line); padding: 0 8px 12px; overflow: hidden; }
+
+.md { max-width: 640px; margin: 0 auto; }
+.md h1 { font: 700 27px/1.15 "Inter V"; letter-spacing: -.025em; margin: 0 0 12px; color: var(--heading); }
+.md p, .md li { font-size: 15px; line-height: 1.62; color: var(--text); }
+.md p { margin: 0 0 12px; }
+.md ul { margin: 0 0 12px; padding-left: 22px; }
+.md h2 { font: 650 19px "Inter V"; margin: 22px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); color: var(--heading); }
+
+/* Tree (MainWindow.axaml) */
+.grp-h { display: flex; align-items: center; margin-top: 12px; padding: 5px 8px; font-weight: 600; font-size: 12.5px; color: var(--text); }
+.chev { width: 12px; height: 16px; display: grid; place-items: center; margin-right: 5px; }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; border: 1px solid var(--line); color: var(--muted); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.row { display: flex; align-items: center; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--text-2); position: relative; font-size: 13px; }
+.row .ico { width: 13px; flex: none; margin-right: 7px; stroke: var(--text-2); opacity: .7; }
+.row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.sel { background: var(--sel-bg); color: var(--sel-text); font-weight: 500; }
+.row.sel .ico { stroke: var(--sel-text); }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--accent); }
+.row.missing .nm { color: var(--muted); opacity: .7; text-decoration: line-through; }
+.row.missing .ico { stroke: var(--muted); opacity: .49; }
+.row .x { width: 20px; height: 20px; margin-left: 4px; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
+.missingTag { font: 600 9.5px "Inter V"; letter-spacing: .05em; color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-line);
+              border-radius: 4px; padding: 1px 5px; margin-left: 6px; }
+
+/* Buttons and path chip (MissingDocumentPane.axaml) */
+.btn { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--doc-bg);
+       color: var(--text); font: 500 12.5px "Inter V"; white-space: nowrap; }
+.path { display: inline-block; padding: 2px 6px; border-radius: 4px; background: var(--chrome-bg); color: var(--text-2);
+        font: 12px "Cascadia Mono", Consolas, monospace; }
+
+/* A: the missing-document pane */
+.missing-pane { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 40px; }
+.missing-pane h4 { margin: 0 0 6px; font: 600 17px "Inter V"; color: var(--text); }
+.missing-pane .sub { margin: 0 0 18px; font-size: 13.5px; color: var(--muted); }
+.missing-pane .btns { display: flex; gap: 8px; margin: 16px 0; }
+.missing-pane .note { font-size: 12.5px; color: var(--muted); }
+
+/* B: Windows 11 message box (light system style) */
+.msgbox { position: absolute; width: 362px; border-radius: 8px; overflow: hidden; background: #fff; color: #000;
+          font: 12px "Segoe UI Variable Text", "Segoe UI", sans-serif; box-shadow: 0 0 0 1px rgba(0,0,0,.28), 0 16px 40px rgba(0,0,0,.32); }
+.msgbox .mb-title { height: 31px; display: flex; align-items: center; padding-left: 12px; background: #f3f3f3; }
+.msgbox .mb-title .spacer { flex: 1; }
+.msgbox .mb-title .close { width: 46px; height: 31px; display: grid; place-items: center; }
+.msgbox .mb-body { display: flex; gap: 12px; align-items: center; padding: 24px 24px 26px 22px; line-height: 17px; }
+.msgbox .mb-body svg { flex: none; }
+.msgbox .mb-strip { height: 43px; background: #f0f0f0; border-top: 1px solid #e3e3e3; display: flex; align-items: center; justify-content: flex-end; padding-right: 11px; }
+.msgbox .ok { width: 88px; height: 26px; border-radius: 4px; background: #fdfdfd; border: 1px solid #0067c0; box-shadow: inset 0 0 0 1px #fdfdfd, inset 0 -1px 0 1px #e5e5e5;
+              display: grid; place-items: center; color: #000; }
+
+/* C: compact YAMV dialog */
+.dlg .dlg-body { padding: 20px 22px 18px; }
+.dlg h4 { margin: 0 0 12px; font: 600 17px "Inter V"; color: var(--text); }
+.dlg .sub { margin: 10px 0 0; font-size: 13.5px; color: var(--muted); }
+.dlg .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: launched with a file that doesn't exist</h1>
+<p class="page">Explorer's "Open with" on a file that was moved or deleted, a stale shortcut, or <code>yamv.exe C:\notes\gone.md</code>. Today YAMV exits with code 2 and writes "File not found: &lt;path&gt;" to a console that a GUI launch does not have, so nothing visible happens. Each lane shows one answer on a Windows 11 desktop at 1x in Studio dark: first a launch with one missing file, then, at half scale, a launch with one file that exists and one that is missing. Windows are drawn smaller than YAMV's 1100 × 760 default so three lanes fit side by side; what is inside them is at real size.</p>
+
+<template id="ico"><svg class="ico" viewBox="0 0 11 14" width="13" height="14"><path d="M1 .5h5.5L10 4v9.5H1zM6.5.5V4H10" fill="none" stroke-width="1"/></svg></template>
+<template id="ctl"><span class="spacer"></span><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+<template id="ctl-close"><span class="spacer"></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+<template id="err"><svg width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e5483a"/><stop offset="1" stop-color="#b8261a"/></linearGradient></defs><circle cx="16" cy="16" r="15" fill="url(#eg)"/><path d="M11 11l10 10M21 11L11 21" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg></template>
+<template id="doc"><div class="md"><h1>Plan</h1><p>Notes for the week. Each item links to the issue that tracks it, and the list is trimmed every Friday.</p><h2>This week</h2><ul><li>Open documents from the command line and from Explorer.</li><li>Remember the tree, the selection and the window size between runs.</li><li>Reload a document when its file changes on disk.</li></ul><h2>Later</h2><ul><li>Find bar with a match count.</li><li>Theme settings window.</li></ul></div></template>
+
+<div class="lanes">
+
+  <!-- A -->
+  <div class="lane">
+    <h2>A · Open it as a missing document</h2>
+    <div class="opt-h">One missing file <small><code>yamv.exe C:\notes\gone.md</code> · the viewer opens with no sidebar</small></div>
+    <div class="desk">
+      <div class="win dark" style="left:34px; top:26px; width:580px; height:400px">
+        <div class="titlebar" data-ctl><span class="name">gone.md</span><span>C:\notes</span></div>
+        <div class="body"><div class="doc" data-missing="C:\notes\gone.md"></div></div>
+      </div>
+      <div class="taskbar" data-taskbar="yamv"></div>
+    </div>
+    <div class="opt-h second">One file exists, one is missing <small>half scale · the viewer opens with both rows; the one that exists is selected</small></div>
+    <div class="desk half"><div class="scale">
+      <div class="win dark" style="left:60px; top:40px; width:1176px; height:680px">
+        <div class="titlebar" data-ctl><span class="name">plan.md</span><span>C:\notes</span></div>
+        <div class="body"><div class="doc" data-doc></div><div class="side" data-tree></div></div>
+      </div>
+      <div class="taskbar" data-taskbar="yamv"></div>
+    </div></div>
+    <p class="after">Works like a missing file in the session: <b>Locate…</b> can fix a stale shortcut. <b>Worst case:</b> every click on a stale shortcut opens a window that only says the file is gone.</p>
+  </div>
+
+  <!-- B -->
+  <div class="lane">
+    <h2>B · System message box</h2>
+    <div class="opt-h">One missing file <small><code>yamv.exe C:\notes\gone.md</code> · no YAMV window; YAMV exits on OK</small></div>
+    <div class="desk">
+      <div class="msgbox" style="left:143px; top:150px" data-msgbox="C:\notes\gone.md"></div>
+      <div class="taskbar" data-taskbar="box"></div>
+    </div>
+    <div class="opt-h second">One file exists, one is missing <small>half scale · plan.md opens in a viewer; the box names gone.md</small></div>
+    <div class="desk half"><div class="scale">
+      <div class="win dark" style="left:60px; top:40px; width:1176px; height:680px">
+        <div class="titlebar" data-ctl><span class="name">plan.md</span><span>C:\notes</span></div>
+        <div class="body"><div class="doc" data-doc></div></div>
+      </div>
+      <div class="msgbox" style="left:467px; top:290px" data-msgbox="C:\notes\gone.md"></div>
+      <div class="taskbar" data-taskbar="yamv"></div>
+    </div></div>
+    <p class="after">No window to build or theme. <b>Worst case:</b> unthemed, modal, and offers nothing but OK.</p>
+  </div>
+
+  <!-- C -->
+  <div class="lane">
+    <h2>C · A small YAMV dialog</h2>
+    <div class="opt-h">One missing file <small><code>yamv.exe C:\notes\gone.md</code> · Close exits; Locate… opens the pick in a viewer</small></div>
+    <div class="desk">
+      <div class="win dark dlg" style="left:104px; top:120px; width:440px" data-dialog="C:\notes\gone.md"></div>
+      <div class="taskbar" data-taskbar="yamv"></div>
+    </div>
+    <div class="opt-h second">One file exists, one is missing <small>half scale · plan.md opens; the dialog over it names gone.md</small></div>
+    <div class="desk half"><div class="scale">
+      <div class="win dark" style="left:60px; top:40px; width:1176px; height:680px">
+        <div class="titlebar" data-ctl><span class="name">plan.md</span><span>C:\notes</span></div>
+        <div class="body"><div class="doc" data-doc></div></div>
+      </div>
+      <div class="win dark dlg" style="left:428px; top:250px; width:440px" data-dialog="C:\notes\gone.md"></div>
+      <div class="taskbar" data-taskbar="yamv"></div>
+    </div></div>
+    <p class="after">Themed and offers <b>Locate…</b>. <b>Worst case:</b> one more window type to build and keep in step with look.md.</p>
+  </div>
+
+</div>
+
+<script>
+const tpl = (id) => document.getElementById(id).innerHTML;
+const ico = tpl("ico");
+const chevron = `<span class="chev"><svg width="7" height="4"><path d="M0 0h7L3.5 4z" fill="#8b949e"/></svg></span>`;
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+function missingPane(path) {
+  return `<div class="missing-pane"><h4>This file is no longer there</h4><p class="sub">It was moved or deleted:</p>
+    <span class="path">${esc(path)}</span>
+    <div class="btns"><span class="btn">Locate…</span><span class="btn">Remove from list</span></div>
+    <div class="note">YAMV keeps watching, and reopens it if it comes back.</div></div>`;
+}
+function tree() {
+  const row = (name, cls, extra) => `<div class="row ${cls}">${ico}<span class="nm">${name}</span>${extra}</div>`;
+  return `<div class="grp-h">${chevron}C:\\notes<span class="badge">DIR</span></div>`
+    + row("gone.md", "missing", `<span class="missingTag">MISSING</span>`)
+    + row("plan.md", "sel", `<span class="x">×</span>`);
+}
+function msgbox(path) {
+  return `<div class="mb-title">YAMV<span class="spacer"></span><span class="close"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke="#1a1a1a" stroke-width="1"/></svg></span></div>
+    <div class="mb-body">${tpl("err")}<div>File not found:<br>${esc(path)}</div></div>
+    <div class="mb-strip"><span class="ok">OK</span></div>`;
+}
+function dialog(path) {
+  return `<div class="titlebar"><span class="name">YAMV</span>${tpl("ctl-close")}</div>
+    <div class="dlg-body"><h4>Can't open the file</h4><span class="path">${esc(path)}</span><p class="sub">It was moved or deleted.</p>
+    <div class="btns"><span class="btn">Locate…</span><span class="btn">Close</span></div></div>`;
+}
+function taskbar(kind) {
+  const start = `<span class="tile"><svg width="20" height="20" viewBox="0 0 20 20"><g fill="#0a7cd6"><rect x="1" y="1" width="8.4" height="8.4" rx="1"/><rect x="10.6" y="1" width="8.4" height="8.4" rx="1"/><rect x="1" y="10.6" width="8.4" height="8.4" rx="1"/><rect x="10.6" y="10.6" width="8.4" height="8.4" rx="1"/></g></svg></span>`;
+  const search = `<span class="tile"><svg width="18" height="18" viewBox="0 0 18 18"><circle cx="7.5" cy="7.5" r="5.5" fill="none" stroke="#333" stroke-width="1.5"/><path d="M11.5 11.5l5 5" stroke="#333" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;
+  const plain = (c) => `<span class="tile run"><span style="width:22px;height:22px;border-radius:5px;background:${c}"></span></span>`;
+  const yamv = `<span class="tile active"><span class="app-y"><svg width="12" height="14" viewBox="0 0 11 14"><path d="M1 .5h5.5L10 4v9.5H1zM6.5.5V4H10" fill="none" stroke="#4493f8" stroke-width="1.1"/></svg></span></span>`;
+  return start + search + plain("#e8a33c") + plain("#2f8f5a") + (kind ? yamv : "")
+    + `<span class="clock">10:42 AM<br>10/20/2026</span>`;
+}
+
+for (const el of document.querySelectorAll("[data-ctl]")) el.insertAdjacentHTML("beforeend", tpl("ctl"));
+for (const el of document.querySelectorAll("[data-missing]")) el.innerHTML = missingPane(el.dataset.missing);
+for (const el of document.querySelectorAll("[data-doc]")) el.innerHTML = `<div class="scroll">${tpl("doc")}</div>`;
+for (const el of document.querySelectorAll("[data-tree]")) el.innerHTML = tree();
+for (const el of document.querySelectorAll("[data-msgbox]")) el.innerHTML = msgbox(el.dataset.msgbox);
+for (const el of document.querySelectorAll("[data-dialog]")) el.innerHTML = dialog(el.dataset.dialog);
+for (const el of document.querySelectorAll("[data-taskbar]")) el.innerHTML = taskbar(el.dataset.taskbar);
+</script>
+</body>
+</html>
