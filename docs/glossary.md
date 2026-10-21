@@ -5,6 +5,7 @@
 - **Appearance**: Match system, Light or Dark — which half of the current theme family is shown.
 - **Asset cache**: the versioned folder under the local app-data dir (`YAMV/web/{assembly version id}/`) that the document page's template, CSS, JS, fonts and vendored libraries are extracted to, so the page loads over `file://`.
 - **Chrome**: the app's own UI around the document (title bar, sidebar tree, dialogs), drawn with Avalonia from the theme's chrome tokens, as opposed to the document page.
+- **Debounce**: waiting for a burst of events to go quiet before acting once: `DocumentFileWatcher` reports a batch 150 ms after the last event naming an open document, at most 1 s after the first; the session saver and the theme folder watcher wait 500 ms and 300 ms the same way.
 - **Disk-change bar**: the bar under the theme settings window's title bar that says the selected theme's file changed on disk while unsaved edits are open, with Reload and Keep mine; it takes the warning colours when the file no longer parses ([look.md](design/look.md)).
 - **Document surface**: what the window logic sees of the document page (`IDocumentSurface`, implemented by `DocumentView`); tests substitute a fake.
 - **Edit as text**: opening a user theme's `.json` file in the app the system associates with it (`IFileActions.OpenWithDefaultApp`, built by `OpenFileCommand`).
@@ -17,6 +18,7 @@
 - **Inherited value**: a token's value in the token editor when the tab sets none: shown grey, taken from Shared or the defaults (on the Shared tab, from the defaults). Setting it, even to the same value, makes it set; ↺ removes a set value.
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.
 - **Link policy**: the Core rule (`LinkPolicy.Decide`) that turns a clicked link, or a dropped file's path, into a `LinkDecision`: open externally, open as a document, open with the default app, ask first, or ignore.
+- **Live reload**: re-reading and redrawing an open document when its file changes on disk; Core's `DocumentFileWatcher` reports which open documents may have changed, watching each folder once and polling a folder that cannot be watched, where only a changed length or write time counts.
 - **Main instance**: the one YAMV process started with no file arguments. It remembers its open documents between runs; a second no-arg launch brings it to the front and exits.
 - **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted when the main instance stops answering, as its main window closes, before the final session save.
 - **Missing document**: an open document whose file no longer exists, or a path a viewer launch named that does not exist; it stays in the tree, greyed, until removed or until the file comes back.

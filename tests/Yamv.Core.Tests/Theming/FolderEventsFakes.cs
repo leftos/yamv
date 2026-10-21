@@ -47,6 +47,9 @@ internal sealed class FakeFolderArm(List<string> order)
 
     public List<FakeFolderEvents> Armed { get; } = [];
 
+    /// <summary>The source most recently armed for each folder, by the folder the arm function was given.</summary>
+    public Dictionary<string, FakeFolderEvents> ByFolder { get; } = new(StringComparer.Ordinal);
+
     public int Attempts { get; private set; }
 
     public FakeFolderEvents Current => Armed[^1];
@@ -76,6 +79,7 @@ internal sealed class FakeFolderArm(List<string> order)
             ThrowOnStart = startFailures.TryDequeue(out Exception? startFailure) ? startFailure : null,
         };
         Armed.Add(events);
+        ByFolder[folder] = events;
         order.Add("arm");
         OnAttempt?.Invoke(Attempts);
         return events;
