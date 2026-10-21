@@ -3,6 +3,7 @@ obj/
 .tmp/
 .playwright-mcp/
 publish/
+dist/
 .vs/
 .idea/
 *.user

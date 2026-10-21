@@ -4,11 +4,12 @@
     <AssemblyName>yamv</AssemblyName>
     <RootNamespace>Yamv.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\yamv.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="Assets\**" />
+    <AvaloniaResource Include="Assets\**" Exclude="Assets\yamv.ico;Assets\yamv.icns;Assets\yamv.svg" />
   </ItemGroup>
 
   <ItemGroup>

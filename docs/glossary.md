@@ -18,3 +18,4 @@
 - **Tree order**: the order documents appear in the sidebar tree (groups, then folders before files, case-insensitively), which Close, Ctrl+Tab and Ctrl+Shift+Tab follow; it differs from the order documents were opened.
 - **Variant**: the light or dark half of a theme family.
 - **Viewer instance**: a YAMV window started with file arguments (or, on macOS, a Finder open). It shows only those files and remembers nothing.
+- **WebView2 user-data folder**: where WebView2 keeps the document page's browser profile on Windows: `%LOCALAPPDATA%\YAMV\webview2`, shared by every YAMV process, or the folder `WEBVIEW2_USER_DATA_FOLDER` names when set (each hidden run gets its own).

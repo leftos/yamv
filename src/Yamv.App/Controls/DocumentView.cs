@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Avalonia.Controls;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Rendering;
@@ -36,6 +37,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         _log = log;
         _templateUri = WebAssets.TemplateUri(log);
         _webView = new NativeWebView();
+        _webView.EnvironmentRequested += OnEnvironmentRequested;
         _webView.AdapterCreated += (_, _) => WebView2Accelerators.Disable(_webView.TryGetPlatformHandle(), _log);
         _webView.AdapterDestroyed += OnAdapterDestroyed;
         _webView.NavigationStarted += OnNavigationStarted;
@@ -295,6 +297,30 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     }
 
     private static string Truncate(string script) => script.Length <= 120 ? script : script[..120] + "…";
+
+    /// <summary>
+    /// Keeps the browser's user data in <c>LocalApplicationData/YAMV/webview2</c>, beside the asset cache and shared by
+    /// every YAMV process, rather than in a folder next to the executable. A non-empty <c>WEBVIEW2_USER_DATA_FOLDER</c>
+    /// wins, so a hidden run can keep a profile of its own; it is passed on explicitly, since Avalonia's WebView2
+    /// adapter does not apply that variable itself.
+    /// </summary>
+    private static void OnEnvironmentRequested(object? sender, WebViewEnvironmentRequestedEventArgs e)
+    {
+        switch (e)
+        {
+            case WindowsWebView2EnvironmentRequestedEventArgs windows:
+                windows.UserDataFolder = WindowsUserDataFolder();
+                break;
+        }
+    }
+
+    private static string WindowsUserDataFolder()
+    {
+        string? overridden = Environment.GetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER");
+        return string.IsNullOrEmpty(overridden)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YAMV", "webview2")
+            : overridden;
+    }
 
     private void OnAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
     {

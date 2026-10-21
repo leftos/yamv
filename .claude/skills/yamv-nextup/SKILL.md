@@ -42,7 +42,7 @@ test mode: stable
 ## Traps
 
 - A routed gate run brings back only changed files, and a `--no-build` test after a routed build drops `--no-build` and builds on the builder.
-- A new hidden run must wait for the previous run's `msedgewebview2` processes to exit (they share the user-data folder), or use a per-run user-data folder.
+- `tools/dev/run-hidden.ps1` gives each hidden run its own WebView2 user-data folder under `.tmp/webview2/` (through `WEBVIEW2_USER_DATA_FOLDER`); any other hidden launch must set that variable too, or it joins the owner's `%LOCALAPPDATA%\YAMV\webview2` browser process on another desktop. The per-run folders are never pruned.
 - System.Text.Json source generation: members absent from the JSON arrive as their type defaults, not as the record initializers (`SessionStore.Normalize` repairs them).
 
 ## Concurrency

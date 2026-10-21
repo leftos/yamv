@@ -15,6 +15,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Change how a document looks or behaves in the page (rendering, find, links, images) | `src/Yamv.App/Web/yamv.js` → `Web/yamv.css` → `Web/template.html` → `src/Yamv.App/Controls/DocumentView.cs` → `tools/dev/page-check/` | |
 | Change the window's view model (selection, rendering, session restore, shortcuts' commands) | `src/Yamv.App/ViewModels/DocumentWindowViewModel.cs` → `src/Yamv.Core/Documents/DocumentWindowState.cs` → `tests/Yamv.App.Tests/ViewModels/` | |
 | Change how a theme reaches the window chrome | `src/Yamv.App/Services/ThemeBridge.cs` → `src/Yamv.Core/Theming/ChromePalette.cs` → `tests/Yamv.App.Tests/Services/ThemeBridgeTests.cs` | [themes.md](design/themes.md) |
+| Change how YAMV is built, published, packaged or run in CI, or its app icon | `scripts/publish.ps1` → `scripts/make-app.sh` → `.github/workflows/ci.yml` → `src/Yamv.App/Yamv.App.csproj` → `tools/dev/make-icons.py` → `src/Yamv.App/Assets/` | README "Building and packaging" |
 | Change what `--register` / `--unregister` writes to the Windows registry | `src/Yamv.Core/Registration/WindowsFileAssociation.cs` → `RegistrationResult.cs` → `tests/Yamv.Core.Tests/Registration/` | [v1-build.md](plans/v1-build.md) step 7 |
 | Change how themes are listed, imported, saved or deleted | `src/Yamv.Core/Theming/ThemeCatalog.cs` → `ThemeIds.cs` → `tests/Yamv.Core.Tests/Theming/ThemeCatalogTests.cs` | [themes.md](design/themes.md) |
 

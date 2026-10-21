@@ -7,9 +7,11 @@
 
         pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -Out .tmp/shot.png
 
-    Before it starts yamv.exe it waits for the msedgewebview2 processes of a previous run to exit, since a new run
-    that starts beside them shares their WebView2 user data folder. It captures the window with capture-window.ps1,
-    stops yamv.exe, waits for its msedgewebview2 processes again, and prints the part of the YAMV log
+    Before it starts yamv.exe it waits for the msedgewebview2 processes of a previous run to exit. Each run gets a
+    fresh WebView2 user data folder, .tmp\webview2\<run stamp> under the repo, through WEBVIEW2_USER_DATA_FOLDER, so a
+    hidden run never joins the browser of a YAMV running on the owner's desktop. It waits for the harness's
+    "Harness: showing" log line (a fresh profile starts slowly), captures the window with capture-window.ps1, stops
+    yamv.exe, waits for its msedgewebview2 processes again, and prints the part of the YAMV log
     (%APPDATA%\YAMV\logs\yamv.log) written since it started.
 
 .PARAMETER ArgLine
@@ -19,7 +21,7 @@
     The PNG file to write.
 
 .PARAMETER Wait
-    Seconds between starting yamv.exe and the capture. Default 8.
+    The most seconds to wait for the "Harness: showing" log line before capturing anyway. Default 30.
 
 .PARAMETER WebViewTimeoutSeconds
     How long to wait for msedgewebview2 processes to exit, before and after the run. Default 15.
@@ -31,7 +33,7 @@
 param(
     [string] $ArgLine = '',
     [Parameter(Mandatory)] [string] $Out,
-    [int] $Wait = 8,
+    [int] $Wait = 30,
     [int] $WebViewTimeoutSeconds = 15
 )
 
@@ -57,6 +59,37 @@ function Wait-WebViewExit {
     Write-Warning "msedgewebview2 processes of a YAMV run were still running after $TimeoutSeconds s."
 }
 
+function Read-LogSince {
+    param([long] $Offset)
+
+    if (-not (Test-Path -LiteralPath $log)) {
+        return ''
+    }
+    $stream = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite')
+    try {
+        [void]$stream.Seek($Offset, 'Begin')
+        $reader = New-Object IO.StreamReader $stream
+        return $reader.ReadToEnd()
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Wait-HarnessShowing {
+    param([long] $Offset, [System.Diagnostics.Process] $Process, [int] $TimeoutSeconds)
+
+    $until = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $until -and -not $Process.HasExited) {
+        if ((Read-LogSince -Offset $Offset) -match 'Harness: showing') {
+            Start-Sleep -Seconds 1
+            return
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    Write-Warning "No 'Harness: showing' log line after $TimeoutSeconds s; capturing anyway."
+}
+
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "$exe does not exist; build first: dotnet build Yamv.slnx -c Release"
 }
@@ -67,9 +100,13 @@ $startArgs = @{ FilePath = $exe; PassThru = $true }
 if ($ArgLine) {
     $startArgs.ArgumentList = $ArgLine
 }
+$userData = Join-Path $root ".tmp\webview2\$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')"
+New-Item -ItemType Directory -Path $userData | Out-Null
+$env:WEBVIEW2_USER_DATA_FOLDER = $userData
+Write-Output "WebView2 user data folder: $userData"
 $process = Start-Process @startArgs
 try {
-    Start-Sleep -Seconds $Wait
+    Wait-HarnessShowing -Offset $start -Process $process -TimeoutSeconds $Wait
     & $capture -ProcessId $process.Id -Out $Out
     Write-Output "pid=$($process.Id) exited=$($process.HasExited)"
 }
@@ -81,12 +118,4 @@ finally {
 if (-not (Test-Path -LiteralPath $log)) {
     throw "The run wrote no log at $log."
 }
-$stream = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite')
-try {
-    [void]$stream.Seek($start, 'Begin')
-    $reader = New-Object IO.StreamReader $stream
-    Write-Output $reader.ReadToEnd()
-}
-finally {
-    $stream.Dispose()
-}
+Write-Output (Read-LogSince -Offset $start)
