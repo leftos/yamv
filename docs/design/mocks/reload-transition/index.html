@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV reload transition</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1600px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 12px; font-size: 15.5px; max-width: 1480px; line-height: 1.5; }
+p.page code { font: 12.5px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+.anno-key { display: inline-block; width: 22px; height: 12px; border: 2px dashed #ffb27a; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+section { margin: 36px 0 0; padding-top: 28px; border-top: 1px solid rgba(255,255,255,.28); }
+
+/* ---------- lanes side by side; the left column names the row ---------- */
+.grid { display: grid; column-gap: 24px; row-gap: 16px; align-items: start; }
+.lane-h { padding-bottom: 4px; }
+.lane-h h3 { font: 600 16.5px "Inter V"; color: #fff; margin: 0 0 4px; }
+.lane-h p.cap { color: #f1f3f5; font-size: 13px; margin: 0 0 4px; line-height: 1.42; }
+.lane-h p.worst { color: #fff; font-size: 13px; margin: 0; line-height: 1.42; }
+.lane-h p.worst b { font-weight: 650; }
+.strip-h { grid-column: 1 / -1; font: 600 11.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin-top: 10px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,.3); }
+.t { border-left: 3px solid rgba(255,255,255,.4); padding: 2px 0 4px 10px; }
+.t b { display: block; font: 700 21px "Inter V"; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.t span { display: block; font-size: 12.5px; color: #eef0f2; line-height: 1.38; margin-top: 3px; }
+.cell { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.fcap { color: #f1f3f5; font-size: 12.5px; margin: 0; line-height: 1.4; }
+.fcap b { color: #fff; }
+.zoom { width: max-content; flex: none; }
+
+/* ---------- timeline under each live lane ---------- */
+.tl { width: 630px; }
+.track { position: relative; height: 26px; display: flex; border-radius: 5px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }
+.z { display: grid; place-items: center; font: 600 11.5px "Inter V"; color: #fff; white-space: nowrap; letter-spacing: .01em; }
+.z.pre { width: 38.4615%; background: rgba(255,255,255,.16); }
+.z.mid { width: 15.3846%; background: rgba(255,255,255,.16); box-shadow: inset 2px 0 0 #fff, inset -2px 0 0 #fff; }
+.z.mid.blank { background: repeating-linear-gradient(135deg, rgba(255,255,255,.34) 0 5px, rgba(255,255,255,.06) 5px 10px); }
+.z.post { flex: 1; background: rgba(255,255,255,.3); }
+.ph { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: #ffb27a; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.ticks { position: relative; height: 18px; font: 600 11.5px "Inter V"; color: #fff; }
+.ticks span { position: absolute; top: 3px; transform: translateX(-50%); white-space: nowrap; }
+.tlcap { margin: 4px 0 0; font: 600 13.5px "Inter V"; color: #fff; }
+.tlcap i { font-style: normal; color: #e3e6e9; font-weight: 500; }
+
+/* ---------- the app window: every colour is a Studio token ---------- */
+.win { position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 10px; flex: none;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-family: "Inter V", sans-serif; font-size: 13px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; white-space: nowrap; position: relative; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--yamv-text-muted); margin-right: 6px; flex: none; }
+.body { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+.layer { position: absolute; left: 0; right: 0; top: 0; }
+.col { box-sizing: content-box; max-width: 800px; margin: 0 auto; padding: 36px 40px 64px; }
+.side { flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 12px 8px; overflow: hidden; }
+
+/* document */
+.md { font-family: "Inter V", sans-serif; font-size: 15.5px; line-height: 1.62; color: var(--yamv-text); }
+.md h1 { font-weight: 700; font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .5em; color: var(--yamv-heading); }
+.md p { margin: 0 0 1em; }
+.md code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md .chg { border-radius: 3px; outline: 2px dashed transparent; outline-offset: 3px; background: transparent; transition: outline-color .5s, background-color .5s; }
+.win.hl .chg { outline-color: var(--anno); background: var(--anno-soft); transition: none; }
+
+/* the rendered Mermaid diagram */
+.diagram { margin: 0 0 1.1em; padding: 14px 10px; border: 1px solid var(--yamv-code-line); border-radius: 8px; display: flex; justify-content: center; }
+.diagram svg { display: block; overflow: visible; }
+.diagram .nd { fill: var(--yamv-code-background); stroke: var(--yamv-accent); stroke-width: 1.3; }
+.diagram .nd.mid { stroke: var(--yamv-text-muted); }
+.diagram text { fill: var(--yamv-text); font: 500 12.5px "Inter V"; text-anchor: middle; dominant-baseline: middle; }
+.diagram text.sub { fill: var(--yamv-text-muted); font: 11px "JetBrains Mono V"; }
+.diagram .ed { stroke: var(--yamv-text-muted); stroke-width: 1.4; fill: none; }
+.diagram .ah { fill: var(--yamv-text-muted); }
+
+/* tree */
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--yamv-text); white-space: nowrap; }
+.grp-h .chev { width: 10px; color: var(--yamv-text-muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; font-size: 13px; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--yamv-text-muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+
+/* ---------- annotations: not UI ---------- */
+.note { position: absolute; z-index: 7; color: var(--anno); background: var(--anno-band); border: 1.5px solid var(--anno); border-radius: 6px; font: 650 15px "Inter V"; padding: 3px 9px; white-space: nowrap; right: 14px; top: 40px; }
+.note[hidden] { display: none; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: live reload, what does the window show while a saved page renders?</h1>
+<p class="page">When the open file is saved, the page gets the new HTML and renders it again; math (KaTeX) and Mermaid diagrams render after the HTML is in. Today the document is hidden for that whole render (<code>yamv.js:300</code> adds <code>yamv-pending</code>, <code>:331</code> removes it; <code>yamv.css:77</code> is <code>visibility: hidden</code>). The other way keeps the old page up until the new one is done, then swaps in one frame.</p>
+<p class="page">Each window is a Studio main window, 700 × 420, shown at 90%. The live rows loop at real speed: the file is saved, the render takes 400 ms (a typical Mermaid render), then the new page shows; each loop saves twice, so every change you see is a save. The orange bar on the timeline is now. <span class="anno-key"></span>Orange marks are annotations, not UI: the dashed box marks the line the save changed.</p>
+
+<template id="ctl"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<section><div id="q"></div></section>
+
+<script>
+const LIGHT = { pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  codeBackground: "#f6f8fa", codeLine: "#e4e8ec" };
+const DARK = { pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  codeBackground: "#161b22", codeLine: "#262c34" };
+/* not tokens: the annotation colours */
+const EXTRA = {
+  light: "--anno:#d9480f;--anno-soft:rgba(217,72,15,.16);--anno-band:rgba(255,255,255,.94)",
+  dark: "--anno:#ff922b;--anno-soft:rgba(255,146,43,.2);--anno-band:rgba(15,19,24,.94)",
+};
+const T = { light: LIGHT, dark: DARK };
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (th) => Object.entries(T[th]).map(([k, v]) => `${kebab(k)}:${v}`).join(";") + ";" + EXTRA[th];
+
+const CTL = document.getElementById("ctl").innerHTML;
+const GLYPH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICO = `<svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+
+/* ---------- the document: v1 and v2 differ in one line ---------- */
+const node = (x, label, sub, cls = "") => `<rect class="nd ${cls}" x="${x}" y="6" width="112" height="50" rx="7"/><text x="${x + 56}" y="${sub ? 24 : 31}">${label}</text>${sub ? `<text class="sub" x="${x + 56}" y="42">${sub}</text>` : ""}`;
+const edge = (x1, x2) => `<path class="ed" d="M${x1} 31H${x2 - 7}"/><path class="ah" d="M${x2} 31l-8-4.5v9z"/>`;
+const DIAGRAM = `<div class="diagram"><svg width="400" height="62" viewBox="0 0 400 62">
+  ${node(0, "Editor saves", "MAIN.md")}${edge(112, 144)}${node(144, "Watcher", "150 ms", "mid")}${edge(256, 288)}${node(288, "Page renders", "KaTeX, Mermaid")}
+</svg></div>`;
+const LINE = {
+  v1: `Saves from any editor reload the page, <span class="chg">including ones that write a temporary file first.</span>`,
+  v2: `Saves from any editor reload the page, <span class="chg">including Vim, which renames a backup over the file.</span>`,
+};
+const doc = (v) => `<h1>Live reload</h1>
+<p>YAMV watches the folder of every open document and renders a changed file again in place.</p>
+${DIAGRAM}
+<p>${LINE[v]}</p>
+<p>The host sends the new HTML with the last scroll position, and the page restores it before it is shown.</p>`;
+
+/* ---------- tree ---------- */
+const row = (name, cls = "") => `<div class="row ${cls}">${ICO}<span class="nm">${name}</span></div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+const head = (name, badge) => `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge">${badge}</span></div>`;
+const TREE = `<div class="grp">${head("yamv", "git")}${row("README.md")}${folder("docs/plans")}${row("MAIN.md", "in")}${row("live-reload.md", "in sel")}${row("v1-build.md", "in")}</div>
+<div class="grp">${head("yaat", "git")}${folder("docs")}${row("ARCHITECTURE.md", "in")}</div>`;
+
+/* ---------- window: both versions are laid out; the state picks what shows ---------- */
+function win(lane, theme) {
+  return `<div class="win" data-lane="${lane}" style="width:700px;height:420px;${vars(theme)}">
+    <div class="titlebar"><span class="name">live-reload.md</span><span>yamv / docs / plans</span><span class="spacer"></span><span class="wbtn">${GLYPH}</span>${CTL}</div>
+    <div class="body"><div class="pane">
+      <div class="layer col md" data-v="v1">${doc("v1")}</div>
+      <div class="layer col md" data-v="v2">${doc("v2")}</div>
+      <div class="note" hidden></div>
+    </div><div class="side" style="width:200px">${TREE}</div></div></div>`;
+}
+
+/* one save: the page shows `from` until SAVE, renders until SHOWN, then shows `to`; the changed line is marked until HL_END */
+const HALF = 2600, SAVE = 1000, SHOWN = 1400, HL_END = 2300;
+const NOTES = {
+  a: { pending: "rendering: document hidden", shown: "shown" },
+  b: { pending: "rendering off screen: old page", shown: "swapped in" },
+};
+function phaseAt(t) {
+  if (t < SAVE) return "before";
+  if (t < SHOWN) return "pending";
+  return t < HL_END ? "shown" : "after";
+}
+function apply(w, from, to, phase) {
+  const lane = w.dataset.lane;
+  const visible = phase === "before" ? from : phase === "pending" ? (lane === "b" ? from : null) : to;
+  for (const layer of w.querySelectorAll(".layer")) layer.style.visibility = layer.dataset.v === visible ? "visible" : "hidden";
+  w.classList.toggle("hl", phase === "shown");
+  const n = w.querySelector(".note");
+  const text = NOTES[lane][phase];
+  n.hidden = !text;
+  if (text) n.textContent = text;
+}
+
+/* ---------- timeline ---------- */
+const pct = (ms) => `${(ms / HALF) * 100}%`;
+function timeline(lane) {
+  const mid = lane === "a" ? `<div class="z mid blank">blank</div>` : `<div class="z mid">old page</div>`;
+  const cap = lane === "a" ? `save → 400 ms <i>(blank)</i> → shown` : `save → 400 ms <i>(old page)</i> → shown`;
+  return `<div class="tl"><div class="track"><div class="z pre">old page</div>${mid}<div class="z post">new page</div><div class="ph" style="left:0"></div></div>
+    <div class="ticks"><span style="left:${pct(SAVE)}">save</span><span style="left:${pct(SHOWN)}">+400 ms</span></div>
+    <p class="tlcap">${cap}</p></div>`;
+}
+
+/* ---------- the grid ---------- */
+const LANES = [
+  { title: "A · Blank while it renders (today)",
+    cap: "The document is hidden from the moment the new HTML arrives until math and diagrams are done, then the new page is shown.",
+    worst: "every save of a page with diagrams blinks for the render time." },
+  { title: "B · Old page until the new one is ready",
+    cap: "The old page stays up while the new one renders off screen; when it is done, it replaces the old one in a single frame.",
+    worst: "for those 400 ms the page shows the old text; a second save inside the render restarts it." },
+];
+const Z = 0.9, ZF = 0.6;
+const t = (b, s) => `<div class="t"><b>${b}</b><span>${s}</span></div>`;
+const cell = (html, z, cap) => `<div class="cell"><div class="zoom" style="zoom:${z}">${html}</div>${cap ?? ""}</div>`;
+const frozen = (lane, phase) => win(lane, "light").replace('class="win"', `class="win frozen" data-phase="${phase}"`);
+const FROZEN_ROWS = [
+  { b: "−1 s", s: "Before the save.", phase: "before", caps: ["The page as it was.", "The page as it was."] },
+  { b: "0–400 ms", s: "Saved; math and diagrams render.", phase: "pending", caps: ["<b>Blank</b>: the title bar and tree stay, the document is gone.", "<b>The old page</b>, still readable; the new one renders off screen."] },
+  { b: "400 ms", s: "The render is done.", phase: "shown", caps: ["The new page appears.", "The new page replaces the old one in one frame."] },
+];
+function build() {
+  let h = `<div class="grid" style="grid-template-columns:150px repeat(2, minmax(0,1fr))"><div></div>`;
+  h += LANES.map((l) => `<div class="lane-h"><h3>${l.title}</h3><p class="cap">${l.cap}</p><p class="worst"><b>Worst case:</b> ${l.worst}</p></div>`).join("");
+  for (const theme of ["light", "dark"]) {
+    h += `<div class="strip-h">Studio ${theme} · live, looping one save</div>`;
+    h += t("Live", `Saved every 2.6 s; the render takes 400 ms.`);
+    h += ["a", "b"].map((lane) => cell(win(lane, theme), Z, timeline(lane))).join("");
+  }
+  h += `<div class="strip-h">Studio light · frozen frames of one save</div>`;
+  for (const r of FROZEN_ROWS) {
+    h += t(r.b, r.s);
+    h += ["a", "b"].map((lane, i) => cell(frozen(lane, r.phase), ZF, `<p class="fcap">${r.caps[i]}</p>`)).join("");
+  }
+  return h + "</div>";
+}
+document.getElementById("q").innerHTML = build();
+
+for (const w of document.querySelectorAll(".win.frozen")) apply(w, "v1", "v2", w.dataset.phase);
+const live = Array.from(document.querySelectorAll(".win:not(.frozen)"));
+const heads = Array.from(document.querySelectorAll(".ph"));
+const start = performance.now();
+function tick(now) {
+  const elapsed = (now - start) % (2 * HALF);
+  const second = elapsed >= HALF;
+  const tHalf = elapsed - (second ? HALF : 0);
+  const phase = phaseAt(tHalf);
+  for (const w of live) apply(w, second ? "v2" : "v1", second ? "v1" : "v2", phase);
+  for (const p of heads) p.style.left = pct(tHalf);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
