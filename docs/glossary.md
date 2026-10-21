@@ -1,5 +1,6 @@
 # Glossary
 
+- **Abandoned request**: an instance request nobody has begun that the server ended itself: its launcher hung up, the reply bound passed, the server is stopping, or the handler threw. `InstanceRequest.TryBegin` then returns false, so the app never carries it out; a late `Complete` is ignored.
 - **Activation gate**: holds an `activate` request that arrives before the main window exists and delivers it once the window is shown, coalescing duplicates.
 - **App default**: the content width a document uses when no folder at or above it has its own width; set from the popover's All documents segment ([content-width.md](design/content-width.md)).
 - **Appearance**: Match system, Light or Dark — which half of the current theme family is shown.
@@ -13,6 +14,7 @@
 - **Group**: a top-level node of the sidebar tree, one per group root: a git repo or a folder.
 - **Group root**: the folder a document is grouped under in the tree: its git work-tree root, or its parent folder when it is not in a repo.
 - **Half**: the light or dark part of a theme family: its `light` or `dark` object, with that half's tokens and css ([themes.md](design/themes.md)).
+- **Hang-up watch**: the pending one-byte read the instance server keeps on a connection while it waits for a request's reply; it ends with 0 bytes (or an error) when the launcher closes its end, and the request is then abandoned.
 - **Harness window**: the development window (`HarnessWindow`) that hosts a bare `DocumentView` with `--theme`, `--find`, `--scroll` and similar switches; opened instead of the main window when `YAMV_DEV_HARNESS=1`.
 - **Import notice**: the modal an Import shows before copying a theme file, with a card for the file (name, author, halves, whether it has css, its path, its errors and warnings) and the warning about css that loads from the web; the card is read by `ThemeCatalog.Inspect` into a `ThemeInspection` ([themes.md](design/themes.md)).
 - **Inherited value**: a token's value in the token editor when the tab sets none: shown grey, taken from Shared or the defaults (on the Shared tab, from the defaults). Setting it, even to the same value, makes it set; ↺ removes a set value.
@@ -23,12 +25,14 @@
 - **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted when the main instance stops answering, as its main window closes, before the final session save.
 - **Missing document**: an open document whose file no longer exists, or a path a viewer launch named that does not exist; it stays in the tree, greyed, until removed or until the file comes back.
 - **Missing row**: the greyed "Missing on disk" row the theme settings window keeps for the theme in use whose file was deleted or renamed outside the app, in its last loaded version; only Save (which writes the file again) and Revert are on ([look.md](design/look.md)).
+- **Open message**: what a launch with files sends the running app: `open`, a space, then a JSON array of full paths (`OpenMessage`); the app answers with one reply (`opened`, `refused` or `closing`) on the same connection.
 - **Open with registration**: what `yamv --register` writes on Windows so YAMV appears in Explorer's Open with for `.md` and `.markdown`: the `YAMV.Markdown` ProgID, an `OpenWithProgids` entry per extension and the `Applications\yamv.exe` key, all under the current user. It never sets the default handler.
 - **Persist**: a window's flag saying its documents, selection and layout are saved to the session file; true only for the main instance's window.
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.
+- **Reply bound**: how long the instance server keeps a request's connection open for the app's reply, 10 s (`InstanceCoordinator.ReplyBound`); past it the request is abandoned and the connection closed with no reply. The launcher's open deadline stays below it.
 - **Reveal**: showing a path in the platform's file manager from a tree menu: a file is shown selected in Explorer or Finder, a folder or group root is opened, and a missing document opens its nearest folder that still exists (`RevealCommand`).
 - **Saved for**: the content-width popover's segmented control: the folders a width can be saved for, deepest first, then All documents (`WidthScopes`, [content-width.md](design/content-width.md)).
-- **Second launch**: a no-argument `yamv` start while another process holds the main-instance lock; it asks the main instance to come forward and exits 0, brings that window forward itself and exits 1 when the signal fails, or, with no pid file, waits up to 5 s for the lock and starts as the main instance (`SecondLaunch`).
+- **Second launch**: a no-argument `yamv` start while another process holds the main-instance lock; it asks the main instance to come forward and exits 0, brings that window forward itself and exits 1 when the signal fails, or, with no pid file, waits up to 5 s for the lock and starts as the main instance (`SecondLaunch`). `SecondLaunch.OpenAsync` also covers a launch with files: it sends the open message and waits for the app's reply (the App does not use it yet; it still starts a file launch as its own viewer process).
 - **Settings file**: `settings.json`, the app-wide settings shared by every window and process (`SettingsStore`, saved off the UI thread by `SettingsWriter`); widths stay in `widths.json`, and the main window's documents and layout in `session.json`.
 - **Sidebar**: the pane on the window's right holding the tree of open documents.
 - **Text space**: the room a pane leaves for the document's text: the pane width less the page's 88 px of side padding (`ContentWidth.TextSpace`); a content width is compared against it ([content-width.md](design/content-width.md)).
