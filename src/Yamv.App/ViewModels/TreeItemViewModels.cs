@@ -122,6 +122,10 @@ public sealed partial class DocumentItemViewModel : TreeItemViewModel
     [ObservableProperty]
     public partial bool IsMissing { get; set; }
 
+    /// <summary>True when the document exists but its last read failed, so the row shows a warning glyph.</summary>
+    [ObservableProperty]
+    public partial bool IsUnreadable { get; set; }
+
     /// <summary>Always false: a document row has no children. Setting it changes nothing.</summary>
     public override bool IsExpanded
     {

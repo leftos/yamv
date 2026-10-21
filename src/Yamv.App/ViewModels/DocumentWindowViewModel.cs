@@ -27,6 +27,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private readonly IAppLog _log;
     private readonly MarkdownRenderer _renderer = new();
     private readonly Dictionary<string, double> _scrollPositions;
+    private readonly HashSet<string> _unreadable;
     private readonly HashSet<Task> _renders = [];
     private readonly Dictionary<string, bool> _folderExpansion;
     private readonly ITimer _missingTimer;
@@ -63,6 +64,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _readText = readText;
         _log = log;
         _scrollPositions = new Dictionary<string, double>(state.PathComparer);
+        _unreadable = new HashSet<string>(state.PathComparer);
         _folderExpansion = new Dictionary<string, bool>(state.PathComparer);
         _state.Changed += OnStateChanged;
         _surface.ScrollChanged += OnScrollChanged;
@@ -125,6 +127,14 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>True when the selected document is no longer on disk, so the window shows the missing pane instead of the page.</summary>
     [ObservableProperty]
     public partial bool SelectedIsMissing { get; private set; }
+
+    /// <summary>True when the selected document exists but cannot be read, so the window shows the can't-read pane instead of the page.</summary>
+    [ObservableProperty]
+    public partial bool SelectedIsUnreadable { get; private set; }
+
+    /// <summary>Why the selected document cannot be read, as the can't-read pane says it; empty when it can.</summary>
+    [ObservableProperty]
+    public partial string UnreadableReason { get; private set; } = "";
 
     /// <summary>Closes the selected document.</summary>
     [RelayCommand]
@@ -346,11 +356,23 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
     private void RecheckMissing()
     {
-        if (!_disposed)
+        if (_disposed)
         {
-            _state.RefreshMissing();
+            return;
+        }
+
+        _state.RefreshMissing();
+        if (SelectedIsUnreadable && !RenderInFlight)
+        {
+            RenderSelection();
         }
     }
+
+    /// <summary>
+    /// True while a render this window started has not finished. A retry tick waits for it, so a read slower than the tick is
+    /// never cancelled by a newer one and never parks a second pool thread; Retry and the reload shortcut still read at once.
+    /// </summary>
+    private bool RenderInFlight => _renders.Any(render => !render.IsCompleted);
 
     private void Sync()
     {
@@ -358,9 +380,17 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         try
         {
             string? selected = _state.SelectedPath;
-            if (selected is not null && !SamePath(selected, SelectedPath))
+            if (!SamePath(selected, SelectedPath))
             {
-                ExpandFoldersAbove(_state.Tree.Items, selected);
+                if (SelectedPath is string previouslySelected)
+                {
+                    ClearUnreadable(previouslySelected);
+                }
+
+                if (selected is not null)
+                {
+                    ExpandFoldersAbove(_state.Tree.Items, selected);
+                }
             }
 
             GroupNode? group = selected is null ? null : _state.GroupOf(selected);
@@ -385,6 +415,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             SidebarHidden = _state.SidebarHidden;
             IsEmpty = _state.IsEmpty;
             SelectedIsMissing = selected is not null && IsMissing(selected);
+            if (SelectedIsMissing && selected is not null)
+            {
+                ClearUnreadable(selected);
+            }
+
+            SelectedIsUnreadable = selected is not null && _unreadable.Contains(selected);
             SelectedItem = _documentRows.FirstOrDefault(row => row.IsSelected);
         }
         finally
@@ -402,7 +438,10 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             case FolderItem folder:
                 return new FolderItemViewModel(folder, Rows(folder.Children, selected), IsFolderExpanded(folder.Path), SetFolderExpanded);
             case DocumentItem document:
-                var row = new DocumentItemViewModel(document, SamePath(document.Path, selected), _state.Close, _state.CloseGroup);
+                var row = new DocumentItemViewModel(document, SamePath(document.Path, selected), _state.Close, _state.CloseGroup)
+                {
+                    IsUnreadable = _unreadable.Contains(document.Path),
+                };
                 _documentRows.Add(row);
                 return row;
             default:
@@ -473,6 +512,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
                     break;
                 case (DocumentItem document, DocumentItemViewModel row):
                     row.IsMissing = document.IsMissing;
+                    row.IsUnreadable = _unreadable.Contains(document.Path);
                     row.IsSelected = SamePath(document.Path, selected);
                     break;
                 default:
@@ -536,12 +576,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
         catch (IOException exception)
         {
-            OnReadFailed(path, exception);
+            OnReadFailed(path, exception, generation);
             return;
         }
         catch (UnauthorizedAccessException exception)
         {
-            OnReadFailed(path, exception);
+            OnReadFailed(path, exception, generation);
             return;
         }
 
@@ -550,12 +590,13 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        ClearUnreadable(path);
         double scroll = _scrollPositions.GetValueOrDefault(path);
         _shownPath = path;
         await _surface.ShowAsync(document, path, group.Path, scroll, fragment: null);
     }
 
-    private void OnReadFailed(string path, Exception exception)
+    private void OnReadFailed(string path, Exception exception, int generation)
     {
         if (_disposed)
         {
@@ -563,9 +604,47 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
 
         _state.RefreshMissing();
-        if (!IsMissing(path))
+        if (generation != _renderGeneration || !SamePath(path, _state.SelectedPath))
         {
-            _log.LogWarning($"Cannot read the document {path}; the window keeps showing what it showed.", exception);
+            return;
+        }
+
+        if (IsMissing(path))
+        {
+            ClearUnreadable(path);
+            return;
+        }
+
+        if (_unreadable.Add(path))
+        {
+            _log.LogWarning($"Cannot read the document {path}.", exception);
+        }
+
+        SetRowUnreadable(path, true);
+        SelectedIsUnreadable = true;
+        UnreadableReason = ReadFailure.ReasonFor(exception);
+    }
+
+    /// <summary>Forgets that <paramref name="path"/> cannot be read: its row's warning glyph goes, and the pane when it is selected.</summary>
+    private void ClearUnreadable(string path)
+    {
+        _unreadable.Remove(path);
+        SetRowUnreadable(path, false);
+        if (SamePath(path, _state.SelectedPath))
+        {
+            SelectedIsUnreadable = false;
+            UnreadableReason = "";
+        }
+    }
+
+    private void SetRowUnreadable(string path, bool unreadable)
+    {
+        foreach (DocumentItemViewModel row in _documentRows)
+        {
+            if (SamePath(row.Path, path))
+            {
+                row.IsUnreadable = unreadable;
+            }
         }
     }
 

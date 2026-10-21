@@ -1,0 +1,104 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  x:Class="Yamv.App.Views.UnreadableDocumentPane"
+  x:DataType="vm:DocumentWindowViewModel"
+>
+  <UserControl.Styles>
+    <Style Selector="Button.pane">
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Padding" Value="12,0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource YamvPageBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Border Padding="40,90">
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="600">
+      <Border
+        Width="44"
+        Height="44"
+        CornerRadius="12"
+        BorderThickness="1.5"
+        BorderBrush="{DynamicResource YamvWarningLine}"
+        Background="{DynamicResource YamvWarningBackground}"
+        HorizontalAlignment="Center"
+        Margin="0,0,0,16"
+      >
+        <Viewbox Width="22" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <Canvas Width="16" Height="16">
+            <Path
+              Data="M8 1.6 15 14H1z"
+              Stroke="{DynamicResource YamvWarning}"
+              StrokeThickness="1.4"
+              StrokeJoin="Round"
+            />
+            <Path Data="M8 6v4" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
+            <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
+          </Canvas>
+        </Viewbox>
+      </Border>
+      <TextBlock
+        Text="This file can't be read"
+        FontSize="17"
+        FontWeight="SemiBold"
+        Foreground="{DynamicResource YamvText}"
+        HorizontalAlignment="Center"
+        TextAlignment="Center"
+        Margin="0,0,0,6"
+      />
+      <Border HorizontalAlignment="Center" Padding="6,2" CornerRadius="4" Background="{DynamicResource YamvChromeBackground}">
+        <SelectableTextBlock
+          x:Name="UnreadablePath"
+          Text="{Binding SelectedPath}"
+          FontFamily="Cascadia Mono, Consolas, Menlo, monospace"
+          FontSize="12"
+          Foreground="{DynamicResource YamvTextSecondary}"
+          TextWrapping="Wrap"
+        />
+      </Border>
+      <TextBlock
+        x:Name="ReasonText"
+        Text="{Binding UnreadableReason}"
+        FontSize="13.5"
+        Foreground="{DynamicResource YamvTextSecondary}"
+        HorizontalAlignment="Center"
+        TextAlignment="Center"
+        TextWrapping="Wrap"
+        Margin="0,12,0,0"
+      />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,20,0,0">
+        <Button
+          x:Name="RetryButton"
+          Classes="pane"
+          Content="Retry"
+          Command="{Binding ReloadCommand}"
+          AutomationProperties.Name="Retry"
+        />
+        <Button
+          x:Name="RemoveButton"
+          Classes="pane"
+          Content="Remove from list"
+          Command="{Binding RemoveMissingCommand}"
+          CommandParameter="{Binding SelectedPath}"
+          AutomationProperties.Name="Remove from list"
+        />
+      </StackPanel>
+      <TextBlock
+        Text="YAMV tries again when the file changes."
+        FontSize="12"
+        Foreground="{DynamicResource YamvTextMuted}"
+        HorizontalAlignment="Center"
+        TextAlignment="Center"
+        Margin="0,12,0,0"
+      />
+    </StackPanel>
+  </Border>
+</UserControl>

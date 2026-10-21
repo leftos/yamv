@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Windows.Input;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -171,6 +172,84 @@ public sealed class MainWindowTests
             Assert.False(fixture.Window.EmptyState.IsVisible);
             Assert.Equal(fixture.Gone, fixture.Window.MissingPane.MissingPath.Text);
             Assert.Contains("It was moved or deleted:", VisibleTexts(fixture.Window.MissingPane));
+        });
+
+    [Fact]
+    public Task Selected_unreadable_document_shows_unreadable_pane_and_marks_its_row() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            fixture.Reader = path =>
+                path == fixture.DocA ? throw new IOException("The file is locked.", unchecked((int)0x80070020)) : File.ReadAllText(path);
+
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            fixture.Settle();
+
+            Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+            Assert.True(fixture.Window.UnreadablePane.IsVisible);
+            Assert.False(fixture.Window.DocumentHost.IsVisible);
+            Assert.False(fixture.Window.MissingPane.IsVisible);
+            Assert.Equal(fixture.DocA, fixture.Window.UnreadablePane.UnreadablePath.Text);
+            List<string> texts = VisibleTexts(fixture.Window.UnreadablePane);
+            Assert.Contains("This file can't be read", texts);
+            Assert.Contains("It is in use by another program.", texts);
+            Assert.Contains("YAMV tries again when the file changes.", texts);
+
+            Panel row = fixture.Row(fixture.DocA);
+            Assert.DoesNotContain("MISSING", VisibleTexts(row));
+            Assert.DoesNotContain("missing", row.Classes);
+            Assert.True(UnreadableGlyph(row).IsEffectivelyVisible);
+            Assert.False(UnreadableGlyph(fixture.Row(fixture.DocB)).IsEffectivelyVisible);
+        });
+
+    [Fact]
+    public Task Retry_on_the_unreadable_pane_shows_the_document_again() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            bool locked = true;
+            fixture.Reader = path => locked ? throw new IOException("The file is locked.", unchecked((int)0x80070020)) : File.ReadAllText(path);
+
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            fixture.Settle();
+            Assert.True(fixture.Window.UnreadablePane.IsVisible);
+
+            locked = false;
+            // A pointer over the pane's buttons hit-tests to the window (their fill is YamvPageBackground, which the test app
+            // never sets), and raising Click does not run a Button's command, so the test runs the command Retry is bound to.
+            ICommand retry = Assert.IsAssignableFrom<ICommand>(fixture.Window.UnreadablePane.RetryButton.Command);
+            retry.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.False(fixture.Window.UnreadablePane.IsVisible);
+            Assert.True(fixture.Window.DocumentHost.IsVisible);
+            Assert.Equal(fixture.DocA, fixture.Surface.Shown[^1].DocumentPath);
+            Assert.False(UnreadableGlyph(fixture.Row(fixture.DocA)).IsEffectivelyVisible);
+        });
+
+    [Fact]
+    public Task Remove_from_list_on_the_unreadable_pane_closes_the_selected_document() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            fixture.Reader = path =>
+                path == fixture.DocA ? throw new IOException("The file is locked.", unchecked((int)0x80070020)) : File.ReadAllText(path);
+
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            fixture.Settle();
+            Assert.True(fixture.Window.UnreadablePane.IsVisible);
+
+            Button remove = fixture.Window.UnreadablePane.RemoveButton;
+            ICommand command = Assert.IsAssignableFrom<ICommand>(remove.Command);
+            command.Execute(remove.CommandParameter);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.DoesNotContain(fixture.DocA, fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+            Assert.False(fixture.Window.UnreadablePane.IsVisible);
+            Assert.True(fixture.Window.DocumentHost.IsVisible);
         });
 
     [Fact]
@@ -630,6 +709,9 @@ public sealed class MainWindowTests
                 .Select(text => text.Text!),
         ];
 
+    private static Viewbox UnreadableGlyph(Panel row) =>
+        row.GetVisualDescendants().OfType<Viewbox>().Single(view => view.Classes.Contains("unreadableGlyph"));
+
     private static IEnumerable<TreeItemViewModel> AllRows(IEnumerable<TreeItemViewModel> rows) =>
         rows.SelectMany(row =>
             row switch
@@ -673,7 +755,7 @@ public sealed class MainWindowTests
                 File.Exists,
                 new GroupingOptions(null, StringComparison.OrdinalIgnoreCase)
             );
-            ViewModel = new DocumentWindowViewModel(State, Surface, File.ReadAllText, new FakeTimeProvider(), Log);
+            ViewModel = new DocumentWindowViewModel(State, Surface, path => Reader(path), new FakeTimeProvider(), Log);
             Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             Window.Closed += (_, _) => IsClosed = true;
         }
@@ -696,6 +778,9 @@ public sealed class MainWindowTests
         public string Design { get; }
 
         public string Plans { get; }
+
+        /// <summary>Reads a document; a test replaces it to make one file fail to read without a real lock.</summary>
+        public Func<string, string> Reader { get; set; } = File.ReadAllText;
 
         public FakeDocumentSurface Surface { get; } = new();
 

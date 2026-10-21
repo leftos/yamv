@@ -104,21 +104,263 @@ public sealed class DocumentWindowViewModelTests
         });
 
     [Theory]
-    [InlineData("io")]
-    [InlineData("access")]
-    public Task Read_error_logs_warning_and_leaves_surface_unchanged(string failure) =>
+    [InlineData("io", ReadFailure.InUseByAnotherProgram)]
+    [InlineData("access", ReadFailure.AccessDenied)]
+    public Task Read_error_logs_warning_and_leaves_surface_unchanged(string failure, string reason) =>
         Headless.RunAsync(async () =>
         {
             using var fixture = new Fixture();
             fixture.Reader = path =>
-                failure == "io" ? throw new IOException($"{path} is locked.") : throw new UnauthorizedAccessException($"{path} is not yours.");
+                failure == "io"
+                    ? throw new IOException($"{path} is locked.", unchecked((int)0x80070020))
+                    : throw new UnauthorizedAccessException($"{path} is not yours.");
 
             fixture.ViewModel.Open([RepoDocA]);
             await fixture.ViewModel.WhenRendersSettled();
 
             Assert.Empty(fixture.Surface.Shown);
             Assert.False(fixture.ViewModel.SelectedIsMissing);
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal(reason, fixture.ViewModel.UnreadableReason);
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+            Assert.Single(fixture.Log.Entries, entry => entry.Level == "warning");
             Assert.Contains(fixture.Log.Entries, entry => entry.Level == "warning" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task Unreadable_document_retried_by_the_timer_logs_no_second_warning() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            int reads = 0;
+            fixture.Reader = _ =>
+            {
+                Interlocked.Increment(ref reads);
+                throw new IOException("The file is locked.", unchecked((int)0x80070020));
+            };
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(3, reads);
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Single(fixture.Log.Entries, entry => entry.Level == "warning");
+        });
+
+    [Fact]
+    public Task Retry_ticks_do_not_restart_a_read_that_is_still_running() =>
+        Headless.RunAsync(async () =>
+        {
+            using var gate = new ManualResetEventSlim();
+            using var secondRead = new ManualResetEventSlim();
+            using var fixture = new Fixture();
+            int reads = 0;
+            fixture.Reader = _ =>
+            {
+                if (Interlocked.Increment(ref reads) == 1)
+                {
+                    throw new IOException("The file is locked.", unchecked((int)0x80070020));
+                }
+
+                secondRead.Set();
+                WaitFor(gate);
+                return "# Read at last";
+            };
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            WaitFor(secondRead);
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            gate.Set();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(2, reads);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            ShownDocument shown = Assert.Single(fixture.Surface.Shown);
+            Assert.Equal(RepoDocA, shown.DocumentPath);
+        });
+
+    [Fact]
+    public Task Slow_failure_of_an_older_render_is_dropped() =>
+        Headless.RunAsync(async () =>
+        {
+            using var gate = new ManualResetEventSlim();
+            using var firstRead = new ManualResetEventSlim();
+            using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            int reads = 0;
+            fixture.Reader = _ =>
+            {
+                if (Interlocked.Increment(ref reads) == 1)
+                {
+                    firstRead.Set();
+                    WaitFor(gate);
+                    throw new IOException("The file is locked.", unchecked((int)0x80070020));
+                }
+
+                return "# Read";
+            };
+            fixture.Surface.OnShown = _ => gate.Set();
+
+            fixture.ViewModel.ReloadCommand.Execute(null);
+            WaitFor(firstRead);
+            fixture.ViewModel.ReloadCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.False(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "warning");
+            Assert.Equal(RepoDocA, fixture.Surface.Shown[^1].DocumentPath);
+        });
+
+    [Fact]
+    public Task Unreadable_document_that_goes_missing_becomes_missing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            fixture.Reader = _ => throw new UnauthorizedAccessException("The file is not yours.");
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+
+            fixture.Absent.Add(RepoDocA);
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.False(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+        });
+
+    [Fact]
+    public Task Closing_another_document_keeps_the_unreadable_row_and_pane() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            fixture.Reader = path => path == RepoDocA ? throw new UnauthorizedAccessException("The file is not yours.") : fixture.Files[path];
+
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+
+            DocumentRow(fixture.ViewModel, RepoDocB).CloseCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal(ReadFailure.AccessDenied, fixture.ViewModel.UnreadableReason);
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+        });
+
+    [Fact]
+    public Task Unreadable_document_read_on_a_later_tick_is_shown() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            bool locked = true;
+            fixture.Reader = path => locked ? throw new IOException("The file is locked.", unchecked((int)0x80070020)) : fixture.Files[path];
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+
+            locked = false;
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal("", fixture.ViewModel.UnreadableReason);
+            Assert.False(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+            ShownDocument shown = Assert.Single(fixture.Surface.Shown);
+            Assert.Equal(RepoDocA, shown.DocumentPath);
+        });
+
+    [Fact]
+    public Task Reload_after_the_read_succeeds_clears_unreadable_and_shows_the_page() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            bool locked = true;
+            fixture.Reader = path => locked ? throw new UnauthorizedAccessException("The file is not yours.") : fixture.Files[path];
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+
+            locked = false;
+            fixture.ViewModel.ReloadCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal("", fixture.ViewModel.UnreadableReason);
+            Assert.False(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+            ShownDocument shown = Assert.Single(fixture.Surface.Shown);
+            Assert.Equal(RepoDocA, shown.DocumentPath);
+        });
+
+    [Fact]
+    public Task Selecting_another_document_clears_the_unreadable_state_and_row_flag() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            fixture.Reader = path => path == RepoDocA ? throw new UnauthorizedAccessException("The file is not yours.") : fixture.Files[path];
+
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal("", fixture.ViewModel.UnreadableReason);
+            Assert.False(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+            Assert.Equal(RepoDocB, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Remove_from_list_closes_the_unreadable_document_and_selects_another() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            fixture.Reader = path => path == RepoDocA ? throw new UnauthorizedAccessException("The file is not yours.") : fixture.Files[path];
+
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.RemoveMissingCommand.Execute(RepoDocA);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.DoesNotContain(RepoDocA, fixture.State.Documents);
+            Assert.Equal(RepoDocB, fixture.ViewModel.SelectedPath);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+        });
+
+    [Fact]
+    public Task Generic_read_failure_shows_the_generic_reason_and_logs_the_message() =>
+        Headless.RunAsync(async () =>
+        {
+            using var fixture = new Fixture();
+            fixture.Reader = _ => throw new IOException("The disk went away.", unchecked((int)0x80070001));
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal(ReadFailure.Unknown, fixture.ViewModel.UnreadableReason);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "warning" && entry.Exception?.Message == "The disk went away.");
         });
 
     [Fact]

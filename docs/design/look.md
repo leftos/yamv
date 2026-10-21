@@ -25,6 +25,7 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
 ## Edge states
 
 - **Missing document** (gone on restore or deleted while open): the row stays, greyed and struck through, with a `MISSING` tag. Selecting it shows "This file is no longer there", its full path, **Locate…** and **Remove from list**, and the note that YAMV keeps watching. If the file reappears, it reopens on its own.
+- **Unreadable document** (the file exists but is locked by another program or access is denied; [mock](mocks/unreadable/index.html), option B): the row stays normal, with a 14x14 warning glyph (tooltip "Can't read this file") and no `MISSING` tag. Selecting it shows a warning mark, "This file can't be read", its full path, the reason ("It is in use by another program.", "Access is denied." or "It could not be read."), **Retry** (the same as Ctrl/Cmd+R), **Remove from list** and the note "YAMV tries again when the file changes." If the file goes missing, the missing pane wins.
 - **Empty main window**: a dashed `md` mark, "No documents open", "Drop markdown files here, or open some. They stay open next time.", an **Open files…** button and the Ctrl/Cmd+O hint.
 - **Find bar**: Ctrl/Cmd+F floats it at the document's top-right, with a field, "n of m", up/down and close. Matches are highlighted and the current one is stronger. Enter and Shift+Enter step through matches; Esc closes and clears.
 
