@@ -20,13 +20,13 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Change how a document looks or behaves in the page (rendering, find, links, images) | `src/Yamv.App/Web/yamv.js` → `Web/yamv.css` → `Web/template.html` → `src/Yamv.App/Controls/DocumentView.cs` → `tools/dev/page-check/` | |
 | Change the window's view model (selection, rendering, session restore, shortcuts' commands) | `src/Yamv.App/ViewModels/DocumentWindowViewModel.cs` → `src/Yamv.Core/Documents/DocumentWindowState.cs` → `tests/Yamv.App.Tests/ViewModels/` | |
 | Change what the main window or viewer window shows (title bar, tree, empty, missing or can't-read state) | `src/Yamv.App/Views/MainWindow.axaml` → `Views/TitleBar.axaml` → `ViewModels/DocumentWindowViewModel.cs` → `src/Yamv.Core/Documents/` → `tests/Yamv.App.Tests/Views/` + `tests/Yamv.Core.Tests/Documents/` | [look.md](design/look.md) |
-| Change how a theme reaches the window chrome | `src/Yamv.App/Services/ThemeBridge.cs` → `src/Yamv.Core/Theming/ChromePalette.cs` → `tests/Yamv.App.Tests/Services/ThemeBridgeTests.cs` | [themes.md](design/themes.md) |
+| Change how a theme reaches the window chrome | `src/Yamv.App/Services/ThemeBridge.cs` → `ThemeBrushes.cs` → `src/Yamv.Core/Theming/ChromePalette.cs` → `tests/Yamv.App.Tests/Services/ThemeBridgeTests.cs` + `ThemeBrushesTests.cs` | [themes.md](design/themes.md) |
 | Change how YAMV is built, published, packaged or run in CI, or its app icon | `scripts/publish.ps1` → `scripts/make-app.sh` → `.github/workflows/ci.yml` → `src/Yamv.App/Yamv.App.csproj` → `tools/dev/make-icons.py` → `src/Yamv.App/Assets/` | README "Building and packaging" |
 | Change what `--register` / `--unregister` writes to the Windows registry | `src/Yamv.Core/Registration/WindowsFileAssociation.cs` → `RegistrationResult.cs` → `tests/Yamv.Core.Tests/Registration/` | [v1-build.md](plans/v1-build.md) step 7 |
 | Change how themes are listed, imported, renamed, duplicated or deleted | `src/Yamv.Core/Theming/ThemeCatalog.cs` → `ThemeIds.cs` → `ThemeInspection.cs` → `IFileTrash.cs` → `tests/Yamv.Core.Tests/Theming/ThemeCatalogTests.cs` → `ThemeCatalogWriteTests.cs` | [themes.md](design/themes.md) |
 | Edit or save a theme file | `src/Yamv.Core/Theming/ThemeCatalog.cs` → `ThemeFilePatch.cs` → `ThemeEditing.cs` → `ThemeTokenView.cs` → `tests/Yamv.Core.Tests/Theming/` | [themes.md](design/themes.md) |
 | Change the theme settings window (the theme list, selecting, rename, delete, duplicate, the footer, its confirms) | `src/Yamv.App/ViewModels/ThemeSettingsViewModel.cs` → `ThemeRowViewModel.cs` → `src/Yamv.App/Views/ThemeSettingsWindow.axaml` → `Views/ThemeSettings/ConfirmDialog.axaml` → `src/Yamv.Core/Theming/ThemeCatalog.cs` → `tests/Yamv.App.Tests/ViewModels/ThemeSettingsViewModelTests.cs` + `Views/ThemeSettingsWindowTests.cs` | [look.md](design/look.md) |
-| Change the theme settings token editor, colour picker or preview | `src/Yamv.App/Views/ThemeSettings/TokenEditor.axaml` + `.axaml.cs` → `ColorPickerPopup.axaml` + `.axaml.cs` → `src/Yamv.Core/Theming/ColorMath.cs` → `src/Yamv.App/ViewModels/TokenRowViewModel.cs` → `ThemeSettingsViewModel.cs` → `src/Yamv.App/Views/ThemeSettingsWindow.axaml` → `tests/Yamv.Core.Tests/Theming/ColorMathTests.cs` + `tests/Yamv.App.Tests/ViewModels/ThemeSettingsViewModelTests.cs` + `Views/ThemeSettingsWindowTests.cs` | [look.md](design/look.md) |
+| Change the theme settings token editor, colour picker or preview | `src/Yamv.App/Views/ThemeSettings/TokenEditor.axaml` + `.axaml.cs` → `ColorPickerPopup.axaml` + `.axaml.cs` → `src/Yamv.Core/Theming/ColorMath.cs` → `src/Yamv.App/ViewModels/TokenRowViewModel.cs` → `ThemeSettingsViewModel.cs` → `src/Yamv.App/Views/ThemeSettings/ThemePreview.axaml` + `.axaml.cs` → `src/Yamv.App/Services/ThemeBrushes.cs` → `src/Yamv.App/Views/ThemeSettingsWindow.axaml` → `tests/Yamv.Core.Tests/Theming/ColorMathTests.cs` + `tests/Yamv.App.Tests/ViewModels/ThemeSettingsViewModelTests.cs` + `Views/ThemeSettingsWindowTests.cs` + `Services/ThemeBrushesTests.cs` | [look.md](design/look.md) |
 | Change per-folder content width | `src/Yamv.Core/Widths/ContentWidth.cs` → `WidthStore.cs` → `src/Yamv.App/Controls/DocumentView.cs` (`SetContentWidthAsync`) → `src/Yamv.App/Web/yamv.js` → `Web/yamv.css` → `tests/Yamv.Core.Tests/Widths/` | [content-width.md](design/content-width.md) |
 | Add a JSON file format | `src/Yamv.Core/Session/SessionJsonContext.cs` → `SessionStore.cs` (its `Normalize`) → `tests/Yamv.Core.Tests/Session/SessionStoreTests.cs`; `src/Yamv.Core/Widths/WidthsFile.cs` is the multi-writer example | |
 
@@ -63,7 +63,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
     The view model wraps Core's `DocumentWindowState`, renders the selection off the UI thread (a stale render is dropped by generation), keeps scroll per shown document, re-checks missing files every 2 s (the same tick retries the selected unreadable document, waiting while a read is still running; `SelectedIsUnreadable` and `UnreadableReason` drive the can't-read pane, from Core's `ReadFailure`, which maps a read exception to a reason), and builds and restores the session.
 
-    `ThemeBridge` picks the session's theme, sets the Avalonia theme variant, swaps one merged resource dictionary of chrome brushes (`YamvChromeBackground` … `YamvWarningLine`) and font (`YamvUiFont`, from Core's `ChromePalette`), and sends the theme CSS to every registered surface.
+    `ThemeBridge` picks the session's theme, sets the Avalonia theme variant, swaps one merged resource dictionary of chrome brushes (`YamvChromeBackground` … `YamvWarningLine`) and font (`YamvUiFont`, from Core's `ChromePalette`), built by `Services/ThemeBrushes` (which also builds the brush and font of any one token, for the theme preview), and sends the theme CSS to every registered surface.
   - `Services/MainWindowFactory` composes the windows.
 
     `App` owns one `IAppLog` (`App.Log`) and one `ThemeBridge` per process (`CreateBridge`, disposed at exit) and passes both to `Create` (the main window: the session, `DocumentView`, `DocumentWindowState` and the view model) and `CreateViewer` (a non-persisting window over `Program`'s files, handed over in the static `App.ViewerFiles`; an existing file is moved first so it is selected, and it reads the session with `SessionStore.LoadReadOnly`, which leaves a corrupt file in place).
@@ -80,6 +80,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
     The view model reaches the app only through `ThemeSettingsSeams` (apply a theme, the trash, Edit as text, the two confirms), so tests fake them. `Views/ThemeSettings/ConfirmDialog` is the in-window scrim dialog behind the unsaved-changes and delete confirms.
 
     `Views/ThemeSettings/TokenEditor` is the token editor (a row per token, the Light/Dark/Shared tabs and the Add dark options strip), over `TokenRowViewModel` (one row's shown value, commit, reset and error) and the view model's token rows, tab state and `Hint`; a swatch raises `PickRequested` with `TokenPickEventArgs` and, on an editable row, opens `Views/ThemeSettings/ColorPickerPopup` (an overlay-layer Popup inside `TokenEditor`: saturation/value square, hue and alpha bars, old and new colours, a hex field) whose every change `TokenEditor` sets on the working copy at once, over Core's `ColorMath` (HSV, RGBA and `ColorValue` conversions), and the hex error text is Core's `ColorValue.NotAColour`.
+
+    `Views/ThemeSettings/ThemePreview` is the right pane's mini window, drawn from `ThemeSettingsViewModel.PreviewTheme` (the working copy resolved for the half the open tab shows, null for an invalid theme) in its own resource dictionary filled by `ThemeBrushes`, so it follows unsaved edits while `ThemeBridge`, the page and the app keep the saved theme; a theme's own css is not previewed.
 
     Nothing in the main app opens the window yet; the dev harness does, when `YAMV_DEV_HARNESS=1` and `YAMV_DEV_THEME_SETTINGS=1` (`App.CreateStartWindow`), and it refuses to start without `YAMV_DATA_DIR`.
   - The find bar lives inside the page, because Avalonia cannot draw over a native web view (airspace). For the same reason an empty, missing or can't-read state hides the web view rather than covering it.
@@ -106,7 +108,6 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
 ## Test locations
 
-<<<<<<< ours
 - `tests/Yamv.Core.Tests`: everything in Core. A new Core type gets a test file at the mirrored path (`Documents/ReadFailureTests.cs` covers the read-failure reasons).
 - `tests/Yamv.App.Tests`: App logic that needs Avalonia types (view model, `ThemeBridge`), run headless as plain `[Fact]`s through `HeadlessUnitTestSession` (`Avalonia.Headless.XUnit` fails discovery under xunit.v3). `Fakes/` holds the fake surface, log and file actions (`FakeFileActions`); `Yamv.App` exposes its internals to it.
 
@@ -114,15 +115,9 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
   A window fixture over real files is `IAsyncDisposable`: it disposes the view model, awaits `ViewModel.WhenRendersSettled()`, then deletes its folder, since a selection change starts a read on a pool thread that the test does not await, and that read holds the file open.
 
-  `Services/` holds `ThemeBridgeTests`, `MainWindowSessionTests` (what is saved and when), `MainWindowFactoryTests` (`RestoreLayout`, `CreateViewer`), `AppStartupTests` (the start window for a main or viewer launch) and `FileActionsTests` (reveal's process start, over a fake process starter). `tests/Yamv.Core.Tests/Platform/RevealCommandTests.cs` covers the reveal command.
-=======
-- `tests/Yamv.Core.Tests`: everything in Core. A new Core type gets a test file at the mirrored path.
-- `tests/Yamv.App.Tests`: App logic that needs Avalonia types (view model, `ThemeBridge`), run headless as plain `[Fact]`s through `HeadlessUnitTestSession` (`Avalonia.Headless.XUnit` fails discovery under xunit.v3). `Fakes/` holds the fake surface, log and file actions (`FakeFileActions`); `Yamv.App` exposes its internals to it.
+  `Services/` holds `ThemeBridgeTests`, `ThemeBrushesTests` (the brushes and fonts built from a resolved theme), `MainWindowSessionTests` (what is saved and when), `MainWindowFactoryTests` (`RestoreLayout`, `CreateViewer`), `AppStartupTests` (the start window for a main or viewer launch) and `FileActionsTests` (reveal's process start, over a fake process starter).
 
-  `Views/` holds headless window tests (title bar, tree, empty and missing states, shortcuts, `ThemeSettingsWindowTests`); `ViewModels/ThemeSettingsViewModelTests.cs` covers the theme settings view model over a temporary themes folder.
-
-  `Services/` holds `ThemeBridgeTests`, `MainWindowSessionTests` (what is saved and when), `MainWindowFactoryTests` (`RestoreLayout`) and `FileActionsTests` (reveal's process start, over a fake process starter). `tests/Yamv.Core.Tests/Platform/RevealCommandTests.cs` covers the reveal command, and `tests/Yamv.Core.Tests/Theming/ColorMathTests.cs` the colour picker's conversions.
->>>>>>> theirs
+  `tests/Yamv.Core.Tests/Platform/RevealCommandTests.cs` covers the reveal command, and `tests/Yamv.Core.Tests/Theming/ColorMathTests.cs` the colour picker's conversions.
 - `tools/dev/page-check/`: a headless Chromium check of the document page (`npm install`, then `npm run check`), against a stubbed host.
 - `tools/dev/run-hidden.ps1` with `tools/dev/capture-window.ps1`, both run under `tools/hidden-desktop.ps1`: screenshots of the real app off the owner's desktop, each run on a fresh data folder (`-App` for the main window, `-Session` to seed it, `-ThemeSettings` for the theme settings window, `-Themes` to seed its themes folder). `docs/design/fixtures/sample.md` is the sample document.
 

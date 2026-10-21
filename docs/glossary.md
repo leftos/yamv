@@ -28,4 +28,5 @@
 - **Variant**: the light or dark half of a theme family.
 - **Viewer instance**: a YAMV window started with file arguments (or, on macOS, a Finder open); on Windows its own process. It shows only those files and is non-persisting: it never writes `session.json`, has no saved layout, shows the tree only with 2+ documents, closes when its last document closes, and reads the theme from the session file read-only (`SessionStore.LoadReadOnly`).
 - **WebView2 user-data folder**: where WebView2 keeps the document page's browser profile on Windows: `%LOCALAPPDATA%\YAMV\webview2`, shared by every YAMV process, or the folder `WEBVIEW2_USER_DATA_FOLDER` names when set (each hidden run gets its own).
+- **Working copy**: the theme the theme settings window edits, a copy of the selected theme that edits change until Save or Revert; the token rows and the preview (`PreviewTheme`) read it, while the window and the app keep the saved theme.
 - **Yours**: the user-themes section of the theme list in the theme settings window, below Built-in.

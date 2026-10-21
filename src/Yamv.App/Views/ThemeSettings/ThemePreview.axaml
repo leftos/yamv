@@ -1,0 +1,185 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="Yamv.App.Views.ThemeSettings.ThemePreview"
+  ClipToBounds="True"
+  FontFamily="{DynamicResource YamvUiFont}"
+>
+  <UserControl.Styles>
+    <!-- The mini window's tree rows, as the mock's .ptree .r. -->
+    <Style Selector="Panel.r">
+      <Setter Property="Height" Value="23" />
+    </Style>
+    <Style Selector="Panel.r > Border.fill">
+      <Setter Property="CornerRadius" Value="5,0,0,5" />
+    </Style>
+    <Style Selector="Panel.r StackPanel">
+      <Setter Property="Orientation" Value="Horizontal" />
+      <Setter Property="Spacing" Value="5" />
+      <Setter Property="Margin" Value="18,0,6,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Panel.r TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextSecondary}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Panel.r Path">
+      <Setter Property="Stroke" Value="{DynamicResource YamvTextSecondary}" />
+    </Style>
+    <Style Selector="Panel.r.sel > Border.fill">
+      <Setter Property="Background" Value="{DynamicResource YamvSelectionBackground}" />
+    </Style>
+    <Style Selector="Panel.r.sel TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource YamvSelectionText}" />
+      <!-- The mock's 550; the bundled Inter has static faces only, so the heavier one, as the theme list does. -->
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Panel.r.sel Path">
+      <Setter Property="Stroke" Value="{DynamicResource YamvSelectionText}" />
+    </Style>
+    <Style Selector="Panel.r.hov > Border.fill">
+      <Setter Property="Background" Value="{DynamicResource YamvHoverBackground}" />
+    </Style>
+    <Style Selector="Viewbox.ico">
+      <Setter Property="Width" Value="11" />
+      <Setter Property="Height" Value="11" />
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="TextBlock.mono">
+      <Setter Property="FontFamily" Value="{DynamicResource YamvPreviewMonoFont}" />
+    </Style>
+    <Style Selector="TextBlock.heading">
+      <Setter Property="FontFamily" Value="{DynamicResource YamvPreviewHeadingFont}" />
+      <Setter Property="FontWeight" Value="{DynamicResource YamvPreviewHeadingWeight}" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvHeading}" />
+    </Style>
+    <Style Selector="TextBlock.body">
+      <Setter Property="FontFamily" Value="{DynamicResource YamvPreviewBodyFont}" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="LineHeight" Value="{DynamicResource YamvPreviewLineHeight}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </UserControl.Styles>
+
+  <DockPanel x:Name="PreviewPage" Background="{DynamicResource YamvPageBackground}">
+    <Border
+      DockPanel.Dock="Top"
+      Height="28"
+      Padding="12,0"
+      Background="{DynamicResource YamvChromeBackground}"
+      BorderBrush="{DynamicResource YamvLine}"
+      BorderThickness="0,0,0,1"
+    >
+      <DockPanel VerticalAlignment="Center">
+        <TextBlock
+          x:Name="AppearanceTag"
+          DockPanel.Dock="Right"
+          FontSize="9.5"
+          FontWeight="SemiBold"
+          LetterSpacing="0.57"
+          VerticalAlignment="Center"
+          Foreground="{DynamicResource YamvTextMuted}"
+        />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBlock Text="Release checklist.md" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource YamvText}" />
+          <TextBlock Text="yamv / docs" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource YamvTextMuted}" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <Border
+      DockPanel.Dock="Right"
+      Width="104"
+      Padding="6,10,0,0"
+      ClipToBounds="True"
+      Background="{DynamicResource YamvSidebarBackground}"
+      BorderBrush="{DynamicResource YamvLine}"
+      BorderThickness="1,0,0,0"
+      TextElement.FontSize="11.5"
+    >
+      <StackPanel>
+        <TextBlock Text="▾ yamv" Margin="6,4" FontWeight="SemiBold" Foreground="{DynamicResource YamvText}" />
+        <Panel Classes="r">
+          <Border Classes="fill" />
+          <TextBlock Text="▾ docs" Margin="6,0" Foreground="{DynamicResource YamvTextMuted}" />
+        </Panel>
+        <Panel Classes="r">
+          <Border Classes="fill" />
+          <StackPanel>
+            <Viewbox Classes="ico">
+              <Canvas Width="14" Height="14"><Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" /></Canvas>
+            </Viewbox>
+            <TextBlock Text="README.md" />
+          </StackPanel>
+        </Panel>
+        <Panel Classes="r sel">
+          <Border Classes="fill" />
+          <Border Width="3" Margin="0,5" CornerRadius="2" HorizontalAlignment="Left" Background="{DynamicResource YamvAccent}" />
+          <StackPanel>
+            <Viewbox Classes="ico">
+              <Canvas Width="14" Height="14"><Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" /></Canvas>
+            </Viewbox>
+            <TextBlock Text="Release checklist.md" />
+          </StackPanel>
+        </Panel>
+        <Panel Classes="r hov">
+          <Border Classes="fill" />
+          <StackPanel>
+            <Viewbox Classes="ico">
+              <Canvas Width="14" Height="14"><Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" /></Canvas>
+            </Viewbox>
+            <TextBlock Text="notes.md" />
+          </StackPanel>
+        </Panel>
+        <Panel Classes="r">
+          <Border Classes="fill" />
+          <StackPanel>
+            <Viewbox Classes="ico">
+              <Canvas Width="14" Height="14"><Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" /></Canvas>
+            </Viewbox>
+            <TextBlock Text="plans.md" />
+          </StackPanel>
+        </Panel>
+      </StackPanel>
+    </Border>
+
+    <Border Padding="20,22,20,0" ClipToBounds="True">
+      <StackPanel TextElement.Foreground="{DynamicResource YamvText}">
+        <TextBlock
+          x:Name="PreviewH1"
+          Classes="heading"
+          Text="Release checklist"
+          FontSize="{DynamicResource YamvPreviewH1Size}"
+          LetterSpacing="-0.67"
+          LineHeight="{DynamicResource YamvPreviewH1LineHeight}"
+          Margin="0,0,0,12"
+          TextWrapping="Wrap"
+        />
+        <!--
+          Inline elements sit on one line each: XAML turns the whitespace between them into a space. The inline code is a run
+          with a background, padded with narrow no-break spaces, since a run has no padding and a container breaks the line box.
+        -->
+        <TextBlock Classes="body" Margin="0,0,0,11.7"><Run Text="YAMV ships as one executable. Read " /><Run x:Name="Link" Text="the release notes" Foreground="{DynamicResource YamvAccent}" /><Run Text=" before tagging, then run " /><Run Text="&#x202F;publish.ps1&#x202F;" FontFamily="{DynamicResource YamvPreviewMonoFont}" FontSize="10.92" Background="{DynamicResource YamvCodeBackground}" /><Run Text=" from the repo root." /></TextBlock>
+        <Border Margin="0,18.9,0,8.6" Padding="0,0,0,5.15" BorderBrush="{DynamicResource YamvLine}" BorderThickness="{DynamicResource YamvPreviewH2Rule}">
+          <TextBlock Classes="heading" Text="Build" FontSize="17.16" LineHeight="21.45" />
+        </Border>
+        <Border
+          Margin="0,0,0,10.8"
+          Padding="12,10"
+          CornerRadius="7"
+          BorderThickness="1"
+          Background="{DynamicResource YamvCodeBackground}"
+          BorderBrush="{DynamicResource YamvCodeLine}"
+          ClipToBounds="True"
+        >
+          <TextBlock Classes="mono" FontSize="10.8" LineHeight="17.28"><Run Text="// Publish both targets" FontStyle="Italic" Foreground="{DynamicResource YamvSyntaxComment}" /><LineBreak /><Run Text="foreach" Foreground="{DynamicResource YamvSyntaxKeyword}" /><Run Text=" (" /><Run Text="var" Foreground="{DynamicResource YamvSyntaxKeyword}" /><Run Text=" rid " /><Run Text="in" Foreground="{DynamicResource YamvSyntaxKeyword}" /><Run Text=" Rids)" /><LineBreak /><Run Text="    " /><Run Text="Publish" Foreground="{DynamicResource YamvSyntaxType}" /><Run Text="(rid, " /><Run Text="&quot;Release&quot;" Foreground="{DynamicResource YamvSyntaxString}" /><Run Text=", " /><Run Text="3" Foreground="{DynamicResource YamvSyntaxNumber}" /><Run Text=");" /></TextBlock>
+        </Border>
+        <Border Padding="13,1.3,0,1.3" BorderThickness="3,0,0,0" BorderBrush="{DynamicResource YamvQuote}">
+          <TextBlock Classes="body" Text="Tag only from main, after CI is green." Foreground="{DynamicResource YamvTextMuted}" />
+        </Border>
+      </StackPanel>
+    </Border>
+  </DockPanel>
+</UserControl>

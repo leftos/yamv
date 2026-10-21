@@ -24,8 +24,6 @@ public sealed class ThemeBridge : IDisposable
     /// <summary>The resource key of the chrome's UI <see cref="FontFamily"/>.</summary>
     public const string UiFontKey = "YamvUiFont";
 
-    private const string BundledUiFont = "fonts:Inter#Inter";
-
     private readonly ThemeCatalog _catalog;
     private readonly Application _application;
     private readonly IAppLog _log;
@@ -161,15 +159,9 @@ public sealed class ThemeBridge : IDisposable
     /// </summary>
     private void ApplyResolved(ResolvedTheme resolved)
     {
-        var palette = ChromePalette.From(resolved);
-        string css = ThemeCss.Build(resolved);
         var resources = new ResourceDictionary();
-        foreach ((string token, uint argb) in palette.Colors)
-        {
-            resources[ResourceKey(token)] = new SolidColorBrush(Color.FromUInt32(argb));
-        }
-
-        resources[UiFontKey] = new FontFamily($"{palette.UiFont}, {BundledUiFont}");
+        ThemeBrushes.FillChrome(resources, resolved);
+        string css = ThemeCss.Build(resolved);
 
         Current = resolved;
         _css = css;

@@ -706,6 +706,83 @@ public sealed class ThemeSettingsWindowTests
             Assert.Equal(ColorMath.FromHsv(old with { S = 0.75, V = 0.25 }, byte.MaxValue), fixture.ViewModel.WorkingTheme!.Light!.Tokens["accent"]);
         });
 
+    [Fact]
+    public Task The_preview_shows_in_the_preview_host_for_a_valid_theme_with_its_own_resources() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+
+            ThemePreview preview = fixture.Find<ThemePreview>("Preview");
+
+            Assert.True(preview.IsEffectivelyVisible);
+            Assert.Same(fixture.ViewModel.PreviewTheme, preview.Resolved);
+            Assert.Contains("Release checklist", VisibleTexts(preview));
+            Assert.True(preview.TryFindResource("YamvQuote", out object? quote));
+            Assert.Equal(Color.FromRgb(0xd0, 0xd7, 0xde), Assert.IsType<SolidColorBrush>(quote).Color);
+            Assert.Equal("LIGHT", fixture.Find<TextBlock>("AppearanceTag").Text);
+        });
+
+    [Fact]
+    public Task An_unsaved_colour_edit_shows_in_the_preview_while_the_window_keeps_its_brush() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            var saved = new SolidColorBrush(Colors.White);
+            fixture.Window.Resources["YamvPageBackground"] = saved;
+            ThemePreview preview = fixture.Find<ThemePreview>("Preview");
+
+            fixture.ViewModel.SetToken(ThemeTab.Light, "pageBackground", new ColorValue("#3fb950"));
+            fixture.Settle();
+
+            var edited = Color.FromRgb(0x3f, 0xb9, 0x50);
+            Assert.True(preview.TryFindResource("YamvPageBackground", out object? inPreview));
+            Assert.Equal(edited, Assert.IsType<SolidColorBrush>(inPreview).Color);
+            Assert.Equal(edited, Assert.IsType<SolidColorBrush>(fixture.Find<DockPanel>("PreviewPage").Background).Color);
+            Assert.True(fixture.Window.TryFindResource("YamvPageBackground", out object? inWindow));
+            Assert.Same(saved, inWindow);
+        });
+
+    [Fact]
+    public Task An_h1Size_edit_resizes_the_preview_h1_at_once() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            TextBlock h1 = fixture.Find<TextBlock>("PreviewH1");
+            Assert.Equal(2.05 * 13, h1.FontSize, 3);
+
+            fixture.ViewModel.SetToken(ThemeTab.Light, "h1Size", new NumberValue(3));
+            fixture.Settle();
+
+            Assert.Equal(39, h1.FontSize, 3);
+            Assert.Equal(39 * 1.15, h1.LineHeight, 3);
+        });
+
+    [Fact]
+    public Task The_preview_tag_names_the_dark_half_on_the_Dark_tab() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Click(fixture.Row("studio"));
+
+            fixture.Click(fixture.Find<Button>("DarkTab"));
+
+            Assert.Equal("DARK", fixture.Find<TextBlock>("AppearanceTag").Text);
+            Assert.True(fixture.Find<ThemePreview>("Preview").TryFindResource("YamvPageBackground", out object? page));
+            Assert.Equal(Color.FromRgb(0x0f, 0x13, 0x18), Assert.IsType<SolidColorBrush>(page).Color);
+        });
+
+    [Fact]
+    public Task There_is_no_preview_for_a_theme_that_did_not_load() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+
+            fixture.Click(fixture.Row("nord"));
+
+            Assert.False(fixture.Find<ThemePreview>("Preview").IsEffectivelyVisible);
+            Assert.True(fixture.Find<Control>("NoPreview").IsEffectivelyVisible);
+        });
+
     private static List<string> VisibleTexts(Visual root) =>
         [
             .. root.GetVisualDescendants()

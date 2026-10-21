@@ -37,6 +37,10 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
   - **Left:** the theme list, in two sections, Built-in and Yours. Its context menu has Rename and Delete, and the Appearance choice sits at the foot of the list.
   - **Middle:** every token, grouped as in the [token table](themes.md#tokens) (Page, Chrome, Code, Syntax, Type, Layout). It has Shared / Light / Dark tabs, colour swatches with hex fields and a picker, and value fields for fonts and sizes.
   - **Right:** a live preview.
+- The **preview** is a mini window drawn by Avalonia from the working copy's resolved tokens, so it follows unsaved edits at once while the window and the app keep the saved theme:
+  - A 28 px top bar with the title "Release checklist.md", the muted location "yamv / docs" and a tag, LIGHT or DARK, naming the half shown. Below it a sample document (an h1, a paragraph with a link and inline code, an h2 with its rule when `h2Rule` is on, a code block with syntax colours, a quote) and a 104 px tree.
+  - The Light tab shows the light half, the Dark tab the dark half and the Shared tab the half the app shows now; a one-half theme shows the half it has. An invalid theme shows no preview.
+  - The sample body is a fixed 13 px and the h1 is `h1Size` × 13 px; `bodySize`, `findMatch` and `findCurrent` do not change it. A theme's own css is not previewed, and nothing goes through the page or `ThemeBridge`.
 - Unsaved changes are marked with a dot.
 - The **token editor** (the middle column; the approved mock is [theme-editor](mocks/theme-editor/index.html), [screenshot](mocks/theme-editor/index.png)):
   - One row per token, 38 px and two lines: the token name in mono over the value field. A colour row also has a swatch, which raises a pick request for the colour picker.

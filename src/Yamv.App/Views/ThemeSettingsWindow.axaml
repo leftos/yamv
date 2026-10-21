@@ -548,7 +548,9 @@
         </Border>
 
         <Panel Grid.Column="2" x:Name="PreviewPane" Background="{DynamicResource YamvPageBackground}">
-          <ContentControl x:Name="PreviewHost" IsVisible="{Binding ShowsEditor}" />
+          <ContentControl x:Name="PreviewHost" IsVisible="{Binding ShowsEditor}">
+            <ts:ThemePreview x:Name="Preview" Resolved="{Binding PreviewTheme}" />
+          </ContentControl>
           <Border x:Name="NoPreview" Background="{DynamicResource YamvChromeBackground}" IsVisible="{Binding IsInvalid}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
               <Rectangle

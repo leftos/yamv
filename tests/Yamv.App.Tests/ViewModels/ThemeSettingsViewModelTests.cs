@@ -717,6 +717,75 @@ public sealed class ThemeSettingsViewModelTests
         Assert.All(Tokens(viewModel), row => Assert.False(row.IsChanged));
     }
 
+    [Theory]
+    [InlineData(ThemeTab.Light, Appearance.Light, "#112233")]
+    [InlineData(ThemeTab.Dark, Appearance.Dark, "#4493f8")]
+    public void The_preview_resolves_the_half_of_the_open_tab(ThemeTab tab, Appearance half, string accent)
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+
+        viewModel.SelectedTab = tab;
+
+        ResolvedTheme preview = Assert.IsType<ResolvedTheme>(viewModel.PreviewTheme);
+        Assert.Equal(half, preview.Appearance);
+        Assert.Equal(new ColorValue(accent), preview.Tokens["accent"]);
+    }
+
+    [Fact]
+    public void The_Shared_tab_previews_the_half_the_app_shows_and_follows_it()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.ShownAppearance = Appearance.Dark;
+
+        viewModel.SelectedTab = ThemeTab.Shared;
+
+        Assert.Equal(Appearance.Dark, viewModel.PreviewTheme?.Appearance);
+
+        viewModel.ShownAppearance = Appearance.Light;
+
+        Assert.Equal(Appearance.Light, viewModel.PreviewTheme?.Appearance);
+    }
+
+    [Fact]
+    public async Task A_one_half_theme_previews_the_half_it_has_on_the_other_tab()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        await viewModel.SelectAsync(Row(viewModel, "alpha"));
+
+        viewModel.SelectedTab = ThemeTab.Light;
+
+        Assert.Equal(Appearance.Dark, viewModel.PreviewTheme?.Appearance);
+        Assert.Equal(new ColorValue("#223344"), viewModel.PreviewTheme?.Tokens["accent"]);
+    }
+
+    [Fact]
+    public void An_edit_changes_the_preview_at_once_without_applying_the_theme_to_the_app()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SelectedTab = ThemeTab.Light;
+
+        viewModel.SetToken(ThemeTab.Light, "pageBackground", new ColorValue("#3fb950"));
+
+        Assert.Equal(new ColorValue("#3fb950"), viewModel.PreviewTheme?.Tokens["pageBackground"]);
+        Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public async Task An_invalid_theme_has_no_preview()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        Assert.NotNull(viewModel.PreviewTheme);
+
+        await viewModel.SelectAsync(Row(viewModel, "nord"));
+
+        Assert.Null(viewModel.PreviewTheme);
+    }
+
     private static IEnumerable<TokenRowViewModel> Tokens(ThemeSettingsViewModel viewModel) => viewModel.TokenGroups.SelectMany(group => group.Rows);
 
     private static TokenRowViewModel Token(ThemeSettingsViewModel viewModel, string name) => Tokens(viewModel).Single(row => row.Name == name);

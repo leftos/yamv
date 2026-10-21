@@ -149,6 +149,13 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     [ObservableProperty]
     public partial ThemeTab SelectedTab { get; set; } = ThemeTab.Light;
 
+    /// <summary>
+    /// The working copy resolved for the preview: the light half on the Light tab, the dark half on the Dark tab and the half the
+    /// app shows on the Shared tab, or the half the theme has when it lacks that one; null when no valid theme is shown.
+    /// </summary>
+    [ObservableProperty]
+    public partial ResolvedTheme? PreviewTheme { get; private set; }
+
     /// <summary>The token editor's rows of <see cref="SelectedTab"/>, grouped as <see cref="ThemeTokens.All"/> orders them.</summary>
     public IReadOnlyList<TokenGroupViewModel> TokenGroups { get; }
 
@@ -551,6 +558,19 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         }
 
         AddHalfCommand.NotifyCanExecuteChanged();
+        UpdatePreview();
+    }
+
+    /// <summary>Resolves the working copy for the preview, for the half the open tab shows.</summary>
+    private void UpdatePreview()
+    {
+        Appearance half = SelectedTab switch
+        {
+            ThemeTab.Light => Appearance.Light,
+            ThemeTab.Dark => Appearance.Dark,
+            _ => ShownAppearance,
+        };
+        PreviewTheme = !IsInvalid && WorkingTheme is { } working ? ThemeResolver.Resolve(working, half) : null;
     }
 
     /// <summary>
