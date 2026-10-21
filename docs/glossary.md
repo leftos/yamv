@@ -13,6 +13,7 @@
 - **Import notice**: the modal an Import shows before copying a theme file, with a card for the file (name, author, variants, whether it has css, its errors and warnings) and the warning about css that loads from the web; the card is read by `ThemeCatalog.Inspect` into a `ThemeInspection` ([themes.md](design/themes.md)).
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.
 - **Main instance**: the one YAMV process started with no file arguments. It remembers its open documents between runs; a second no-arg launch brings it to the front and exits.
+- **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted on a clean exit.
 - **Missing document**: an open document whose file no longer exists; it stays in the tree, greyed, until removed or until the file comes back.
 - **Open with registration**: what `yamv --register` writes on Windows so YAMV appears in Explorer's Open with for `.md` and `.markdown`: the `YAMV.Markdown` ProgID, an `OpenWithProgids` entry per extension and the `Applications\yamv.exe` key, all under the current user. It never sets the default handler.
 - **Persist**: a window's flag saying its documents, selection and layout are saved to the session file; true only for the main instance's window.

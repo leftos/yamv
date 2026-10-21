@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Text;
@@ -11,7 +13,9 @@ namespace Yamv.Core.Instance;
 /// Keeps YAMV to one main instance per user: the main instance holds an exclusive lock on <paramref name="lockFilePath"/>
 /// and listens on the pipe <see cref="Endpoint"/> derived from that path; a later no-arg launch fails to take the lock and signals
 /// it. On Unix the lock is an advisory <c>flock</c>, which .NET turns off silently when <c>System.IO.DisableFileLocking</c> is set
-/// or the file system does not support it (NFS, SMB).
+/// or the file system does not support it (NFS, SMB). The main instance also writes its pid and start time to a pid file beside the
+/// lock, named after the lock file with the extension <c>.pid</c> (a second launch cannot read the locked file itself), and deletes it
+/// before releasing the lock.
 /// </summary>
 /// <param name="lockFilePath">The lock file, normally <see cref="AppPaths.MainLockFile"/>. Its folder is created on demand.</param>
 /// <param name="log">Where every caught exception is reported.</param>
@@ -25,6 +29,14 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     private const int ConnectAttemptTimeoutMilliseconds = 0;
 
     private const PipeOptions SharedPipeOptions = PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly;
+
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    private const int PidMoveAttempts = 3;
+    private static readonly TimeSpan PidMoveRetryDelay = TimeSpan.FromMilliseconds(20);
+
+    /// <summary>The longest pid file read; a longer one is malformed. A valid one is at most 31 bytes.</summary>
+    private const int MaxPidFileLength = 64;
 
     /// <summary>The coordinator whose message handler is running on this thread, if any.</summary>
     [ThreadStatic]
@@ -41,6 +53,9 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     private readonly TaskCompletionSource _lockReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private FileStream? _lockStream;
+
+    /// <summary>True once this instance has written the pid file, so <see cref="Dispose"/> deletes only a file it wrote.</summary>
+    private bool _pidFileWritten;
 
     /// <summary>The loop that accepts clients and queues their frames, once <see cref="StartServer"/> has run.</summary>
     private Task? _acceptLoop;
@@ -61,8 +76,8 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     /// </summary>
     private bool _firstListenerCreated;
 
-    /// <summary>The lock file's full path, computed once, and the <see cref="Endpoint"/> derived from it.</summary>
-    private readonly (string FullLockPath, string Endpoint) _paths = ResolvePaths(lockFilePath, log);
+    /// <summary>The lock file's full path, computed once, the pid file beside it and the <see cref="Endpoint"/> derived from it.</summary>
+    private readonly (string FullLockPath, string PidPath, string Endpoint) _paths = ResolvePaths(lockFilePath, log);
 
     /// <summary>
     /// The pipe this coordinator's server listens on, derived from the lock file's path so a launch that shares the lock reaches it:
@@ -102,8 +117,21 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     internal static AsyncLocal<Action<int>?> ConnectAttempted { get; } = new();
 
     /// <summary>
+    /// Called before the pid file's text reads this process's start time, in the async flow that set it. An exception it throws
+    /// stands for a start time the runtime cannot read, so tests can stage a failed pid-file write.
+    /// </summary>
+    internal static AsyncLocal<Action?> PidTextReading { get; } = new();
+
+    /// <summary>
+    /// Called by the first <see cref="Dispose"/> once it has deleted the pid file and before it closes the lock. Lets tests check
+    /// that the pid file is gone while the lock is still held.
+    /// </summary>
+    internal Action? LockReleasing { get; set; }
+
+    /// <summary>
     /// Takes the main-instance lock, held until <see cref="Dispose"/> or the process ends. True when this process now holds it
-    /// (or already did); false when another process holds it or the lock file cannot be opened.
+    /// (or already did); false when another process holds it or the lock file cannot be opened. On first taking it, records this
+    /// process's pid and start time in the pid file beside the lock (see <see cref="TryReadMainPid"/>); a failed write is a warning.
     /// </summary>
     public bool TryAcquireMainLock()
     {
@@ -124,7 +152,6 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
                 }
 
                 _lockStream = new FileStream(_paths.FullLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                return true;
             }
             catch (IOException ex) when (IsShareViolation(ex))
             {
@@ -138,7 +165,36 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
                 log.LogError($"Could not open the main-instance lock {_paths.FullLockPath}; check that its folder is writable.", ex);
                 return false;
             }
+
+            // Outside the catches above: the lock is held now, so no pid-file failure may turn this into a false.
+            WritePidFile();
+            return true;
         }
+    }
+
+    /// <summary>
+    /// Reads the pid the main instance holding the lock at <paramref name="lockFilePath"/> recorded beside it, for a second launch.
+    /// Returns it only when that process is running and started at the recorded time, so a stale file left by a crash or a pid
+    /// the system has since reused gives null. A missing file gives null silently; every other null is logged as info.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="lockFilePath"/> is empty or not a valid path.</exception>
+    public static int? TryReadMainPid(string lockFilePath, IAppLog log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        string pidPath = PidPathFor(Path.GetFullPath(lockFilePath));
+        string? text = ReadPidFile(pidPath, log);
+        if (text is null)
+        {
+            return null;
+        }
+
+        if (!TryParsePidFile(text, out int pid, out long startTicks))
+        {
+            log.LogInfo($"Ignoring the main-instance pid file {pidPath}: it does not hold a pid line and a start-time line.");
+            return null;
+        }
+
+        return IsRecordedProcessRunning(pidPath, pid, startTicks, log) ? pid : null;
     }
 
     /// <summary>
@@ -334,24 +390,192 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         }
     }
 
-    /// <summary>Releases the lock, then lets every later <see cref="Dispose"/> caller return.</summary>
+    /// <summary>
+    /// Deletes the pid file this instance wrote while it still holds the lock, releases the lock, then lets every later
+    /// <see cref="Dispose"/> caller return.
+    /// </summary>
     private void ReleaseLock()
     {
         try
         {
-            _lockStream?.Dispose();
+            DeleteOwnPidFile();
+            LockReleasing?.Invoke();
         }
         finally
         {
-            _lockReleased.TrySetResult();
+            try
+            {
+                _lockStream?.Dispose();
+            }
+            finally
+            {
+                _lockReleased.TrySetResult();
+            }
         }
     }
 
-    /// <summary>The lock file's full path and the endpoint derived from it.</summary>
-    private static (string FullLockPath, string Endpoint) ResolvePaths(string lockFilePath, IAppLog log)
+    /// <summary>
+    /// Records this process's pid and start time beside the lock, through a temporary file replaced into place so a reader never
+    /// sees half a file. A failure is logged and leaves the main instance running.
+    /// </summary>
+    private void WritePidFile()
+    {
+        string pidPath = _paths.PidPath;
+        string tempPath = $"{pidPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tempPath, CurrentProcessPidText(), Utf8NoBom);
+            MovePidFileWithRetry(tempPath, pidPath);
+            _pidFileWritten = true;
+        }
+        catch (Exception ex)
+            when (ex is IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+            log.LogWarning($"Could not write the main-instance pid file {pidPath}; a second launch cannot bring this window forward.", ex);
+            DeleteFileLoggingFailure(tempPath, $"Could not delete the temporary pid file {tempPath}.");
+        }
+    }
+
+    /// <summary>
+    /// Replaces <paramref name="pidPath"/> with <paramref name="tempPath"/>, retrying a destination a reader or a virus scanner
+    /// briefly holds; the last attempt's failure is thrown.
+    /// </summary>
+    private void MovePidFileWithRetry(string tempPath, string pidPath)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(tempPath, pidPath, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < PidMoveAttempts)
+            {
+                log.LogInfo($"Cannot replace the main-instance pid file {pidPath} (attempt {attempt} of {PidMoveAttempts}); retrying: {ex.Message}");
+                Thread.Sleep(PidMoveRetryDelay);
+            }
+        }
+    }
+
+    private void DeleteOwnPidFile()
+    {
+        if (_pidFileWritten)
+        {
+            DeleteFileLoggingFailure(
+                _paths.PidPath,
+                $"Could not delete the main-instance pid file {_paths.PidPath}; a second launch ignores it once this process has exited."
+            );
+        }
+    }
+
+    private void DeleteFileLoggingFailure(string path, string warning)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log.LogWarning(warning, ex);
+        }
+    }
+
+    /// <summary>The pid file's text: the pid and the process start time in UTC ticks, one per line, each line ending in LF.</summary>
+    private static string CurrentProcessPidText()
+    {
+        PidTextReading.Value?.Invoke();
+        using var current = Process.GetCurrentProcess();
+        long startTicks = current.StartTime.ToUniversalTime().Ticks;
+        return string.Create(CultureInfo.InvariantCulture, $"{Environment.ProcessId}\n{startTicks}\n");
+    }
+
+    /// <summary>The pid file beside the lock: the lock's file name with the extension <c>.pid</c>.</summary>
+    private static string PidPathFor(string fullLockPath) => Path.ChangeExtension(fullLockPath, ".pid");
+
+    /// <summary>
+    /// The pid file's text, at most one character past <see cref="MaxPidFileLength"/>, or null (logged as info unless the file is
+    /// missing) when it cannot be read. The file is opened sharing write and delete, so a reader never blocks the main instance's
+    /// replace or delete.
+    /// </summary>
+    private static string? ReadPidFile(string pidPath, IAppLog log)
+    {
+        try
+        {
+            using FileStream stream = new(pidPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using StreamReader reader = new(stream, Utf8NoBom);
+            char[] buffer = new char[MaxPidFileLength + 1];
+            int read = reader.ReadBlock(buffer);
+            return new string(buffer, 0, read);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // No pid file: no main instance is running, or one is starting or shutting down.
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log.LogInfo($"Could not read the main-instance pid file {pidPath}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="text"/> is at most <see cref="MaxPidFileLength"/> characters and exactly a decimal pid line and a
+    /// decimal ticks line, with one trailing LF allowed.
+    /// </summary>
+    private static bool TryParsePidFile(string text, out int pid, out long startTicks)
+    {
+        pid = 0;
+        startTicks = 0;
+        if (text.Length > MaxPidFileLength)
+        {
+            return false;
+        }
+
+        string body = text.EndsWith('\n') ? text[..^1] : text;
+        string[] lines = body.Split('\n');
+        return lines.Length == 2
+            && int.TryParse(lines[0], NumberStyles.None, CultureInfo.InvariantCulture, out pid)
+            && long.TryParse(lines[1], NumberStyles.None, CultureInfo.InvariantCulture, out startTicks);
+    }
+
+    /// <summary>True when process <paramref name="pid"/> is running and started at <paramref name="startTicks"/>; false is logged as info.</summary>
+    private static bool IsRecordedProcessRunning(string pidPath, int pid, long startTicks, IAppLog log)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            if (process.HasExited)
+            {
+                log.LogInfo($"The main-instance pid file {pidPath} names process {pid}, which has exited; the file is stale.");
+                return false;
+            }
+
+            if (process.StartTime.ToUniversalTime().Ticks != startTicks)
+            {
+                log.LogInfo($"The main-instance pid file {pidPath} names process {pid}, which started at another time; the pid was reused.");
+                return false;
+            }
+
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            log.LogInfo($"The main-instance pid file {pidPath} names process {pid}, which is not running; the file is stale.");
+            return false;
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+            log.LogInfo($"Could not inspect process {pid} named in the main-instance pid file {pidPath}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>The lock file's full path, the pid file beside it and the endpoint derived from the lock.</summary>
+    private static (string FullLockPath, string PidPath, string Endpoint) ResolvePaths(string lockFilePath, IAppLog log)
     {
         string fullLockPath = Path.GetFullPath(lockFilePath);
-        return (fullLockPath, InstanceEndpoint.Resolve(fullLockPath, EndpointEnvironment.ForCurrentProcess(), log));
+        return (fullLockPath, PidPathFor(fullLockPath), InstanceEndpoint.Resolve(fullLockPath, EndpointEnvironment.ForCurrentProcess(), log));
     }
 
     private static void ValidateTimeout(TimeSpan timeout)

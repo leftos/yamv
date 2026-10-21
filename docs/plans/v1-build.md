@@ -68,7 +68,8 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
 - `InstanceCoordinator`:
   - `TryAcquireMainLock()` takes the lock file;
   - on failure, the static `SignalAsync(lockFilePath, "activate", timeout, log)` sends the message over the pipe and the process exits;
-  - the main instance runs the pipe server with `StartServer(onMessage)`.
+  - the main instance runs the pipe server with `StartServer(onMessage)`;
+  - the main instance also writes its pid and start time to a sibling file (`main.lock` → `main.pid`), not into the locked file, and `TryReadMainPid(lockFilePath, log)` gives a second launch the pid only when that process is running and its start time matches.
   - Viewer launches (with file args) skip the coordinator entirely.
   - Tests run two coordinators in-process with unique names.
 - `LaunchOptions.Parse(args)` → `Main` | `Viewer(files)` | `Register` | `Unregister`. Missing or non-file args produce a clear error. Relative paths are resolved against the cwd.

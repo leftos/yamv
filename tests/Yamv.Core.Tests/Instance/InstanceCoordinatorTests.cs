@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -33,6 +35,8 @@ public sealed class InstanceCoordinatorTests : IDisposable
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    private string PidPath => Path.Combine(_stateRoot, "main.pid");
+
     public void Dispose()
     {
         if (Directory.Exists(_stateRoot))
@@ -52,6 +56,205 @@ public sealed class InstanceCoordinatorTests : IDisposable
         }
 
         Assert.True(second.TryAcquireMainLock());
+        Assert.Empty(_log.Errors);
+    }
+
+    [Fact]
+    public void TryAcquireMainLock_Acquired_WritesPidFileThatReadsBackAsThisProcess()
+    {
+        using InstanceCoordinator main = new(_lockPath, _log);
+
+        Assert.True(main.TryAcquireMainLock());
+
+        using var current = Process.GetCurrentProcess();
+        string expected = $"{Environment.ProcessId}\n{current.StartTime.ToUniversalTime().Ticks}\n";
+        Assert.Equal(expected, File.ReadAllText(PidPath));
+        Assert.Equal(Environment.ProcessId, InstanceCoordinator.TryReadMainPid(_lockPath, _log));
+        Assert.Empty(_log.Warnings);
+        Assert.Empty(_log.Infos);
+    }
+
+    [Fact]
+    public void TryAcquireMainLock_AlreadyHeld_DoesNotRewritePidFile()
+    {
+        using InstanceCoordinator main = new(_lockPath, _log);
+        Assert.True(main.TryAcquireMainLock());
+        Assert.True(File.Exists(PidPath));
+        File.WriteAllText(PidPath, "marker");
+
+        Assert.True(main.TryAcquireMainLock());
+
+        Assert.Equal("marker", File.ReadAllText(PidPath));
+    }
+
+    [Fact]
+    public void Dispose_DeletesOwnPidFileButLeavesOneItNeverWrote()
+    {
+        InstanceCoordinator first = new(_lockPath, _log);
+        try
+        {
+            Assert.True(first.TryAcquireMainLock());
+            Assert.True(File.Exists(PidPath));
+            using (InstanceCoordinator second = new(_lockPath, _log))
+            {
+                Assert.False(second.TryAcquireMainLock());
+            }
+
+            Assert.True(File.Exists(PidPath));
+            first.Dispose();
+            Assert.False(File.Exists(PidPath));
+
+            File.WriteAllText(PidPath, "left alone");
+            new InstanceCoordinator(_lockPath, _log).Dispose();
+            Assert.Equal("left alone", File.ReadAllText(PidPath));
+            Assert.Empty(_log.Warnings);
+        }
+        finally
+        {
+            // Releases the lock before the fixture deletes its folder when an assertion failed; a second Dispose is safe.
+            first.Dispose();
+        }
+    }
+
+    [Fact]
+    public void Dispose_DeletesPidFileWhileStillHoldingTheLock()
+    {
+        bool? pidFileExistedAtRelease = null;
+        bool? otherCouldAcquireAtRelease = null;
+        using InstanceCoordinator other = new(_lockPath, _log);
+        InstanceCoordinator main = new(_lockPath, _log)
+        {
+            LockReleasing = () =>
+            {
+                pidFileExistedAtRelease = File.Exists(PidPath);
+                otherCouldAcquireAtRelease = other.TryAcquireMainLock();
+            },
+        };
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+        }
+        finally
+        {
+            main.Dispose();
+        }
+
+        Assert.False(pidFileExistedAtRelease);
+        Assert.False(otherCouldAcquireAtRelease);
+    }
+
+    [Fact]
+    public void TryAcquireMainLock_ReaderHoldsOldPidFileOpen_NextMainStillWritesItsOwn()
+    {
+        InstanceCoordinator first = new(_lockPath, _log);
+        try
+        {
+            Assert.True(first.TryAcquireMainLock());
+            using FileStream reader = new(PidPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            first.Dispose();
+
+            using InstanceCoordinator second = new(_lockPath, _log);
+            Assert.True(second.TryAcquireMainLock());
+
+            Assert.Equal(Environment.ProcessId, InstanceCoordinator.TryReadMainPid(_lockPath, _log));
+            Assert.Empty(_log.Warnings);
+        }
+        finally
+        {
+            first.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData(typeof(Win32Exception))]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(NotSupportedException))]
+    public void TryAcquireMainLock_StartTimeUnreadable_StillAcquiresAndWarns(Type exceptionType)
+    {
+        using InstanceCoordinator main = new(_lockPath, _log);
+        InstanceCoordinator.PidTextReading.Value = () => throw (Exception)Activator.CreateInstance(exceptionType)!;
+        try
+        {
+            Assert.True(main.TryAcquireMainLock());
+        }
+        finally
+        {
+            InstanceCoordinator.PidTextReading.Value = null;
+        }
+
+        (_, Exception? logged) = Assert.Single(_log.Warnings);
+        Assert.IsType(exceptionType, logged);
+        Assert.False(File.Exists(PidPath));
+        Assert.Empty(Directory.GetFiles(_stateRoot, "*.tmp"));
+        Assert.Empty(_log.Errors);
+    }
+
+    [Fact]
+    public void TryReadMainPid_LongerThan64Bytes_ReturnsNullAndLogsInfo()
+    {
+        using var current = Process.GetCurrentProcess();
+        string pid = Environment.ProcessId.ToString(CultureInfo.InvariantCulture).PadLeft(32, '0');
+        string ticks = current.StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture).PadLeft(31, '0');
+
+        // Leading zeros keep it a valid pid file in every way but its length: 65 bytes.
+        AssertReadIsNullWithOneInfo($"{pid}\n{ticks}\n");
+    }
+
+    [Fact]
+    public void TryReadMainPid_NoFile_ReturnsNullSilently()
+    {
+        Assert.Null(InstanceCoordinator.TryReadMainPid(_lockPath, _log));
+        Assert.Empty(_log.Infos);
+    }
+
+    [Theory]
+    [InlineData("12345\n")]
+    [InlineData("12345")]
+    [InlineData("pid\nticks\n")]
+    [InlineData("12345\n678\nextra\n")]
+    [InlineData("")]
+    public void TryReadMainPid_MalformedFile_ReturnsNullAndLogsInfo(string content) => AssertReadIsNullWithOneInfo(content);
+
+    [Fact]
+    public void TryReadMainPid_StartTimeOneTickOff_ReturnsNullAndLogsInfo()
+    {
+        using var current = Process.GetCurrentProcess();
+        long ticks = current.StartTime.ToUniversalTime().Ticks;
+
+        AssertReadIsNullWithOneInfo($"{Environment.ProcessId}\n{ticks + 1}\n");
+    }
+
+    [Fact]
+    public void TryReadMainPid_ProcessNotRunning_ReturnsNullAndLogsInfo()
+    {
+        ProcessStartInfo startInfo = new("dotnet", "--version")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+        };
+        int exitedPid;
+        using (Process child = Process.Start(startInfo) ?? throw new InvalidOperationException("dotnet --version did not start."))
+        {
+            child.StandardOutput.ReadToEnd();
+            Assert.True(child.WaitForExit(HangGuard));
+            exitedPid = child.Id;
+        }
+
+        AssertReadIsNullWithOneInfo($"{exitedPid}\n{DateTime.UtcNow.Ticks}\n");
+    }
+
+    [Fact]
+    public void TryAcquireMainLock_PidFileCannotBeWritten_StillAcquiresAndWarns()
+    {
+        Directory.CreateDirectory(PidPath);
+        using InstanceCoordinator main = new(_lockPath, _log);
+
+        Assert.True(main.TryAcquireMainLock());
+
+        (string message, _) = Assert.Single(_log.Warnings);
+        Assert.Contains(PidPath, message, StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFiles(_stateRoot, "*.tmp"));
         Assert.Empty(_log.Errors);
     }
 
@@ -489,6 +692,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
     public async Task Dispose_FromInsideHandler_AsFirstCaller_ReleasesLockAtOnce()
     {
         TaskCompletionSource<bool> acquiredRightAfterHandlerDispose = NewSource<bool>();
+        bool? pidFileExistedAfterHandlerDispose = null;
         using InstanceCoordinator probe = new(_lockPath, _log);
         InstanceCoordinator main = new(_lockPath, _log);
         try
@@ -497,6 +701,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
             main.StartServer(_ =>
             {
                 main.Dispose();
+                pidFileExistedAfterHandlerDispose = File.Exists(PidPath);
                 acquiredRightAfterHandlerDispose.TrySetResult(probe.TryAcquireMainLock());
             });
 
@@ -507,6 +712,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
 
             // The handler's Dispose did not wait on the handler it runs in, so the lock was free before the handler returned.
             Assert.True(await acquiredRightAfterHandlerDispose.Task.WaitAsync(HangGuard, Token));
+            Assert.False(pidFileExistedAfterHandlerDispose);
             Assert.DoesNotContain(_log.Warnings, warning => warning.Message.Contains("probably blocked", StringComparison.Ordinal));
         }
         finally
@@ -646,6 +852,19 @@ public sealed class InstanceCoordinatorTests : IDisposable
         }
     }
 
+    /// <summary>Writes <paramref name="content"/> as the pid file and checks that reading it gives null and one info line.</summary>
+    private void AssertReadIsNullWithOneInfo(string content)
+    {
+        Directory.CreateDirectory(_stateRoot);
+        File.WriteAllText(PidPath, content);
+
+        Assert.Null(InstanceCoordinator.TryReadMainPid(_lockPath, _log));
+
+        Assert.Single(_log.Infos);
+        Assert.Empty(_log.Warnings);
+        Assert.Empty(_log.Errors);
+    }
+
     private InstanceCoordinator StartMain(out TaskCompletionSource<string> received)
     {
         InstanceCoordinator main = new(_lockPath, _log);
@@ -719,6 +938,9 @@ public sealed class InstanceCoordinatorTests : IDisposable
     {
         private readonly ConcurrentQueue<(string Message, Exception? Exception)> _warnings = new();
         private readonly ConcurrentQueue<(string Message, Exception? Exception)> _errors = new();
+        private readonly ConcurrentQueue<string> _infos = new();
+
+        public IReadOnlyCollection<string> Infos => _infos;
 
         public IReadOnlyCollection<(string Message, Exception? Exception)> Warnings => _warnings;
 
@@ -730,7 +952,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
         /// <summary>Called with each error after it is recorded.</summary>
         public Action<string>? ErrorLogged { get; set; }
 
-        public void LogInfo(string message) { }
+        public void LogInfo(string message) => _infos.Enqueue(message);
 
         public void LogWarning(string message, Exception? exception = null)
         {
