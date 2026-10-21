@@ -4,15 +4,16 @@
 
 ## App shell
 
-### Window and launch (1/4 done)
+### Window and launch (2/5 done)
 - [/] YAMV-5 App shell: document view and main window, built to look.md
   - [/] YAMV-7 Main window: tree sidebar, custom title bar, empty and missing states, session restore
 - [ ] YAMV-8 Launch modes: main vs viewer, activating the main instance, macOS file activation
 
-### Features (0/3 done)
+### Features (0/4 done)
 - [ ] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
 - [/] YAMV-10 Content width: per-folder slider (480 px to Full) in a title-bar popover
 - [/] YAMV-11 Theme settings window, Import notice and a watcher on the user themes folder
+- [ ] YAMV-29 Page shortcuts: fall back to event.code on non-Latin keyboard layouts
 
 ### No milestone
 - [ ] YAMV-27 Embed JetBrains Mono for the window chrome's monospace text
@@ -20,15 +21,13 @@
 ## Ship v1
 
 - [ ] YAMV-14 Docs: ARCHITECTURE filled in, README usage, CHANGELOG
-- [ ] YAMV-25 Registration: note a replaced foreign ProgID, and guard Unregister's process path
 
 ## Backlog
 
 - [ ] YAMV-17 Page privacy: fetch remote images through the host behind an opt-in
 - [ ] YAMV-18 macOS: let WKWebView read document images outside the asset cache
 - [ ] YAMV-19 Tests: fold the three fake logs into one thread-safe recorder
-- [ ] YAMV-20 Theme files: cap the read size and share the file while importing
-- [ ] YAMV-21 Theme catalog: list every file with an invalid id as invalid, not only device names
 - [ ] YAMV-22 Document view follow-ups: asset cache pruning, logic into Core, hidden link click, scroll after images
 - [ ] YAMV-24 Window state: regroup only when the document list changes
 - [ ] YAMV-26 Instance coordinator: stale socket unlink on slow exit, elevated vs normal launch
+- [ ] YAMV-30 Theme files: broken links, UTF-16 files, write-size check, FIFO hang
