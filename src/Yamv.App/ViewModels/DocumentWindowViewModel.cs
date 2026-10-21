@@ -31,7 +31,10 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private readonly Dictionary<string, double> _scrollPositions;
     private readonly HashSet<string> _unreadable;
     private readonly HashSet<Task> _renders = [];
-    private Task _lastStep = Task.CompletedTask;
+    private readonly DocumentWindowServices _services;
+    private Task _widthWork = Task.CompletedTask;
+    private ContentWidthViewModel? _contentWidthPopover;
+    private bool _contentWidthPopoverShowsTree;
     private readonly Dictionary<string, bool> _folderExpansion;
     private readonly ITimer _missingTimer;
     private List<DocumentItemViewModel> _documentRows = [];
@@ -59,6 +62,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         TimeProvider timeProvider = services.Time;
         _state = state;
         _surface = surface;
+        _services = services;
         _widths = services.Widths;
         _readText = services.ReadText;
         _log = services.Log;
@@ -97,6 +101,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>The selected document's full path, or null when the window shows none.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditContentWidth))]
     public partial string? SelectedPath { get; private set; }
 
     /// <summary>The selected document's file name, or the app name when there is none.</summary>
@@ -125,10 +130,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>True when the selected document is no longer on disk, so the window shows the missing pane instead of the page.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditContentWidth))]
     public partial bool SelectedIsMissing { get; private set; }
 
     /// <summary>True when the selected document exists but cannot be read, so the window shows the can't-read pane instead of the page.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditContentWidth))]
     public partial bool SelectedIsUnreadable { get; private set; }
 
     /// <summary>Why the selected document cannot be read, as the can't-read pane says it; empty when it can.</summary>
@@ -175,19 +182,62 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Steps the shown document's width one grid value, writing the result to where that width comes from (the folder it is
     /// inherited from, or the app default) and sending it to the page. With no document shown it does nothing; a write that
-    /// fails is logged and the page keeps its width. Each press steps once: a step starts after the one before it has
-    /// written and sent its width. <see cref="WhenRendersSettled"/> waits for the steps too.
+    /// fails is logged and the page keeps its width. Each press steps once: a step starts after the width change queued before
+    /// it has written its width, and starts its page call without waiting for the page to answer. An open content-width
+    /// popover on the document reads its width again. <see cref="WhenRendersSettled"/> waits for the steps too.
     /// </summary>
     /// <param name="wider">True to step wider (Ctrl/Cmd+]), false to step narrower (Ctrl/Cmd+[).</param>
     /// <param name="paneWidth">The document pane's width in px; the step compares against the text space it leaves.</param>
     public void StepContentWidth(bool wider, double paneWidth)
     {
-        if (_shownPath is not string path || !SamePath(path, _state.SelectedPath) || SelectedIsMissing || SelectedIsUnreadable)
+        if (ShownEditablePath() is not string path)
         {
             return;
         }
 
-        _lastStep = StepAfterAsync(_lastStep, path, wider, paneWidth);
+        QueueWidthWork(() => StepContentWidthAsync(path, wider, paneWidth));
+    }
+
+    /// <summary>
+    /// True when the window shows a document whose width can be edited: one is selected and it is neither missing nor
+    /// unreadable. The ⟷ button is enabled by it.
+    /// </summary>
+    public bool CanEditContentWidth => SelectedPath is not null && !SelectedIsMissing && !SelectedIsUnreadable;
+
+    /// <summary>
+    /// Creates the content-width popover of the shown document, once the width changes queued before it have finished, or
+    /// null when no document is shown (the window is empty, or its document is missing, unreadable or not shown yet) or the
+    /// selection moved meanwhile. The popover before it, if any, goes stale; so does this one when the window's document
+    /// changes or stops being shown.
+    /// </summary>
+    /// <param name="paneWidth">The document pane's width in px; the slider spans the text space it leaves.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="paneWidth"/> is not a finite number above zero.</exception>
+    public Task<ContentWidthViewModel?> CreateContentWidthPopoverAsync(double paneWidth)
+    {
+        if (!double.IsFinite(paneWidth) || paneWidth <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(paneWidth), paneWidth, "The pane width must be a finite number of px above zero.");
+        }
+
+        if (ShownEditablePath() is not string path)
+        {
+            return Task.FromResult<ContentWidthViewModel?>(null);
+        }
+
+        var created = new TaskCompletionSource<ContentWidthViewModel?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        QueueWidthWork(async () =>
+        {
+            ContentWidthViewModel? popover = null;
+            try
+            {
+                popover = await OpenContentWidthPopoverAsync(path, paneWidth);
+            }
+            finally
+            {
+                created.SetResult(popover);
+            }
+        });
+        return created.Task;
     }
 
     /// <summary>Removes a missing document from the window.</summary>
@@ -271,10 +321,49 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _missingTimer.Dispose();
         _state.Changed -= OnStateChanged;
         _surface.ScrollChanged -= OnScrollChanged;
+        _contentWidthPopover?.MarkStale();
+        _contentWidthPopover = null;
     }
 
-    /// <summary>Completes once every render started so far has finished or been dropped.</summary>
-    internal Task WhenRendersSettled() => Task.WhenAll([.. _renders, _lastStep]);
+    /// <summary>
+    /// Completes once every render and width change started so far, and every width change those queued, has finished or
+    /// been dropped.
+    /// </summary>
+    internal async Task WhenRendersSettled()
+    {
+        Task tail;
+        do
+        {
+            tail = _widthWork;
+            await Task.WhenAll([.. _renders, tail]);
+        } while (!ReferenceEquals(tail, _widthWork));
+    }
+
+    partial void OnSelectedPathChanged(string? value) => RetireStalePopover();
+
+    partial void OnSelectedIsMissingChanged(bool value) => RetireStalePopover();
+
+    partial void OnSelectedIsUnreadableChanged(bool value) => RetireStalePopover();
+
+    partial void OnShowTreeChanged(bool value) => RetireStalePopover();
+
+    /// <summary>
+    /// Marks the content-width popover stale once its document is no longer the shown document, or the tree it took its group
+    /// root from appeared or went.
+    /// </summary>
+    private void RetireStalePopover()
+    {
+        if (
+            _contentWidthPopover is not { } popover
+            || (CanEditContentWidth && SamePath(popover.DocumentPath, SelectedPath) && ShowTree == _contentWidthPopoverShowsTree)
+        )
+        {
+            return;
+        }
+
+        popover.MarkStale();
+        _contentWidthPopover = null;
+    }
 
     partial void OnSelectedItemChanged(TreeItemViewModel? value)
     {
@@ -615,11 +704,74 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         await _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, Fragment: null, width.Px));
     }
 
-    /// <summary>Runs one step once <paramref name="previous"/>, which never faults, has finished.</summary>
-    private async Task StepAfterAsync(Task previous, string path, bool wider, double paneWidth)
+    /// <summary>
+    /// Queues <paramref name="work"/> behind every width change queued before it, so steps and popover changes reach the store
+    /// and the page in the order the user made them. The work starts on the UI thread; a failure is logged.
+    /// </summary>
+    internal void QueueWidthWork(Func<Task> work)
+    {
+        // The queue's tail is set before the work starts, so work it queues before its first await runs after it.
+        Task previous = _widthWork;
+        var run = new Task<Task>(() => RunAfterAsync(previous, work));
+        _widthWork = run.Unwrap();
+        run.RunSynchronously();
+    }
+
+    /// <summary>The open content-width popover, or null when there is none.</summary>
+    internal ContentWidthViewModel? ContentWidthPopover => _contentWidthPopover;
+
+    /// <summary>True while <paramref name="path"/> is the shown document and its width can be edited.</summary>
+    internal bool IsShowingContentWidthOf(string path) => SamePath(path, ShownEditablePath());
+
+    /// <summary>Forgets <paramref name="popover"/> when it is the open one; it closed.</summary>
+    internal void ForgetContentWidthPopover(ContentWidthViewModel popover)
+    {
+        if (ReferenceEquals(popover, _contentWidthPopover))
+        {
+            _contentWidthPopover = null;
+        }
+    }
+
+    /// <summary>Runs <paramref name="work"/> once <paramref name="previous"/>, which never faults, has finished.</summary>
+    private async Task RunAfterAsync(Task previous, Func<Task> work)
     {
         await previous;
-        await StepContentWidthAsync(path, wider, paneWidth);
+        try
+        {
+            await work();
+        }
+        // The queue is only awaited by WhenRendersSettled, so a failure is logged here or nowhere.
+        catch (Exception exception)
+        {
+            _log.LogError("Cannot change the content width.", exception);
+        }
+    }
+
+    /// <summary>
+    /// The shown document when its width can be edited: the window is not disposed, and the document is the selection and
+    /// neither missing nor unreadable.
+    /// </summary>
+    private string? ShownEditablePath() =>
+        !_disposed && _shownPath is string path && SamePath(path, _state.SelectedPath) && CanEditContentWidth ? path : null;
+
+    private async Task<ContentWidthViewModel?> OpenContentWidthPopoverAsync(string path, double paneWidth)
+    {
+        (ContentWidth width, WidthSource source) = await Task.Run(() => _widths.Resolve(path));
+        if (!SamePath(path, ShownEditablePath()) || _state.GroupOf(path) is not GroupNode group)
+        {
+            return null;
+        }
+
+        // A window without a tree (a one-file viewer) shows no group, so its document's folder is its own group root.
+        string folder = Path.GetDirectoryName(path) ?? path;
+        string groupRoot = ShowTree ? group.Path : folder;
+        bool groupIsRepo = group.IsRepo && SamePath(group.Path, groupRoot);
+        var host = new ContentWidthHost(path, _surface, _services, this, from => WidthScopes.For(path, groupRoot, groupIsRepo, from));
+        var popover = new ContentWidthViewModel(host, source, width, paneWidth);
+        _contentWidthPopover?.MarkStale();
+        _contentWidthPopover = popover;
+        _contentWidthPopoverShowsTree = ShowTree;
+        return popover;
     }
 
     private async Task StepContentWidthAsync(string path, bool wider, double paneWidth)
@@ -640,15 +792,36 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            if (!_disposed && SamePath(path, _shownPath))
+            if (_disposed || !SamePath(path, _shownPath))
             {
-                await _surface.SetContentWidthAsync(stepped.Px);
+                return;
+            }
+
+            // Started here so page calls keep the queue's order, but not awaited: a page that never answers must not hold
+            // the queue.
+            _ = SendSteppedWidthAsync(path, stepped.Px);
+            if (_contentWidthPopover is { } popover && SamePath(popover.DocumentPath, path))
+            {
+                popover.Refresh();
             }
         }
         // The step's task is only awaited by WhenRendersSettled, so its failure is logged here or nowhere.
         catch (Exception exception)
         {
             _log.LogError($"Cannot step the content width of {path}.", exception);
+        }
+    }
+
+    private async Task SendSteppedWidthAsync(string path, double? px)
+    {
+        try
+        {
+            await _surface.SetContentWidthAsync(px);
+        }
+        // The send is not awaited by anyone, so its failure is logged here or nowhere.
+        catch (Exception exception)
+        {
+            _log.LogError($"Cannot send the stepped content width of {path} to the page.", exception);
         }
     }
 

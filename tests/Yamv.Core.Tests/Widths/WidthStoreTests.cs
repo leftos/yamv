@@ -606,6 +606,27 @@ public sealed class WidthStoreTests : IDisposable
         Assert.Empty(_log.Entries);
     }
 
+    [Fact]
+    public void ResolveFolder_GivesTheNearestWidthAtOrAboveTheFolderElseTheDefault()
+    {
+        WidthStore store = CreateStore();
+        Assert.True(store.Set(Docs, ContentWidth.FromPx(720)));
+        Assert.True(store.Set(FolderA, ContentWidth.FromPx(600)));
+        Assert.True(store.SetDefault(ContentWidth.FromPx(900)));
+
+        (ContentWidth own, WidthSource ownSource) = store.ResolveFolder(FolderA);
+        (ContentWidth inherited, WidthSource inheritedSource) = store.ResolveFolder(Path.Combine(FolderB, "deeper"));
+        (ContentWidth fallback, WidthSource fallbackSource) = store.ResolveFolder(_directory);
+
+        Assert.Equal(600, own.Px);
+        Assert.Equal(FolderA, ownSource.Folder);
+        Assert.Equal(720, inherited.Px);
+        Assert.Equal(Docs, inheritedSource.Folder);
+        Assert.Equal(900, fallback.Px);
+        Assert.True(fallbackSource.IsAppDefault);
+        Assert.Throws<ArgumentException>(() => store.ResolveFolder("relative"));
+    }
+
     private static void AssertResolves(WidthStore store, string document, double px, string folder)
     {
         (ContentWidth width, WidthSource source) = store.Resolve(document);

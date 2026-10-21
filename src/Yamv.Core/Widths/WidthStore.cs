@@ -83,6 +83,18 @@ public sealed class WidthStore
     public (ContentWidth Width, WidthSource Source) Resolve(string documentPath)
     {
         string? folder = Path.GetDirectoryName(WidthKeys.Normalize(documentPath, nameof(documentPath)));
+        return ResolveFrom(folder);
+    }
+
+    /// <summary>
+    /// The width a document in <paramref name="folder"/> uses: that of the nearest folder at or above it that has one, else
+    /// the app default, with where it came from.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="folder"/> is blank or not a full path.</exception>
+    public (ContentWidth Width, WidthSource Source) ResolveFolder(string folder) => ResolveFrom(WidthKeys.Normalize(folder, nameof(folder)));
+
+    private (ContentWidth Width, WidthSource Source) ResolveFrom(string? folder)
+    {
         lock (gate)
         {
             ReadForLookup();

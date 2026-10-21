@@ -25,6 +25,7 @@
 - **Persist**: a window's flag saying its documents, selection and layout are saved to the session file; true only for the main instance's window.
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.
 - **Reveal**: showing a path in the platform's file manager from a tree menu: a file is shown selected in Explorer or Finder, a folder or group root is opened, and a missing document opens its nearest folder that still exists (`RevealCommand`).
+- **Saved for**: the content-width popover's segmented control: the folders a width can be saved for, deepest first, then All documents (`WidthScopes`, [content-width.md](design/content-width.md)).
 - **Second launch**: a no-argument `yamv` start while another process holds the main-instance lock; it asks the main instance to come forward and exits 0, brings that window forward itself and exits 1 when the signal fails, or, with no pid file, waits up to 5 s for the lock and starts as the main instance (`SecondLaunch`).
 - **Settings file**: `settings.json`, the app-wide settings shared by every window and process (`SettingsStore`); widths stay in `widths.json`, and the main window's documents and layout in `session.json`.
 - **Sidebar**: the pane on the window's right holding the tree of open documents.
