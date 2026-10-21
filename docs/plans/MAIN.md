@@ -46,11 +46,14 @@
 - [ ] YAMV-60 Theme settings: disk-change edge cases (broken in-use theme not held, Appearance dropped, Revert vs bar)
 - [ ] YAMV-63 Content width popover: stale cached width, store exceptions, Reset-before-EndDrag segment
 - [ ] YAMV-64 Document file watcher follow-ups: error loop after healthy ticks, unstarted source, spin helper, dead-share threads
+- [ ] YAMV-68 Toast when the theme in use goes bad or is deleted outside the app
+- [ ] YAMV-69 Content-width popover: keep the keyboard focus ring when the Clear all question moves focus
 
 ## Single instance
 
 - [ ] YAMV-54 Single instance: every window in one process; file launches open viewer windows in it
-  - [/] YAMV-62 54-A: open message with confirmation over a duplex instance channel (Core)
+  - [ ] YAMV-66 Merge feat/single-instance to main (#2)
+  - [ ] YAMV-71 54-B1 follow-ups: pin the reply-bound coupling, finally hides the loop error, answer activate requests
 
 ## Ship v1
 
