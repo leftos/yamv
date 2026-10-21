@@ -2,6 +2,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Yamv.App.Controls;
+using Yamv.App.Services;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
@@ -17,10 +18,18 @@ namespace Yamv.App.ViewModels;
 /// thread; it is shown, with its width, only if it is still the selection when both finish. Missing documents are re-checked
 /// every two seconds and shown again when they reappear. Every member is called on the UI thread.
 /// </summary>
+/// <remarks>
+/// The open documents are followed through the window's <see cref="IDocumentChanges"/>: a report on the selected document
+/// reads and renders it again at its scroll position, and a report on another re-checks only whether it is on disk. The
+/// watched documents are updated before a newly opened document is read, so a save in the single pool dispatch between that
+/// read and the watcher stamping the file is not reported, and is picked up by the next change.
+/// </remarks>
 public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 {
     private const string AppName = "YAMV";
     private static readonly TimeSpan MissingRecheckInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan DeleteGrace = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan InUseLimit = TimeSpan.FromSeconds(10);
 
     private readonly DocumentWindowState _state;
     private readonly IDocumentSurface _surface;
@@ -30,6 +39,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private readonly MarkdownRenderer _renderer = new();
     private readonly Dictionary<string, double> _scrollPositions;
     private readonly HashSet<string> _unreadable;
+    private readonly Dictionary<string, DateTimeOffset> _inUseSince;
     private readonly HashSet<Task> _renders = [];
     private readonly DocumentWindowServices _services;
     private Task _widthWork = Task.CompletedTask;
@@ -37,6 +47,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private bool _contentWidthPopoverShowsTree;
     private readonly Dictionary<string, bool> _folderExpansion;
     private readonly ITimer _missingTimer;
+    private readonly IDocumentChanges? _changes;
+    private List<string> _watchedDocuments = [];
+    private string? _shownHtml;
+    private double? _shownWidth;
+    private ITimer? _graceTimer;
+    private string? _gracePath;
     private List<DocumentItemViewModel> _documentRows = [];
     private int _syncDepth;
     private int _renderGeneration;
@@ -49,7 +65,10 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>Creates the view model of a window over <paramref name="state"/>, and starts the missing-file re-check.</summary>
     /// <param name="state">The window's documents, selection and layout.</param>
     /// <param name="surface">The view that draws the selected document.</param>
-    /// <param name="services">The width store, the document reader, the clock and the log the window uses.</param>
+    /// <param name="services">
+    /// The width store, the document reader, the clock, the log and what reports the documents' changes, which the view model
+    /// takes ownership of.
+    /// </param>
     public DocumentWindowViewModel(DocumentWindowState state, IDocumentSurface surface, DocumentWindowServices services)
     {
         ArgumentNullException.ThrowIfNull(state);
@@ -68,10 +87,15 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _log = services.Log;
         _scrollPositions = new Dictionary<string, double>(state.PathComparer);
         _unreadable = new HashSet<string>(state.PathComparer);
+        _inUseSince = new Dictionary<string, DateTimeOffset>(state.PathComparer);
         _folderExpansion = new Dictionary<string, bool>(state.PathComparer);
         _state.Changed += OnStateChanged;
         _surface.ScrollChanged += OnScrollChanged;
+        _changes = services.Changes;
+        _changes?.Changed += OnDocumentsChangedReported;
+
         Sync();
+        WatchDocuments();
         _sessionKey = SessionKey();
         _missingTimer = timeProvider.CreateTimer(_ => OnMissingRecheckDue(), null, MissingRecheckInterval, MissingRecheckInterval);
     }
@@ -166,17 +190,20 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Checks which documents are on disk, then reads and renders the selected document again, keeping its scroll position.
+    /// Asked for by the user, it shows at once what it finds: a gone file shows the missing pane and a failed read the
+    /// can't-read pane, with no delete grace and no wait while the file is in use.
     /// </summary>
     [RelayCommand]
     public void Reload()
     {
+        EndGrace();
         bool wasMissing = SelectedIsMissing;
         if (_state.RefreshMissing() && wasMissing && !SelectedIsMissing)
         {
             return;
         }
 
-        RenderSelection();
+        RenderSelection(RenderOrigin.Show);
     }
 
     /// <summary>
@@ -307,7 +334,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     public SessionState BuildSession(WindowBounds? bounds, double sidebarWidth) =>
         SessionSnapshot.Build(_state, _scrollPositions, bounds, sidebarWidth);
 
-    /// <summary>Stops the missing-file re-check and stops following the state and the surface.</summary>
+    /// <summary>Stops the missing-file re-check and the watching of the documents, and stops following the state and the surface.</summary>
     public void Dispose()
     {
         if (_disposed)
@@ -316,7 +343,14 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
 
         _disposed = true;
+        if (_changes is not null)
+        {
+            _changes.Changed -= OnDocumentsChangedReported;
+            _changes.Dispose();
+        }
+
         _missingTimer.Dispose();
+        EndGrace();
         _state.Changed -= OnStateChanged;
         _surface.ScrollChanged -= OnScrollChanged;
         _contentWidthPopover?.MarkStale();
@@ -403,9 +437,10 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         string? previousPath = SelectedPath;
         bool wasMissing = SelectedIsMissing;
         Sync();
+        WatchDocuments();
         if (!SamePath(previousPath, SelectedPath) || (wasMissing && !SelectedIsMissing))
         {
-            RenderSelection();
+            RenderSelection(RenderOrigin.Show);
         }
 
         if (_state.WindowShouldClose && !_closeRequested)
@@ -458,6 +493,10 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// The retry tick: re-checks which documents are on disk, giving the shown page whose file is gone its delete grace instead
+    /// of the missing pane, and reads again a selection that cannot be read or is kept while in use.
+    /// </summary>
     private void RecheckMissing()
     {
         if (_disposed)
@@ -465,10 +504,163 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        _state.RefreshMissing();
-        if (SelectedIsUnreadable && !RenderInFlight)
+        string? shown = ShownSelection();
+        ProbeMissingExcept(shown);
+        StartGraceIfGone(shown);
+        bool keptWhileInUse = _state.SelectedPath is string selected && _inUseSince.ContainsKey(selected);
+        if ((SelectedIsUnreadable || keptWhileInUse) && !RenderInFlight)
         {
-            RenderSelection();
+            RenderSelection(RenderOrigin.Reload);
+        }
+    }
+
+    /// <summary>
+    /// Re-checks whether the open documents are on disk, leaving alone <paramref name="kept"/> and the document whose delete
+    /// grace runs; true when a missing flag changed.
+    /// </summary>
+    private bool ProbeMissingExcept(string? kept)
+    {
+        List<string> probed = [.. _state.Documents.Where(path => !SamePath(path, kept) && !SamePath(path, _gracePath))];
+        return _state.RefreshMissing(probed);
+    }
+
+    /// <summary>The selected document while its page is the one shown and it is neither missing nor unreadable; else null.</summary>
+    private string? ShownSelection() =>
+        _state.SelectedPath is string path && SamePath(path, _shownPath) && !IsMissing(path) && !_unreadable.Contains(path) ? path : null;
+
+    /// <summary>Starts the delete grace of the shown page <paramref name="shown"/> when its file is gone and no grace runs for it.</summary>
+    private void StartGraceIfGone(string? shown)
+    {
+        if (shown is not null && !SamePath(shown, _gracePath) && !_state.ExistsOnDisk(shown))
+        {
+            StartGrace(shown);
+        }
+    }
+
+    /// <summary>
+    /// Tells the watcher the open documents when they differ from those it was last told. A failure is logged, and the
+    /// watcher is told again only once the documents change.
+    /// </summary>
+    private void WatchDocuments()
+    {
+        if (_changes is null || _state.Documents.SequenceEqual(_watchedDocuments, _state.PathComparer))
+        {
+            return;
+        }
+
+        List<string> documents = [.. _state.Documents];
+        _watchedDocuments = documents;
+        try
+        {
+            _changes.SetPaths(documents);
+        }
+        // Watching only makes reloads prompt: a window that cannot watch still shows, re-checks and reloads its documents.
+        catch (Exception exception)
+        {
+            _log.LogError("Cannot watch the open documents for changes; they are re-read only when reloaded or re-checked.", exception);
+        }
+    }
+
+    /// <summary>Runs on the watcher's pool thread: it only posts the report to the UI thread, never waiting on it.</summary>
+    private void OnDocumentsChangedReported(object? sender, DocumentsChangedEventArgs e)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        IReadOnlySet<string> paths = e.Paths;
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            OnDocumentsChanged(paths);
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() => OnDocumentsChanged(paths));
+        }
+    }
+
+    /// <summary>
+    /// Handles a change report on the UI thread, probing only the open documents <paramref name="paths"/> names and leaving
+    /// alone the one whose delete grace runs. The selected document, when named and not missing, is read and rendered again,
+    /// so a shown page whose file is gone gets its delete grace; a missing selection is probed, and one that came back is
+    /// rendered once, by the state change that shows it. Every other named document is only re-checked for whether it is on
+    /// disk. Paths that are not open are ignored.
+    /// </summary>
+    private void OnDocumentsChanged(IReadOnlySet<string> paths)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        string? selected = _state.SelectedPath;
+        bool selectedWasMissing = SelectedIsMissing;
+        List<string> changed = [.. _state.Documents.Where(document => paths.Any(path => SamePath(path, document)))];
+        List<string> probed = [.. changed.Where(path => !SamePath(path, _gracePath) && (selectedWasMissing || !SamePath(path, selected)))];
+        if (probed.Count > 0)
+        {
+            _state.RefreshMissing(probed);
+        }
+
+        if (!selectedWasMissing && changed.Any(path => SamePath(path, selected)))
+        {
+            RenderSelection(RenderOrigin.Reload);
+        }
+    }
+
+    /// <summary>
+    /// Keeps the shown page of <paramref name="path"/>, whose file was found gone by a reload, and re-checks it once after
+    /// <see cref="DeleteGrace"/>, so an editor that deletes and re-creates a file on save never shows the missing pane. A
+    /// grace already running for it is kept as it is, and a document already missing gets none.
+    /// </summary>
+    private void StartGrace(string path)
+    {
+        if (SamePath(_gracePath, path) || IsMissing(path))
+        {
+            return;
+        }
+
+        EndGrace();
+        _gracePath = path;
+        _graceTimer = _services.Time.CreateTimer(_ => OnGraceDue(), null, DeleteGrace, Timeout.InfiniteTimeSpan);
+    }
+
+    private void EndGrace()
+    {
+        _graceTimer?.Dispose();
+        _graceTimer = null;
+        _gracePath = null;
+    }
+
+    private void OnGraceDue()
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            RecheckAfterGrace();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(RecheckAfterGrace);
+        }
+    }
+
+    /// <summary>
+    /// Ends the delete grace: the document's missing flag is read again, and a selected document still on disk is read again,
+    /// with no second grace; one gone shows the missing pane.
+    /// </summary>
+    private void RecheckAfterGrace()
+    {
+        if (_disposed || _gracePath is not string path)
+        {
+            return;
+        }
+
+        EndGrace();
+        _state.RefreshMissing([path]);
+        if (SamePath(path, _state.SelectedPath) && !IsMissing(path))
+        {
+            RenderSelection(RenderOrigin.ReloadAfterGrace);
         }
     }
 
@@ -646,7 +838,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         return documents.FirstOrDefault(path => !IsMissing(path)) ?? (documents.Count > 0 ? documents[0] : null);
     }
 
-    private void RenderSelection()
+    /// <summary>Reads and renders the selected document off the UI thread, dropping any render started before.</summary>
+    /// <param name="requested">
+    /// Why the document is read. A reload counts as one only when the selection's page is the one shown and it is not
+    /// unreadable; otherwise the read is a first show.
+    /// </param>
+    private void RenderSelection(RenderOrigin requested)
     {
         int generation = ++_renderGeneration;
         string? path = _state.SelectedPath;
@@ -655,15 +852,17 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        bool showsPage = SamePath(_shownPath, path) && !_unreadable.Contains(path);
+        RenderOrigin origin = showsPage ? requested : RenderOrigin.Show;
         _renders.RemoveWhere(render => render.IsCompleted);
-        _renders.Add(RenderAsync(path, generation));
+        _renders.Add(RenderAsync(path, generation, origin));
     }
 
-    private async Task RenderAsync(string path, int generation)
+    private async Task RenderAsync(string path, int generation, RenderOrigin origin)
     {
         try
         {
-            await RenderCoreAsync(path, generation);
+            await RenderCoreAsync(path, generation, origin);
         }
         catch (Exception exception)
         {
@@ -671,7 +870,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task RenderCoreAsync(string path, int generation)
+    private async Task RenderCoreAsync(string path, int generation, RenderOrigin origin)
     {
         RenderedDocument document;
         ContentWidth width;
@@ -681,12 +880,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
         catch (IOException exception)
         {
-            OnReadFailed(path, exception, generation);
+            OnReadFailed(path, exception, generation, origin);
             return;
         }
         catch (UnauthorizedAccessException exception)
         {
-            OnReadFailed(path, exception, generation);
+            OnReadFailed(path, exception, generation, origin);
             return;
         }
 
@@ -697,9 +896,35 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
         ClearUnreadable(path);
         double scroll = _scrollPositions.GetValueOrDefault(path);
-        _shownPath = path;
+        if (!MarkShown(path, document.Html, width.Px, origin))
+        {
+            return;
+        }
+
         // Nothing may be awaited between the check above and this call: a document that is no longer the selection is never shown.
         await _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, Fragment: null, width.Px));
+    }
+
+    /// <summary>
+    /// Records <paramref name="path"/> as the shown document, ending its delete grace since it was read, and returns false when
+    /// it is a reload of the page already shown with the same HTML at the same width, which needs no new show.
+    /// </summary>
+    private bool MarkShown(string path, string html, double? widthPx, RenderOrigin origin)
+    {
+        if (SamePath(_gracePath, path))
+        {
+            EndGrace();
+        }
+
+        bool unchanged =
+            origin != RenderOrigin.Show
+            && SamePath(_shownPath, path)
+            && string.Equals(_shownHtml, html, StringComparison.Ordinal)
+            && _shownWidth == widthPx;
+        _shownPath = path;
+        _shownHtml = html;
+        _shownWidth = widthPx;
+        return !unchanged;
     }
 
     /// <summary>
@@ -838,22 +1063,46 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void OnReadFailed(string path, Exception exception, int generation)
+    private void OnReadFailed(string path, Exception exception, int generation, RenderOrigin origin)
     {
         if (_disposed)
         {
             return;
         }
 
-        _state.RefreshMissing();
-        if (generation != _renderGeneration || !SamePath(path, _state.SelectedPath))
+        bool current = generation == _renderGeneration && SamePath(path, _state.SelectedPath);
+        if (origin == RenderOrigin.Reload && IsGone(exception))
         {
+            KeepPageOfGoneFile(path, current);
             return;
         }
 
+        if (IsGone(exception) && SamePath(path, _gracePath))
+        {
+            EndGrace();
+        }
+
+        ProbeMissingExcept(null);
+        if (current)
+        {
+            ShowReadFailure(path, exception, origin);
+        }
+    }
+
+    /// <summary>
+    /// Shows why the selected document's current read failed: the missing pane when it is gone, nothing while a reload of its
+    /// shown page finds it in use for less than <see cref="InUseLimit"/>, else the can't-read pane.
+    /// </summary>
+    private void ShowReadFailure(string path, Exception exception, RenderOrigin origin)
+    {
         if (IsMissing(path))
         {
             ClearUnreadable(path);
+            return;
+        }
+
+        if (origin != RenderOrigin.Show && KeepsPageWhileInUse(path, exception))
+        {
             return;
         }
 
@@ -867,10 +1116,53 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         UnreadableReason = ReadFailure.ReasonFor(exception);
     }
 
-    /// <summary>Forgets that <paramref name="path"/> cannot be read: its row's warning glyph goes, and the pane when it is selected.</summary>
+    /// <summary>
+    /// Handles a reload of the shown page whose file is gone: the page stays, and the current read starts the delete grace,
+    /// after which the file's read shows the page or the missing pane shows. A read the selection left behind greys its
+    /// document's row at once; one a newer read of the same selection replaced leaves it to that read.
+    /// </summary>
+    private void KeepPageOfGoneFile(string path, bool current)
+    {
+        if (current)
+        {
+            StartGrace(path);
+        }
+        else if (!SamePath(path, _state.SelectedPath))
+        {
+            _state.RefreshMissing([path]);
+        }
+    }
+
+    /// <summary>
+    /// True when a reload of the shown page of <paramref name="path"/> failed because another program holds the file, and
+    /// its reloads have kept failing so for less than <see cref="InUseLimit"/>: the page stays unchanged, and the next report
+    /// or retry tick reads it again.
+    /// </summary>
+    private bool KeepsPageWhileInUse(string path, Exception exception)
+    {
+        if (ReadFailure.ReasonFor(exception) != ReadFailure.InUseByAnotherProgram)
+        {
+            return false;
+        }
+
+        DateTimeOffset now = _services.Time.GetUtcNow();
+        if (!_inUseSince.TryGetValue(path, out DateTimeOffset since))
+        {
+            since = now;
+            _inUseSince[path] = since;
+        }
+
+        return now - since < InUseLimit;
+    }
+
+    /// <summary>
+    /// Forgets that <paramref name="path"/> cannot be read, and since when it has been in use: its row's warning glyph goes,
+    /// and the pane when it is selected.
+    /// </summary>
     private void ClearUnreadable(string path)
     {
         _unreadable.Remove(path);
+        _inUseSince.Remove(path);
         SetRowUnreadable(path, false);
         if (SamePath(path, _state.SelectedPath))
         {
@@ -906,9 +1198,30 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>True when a read failed because the file or its folder is no longer on disk.</summary>
+    private static bool IsGone(Exception exception) => exception is FileNotFoundException or DirectoryNotFoundException;
+
     private bool IsMissing(string path) => _state.Tree.Documents.Any(document => document.IsMissing && SamePath(document.Path, path));
 
     private bool SamePath(string? first, string? second) => first is not null && second is not null && _state.PathComparer.Equals(first, second);
+
+    /// <summary>Why a document is read: to show it, or to read again the page already shown.</summary>
+    private enum RenderOrigin
+    {
+        /// <summary>
+        /// A first show, or the user's Reload command: any failure shows its pane at once, and the page is always sent again.
+        /// </summary>
+        Show,
+
+        /// <summary>
+        /// A reload of the shown page after a change report or a retry tick: a gone file gets the delete grace, a file in use
+        /// keeps the page for a while, and the same HTML at the same width is not sent again.
+        /// </summary>
+        Reload,
+
+        /// <summary>The read after the delete grace: as <see cref="Reload"/>, with no second grace.</summary>
+        ReloadAfterGrace,
+    }
 
     /// <summary>One row of the tree's shape: its kind (repo group, folder group, folder or document), name, path and depth.</summary>
     private readonly record struct ShapeRow(char Kind, string Name, string Path, int Depth);
@@ -919,7 +1232,17 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 /// <param name="ReadText">Reads a document's markdown; called off the UI thread.</param>
 /// <param name="Time">The clock of the missing-file re-check.</param>
 /// <param name="Log">Where read and width failures are reported.</param>
-public sealed record DocumentWindowServices(WidthStore Widths, Func<string, string> ReadText, TimeProvider Time, IAppLog Log);
+/// <param name="Changes">
+/// What reports the open documents' changes on disk; the view model owns it and disposes it. Null for a window that does not
+/// follow its documents.
+/// </param>
+public sealed record DocumentWindowServices(
+    WidthStore Widths,
+    Func<string, string> ReadText,
+    TimeProvider Time,
+    IAppLog Log,
+    IDocumentChanges? Changes = null
+);
 
 /// <summary>What kind of session change <see cref="DocumentWindowViewModel.SessionDirty"/> reports.</summary>
 /// <param name="scrollOnly">True when only the shown document's scroll position changed.</param>

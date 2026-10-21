@@ -134,6 +134,44 @@ public sealed class MainWindowFactoryTests
             Assert.DoesNotContain("appearance", json, StringComparison.OrdinalIgnoreCase);
         });
 
+    [Fact]
+    public Task Create_and_CreateViewer_watch_their_documents() =>
+        Headless.RunAsync(async () =>
+        {
+            await using (var main = new ViewerFixture())
+            {
+                string plan = main.Write("plan.md");
+                new SessionStore(main.SessionFile, main.Log).Save(new SessionState { OpenFiles = [plan], SelectedFile = plan });
+
+                main.BuildMain();
+
+                Assert.Equal([plan], Assert.Single(main.Changes.SetPathsCalls));
+                Assert.True(main.Changes.HasSubscribers);
+            }
+
+            await using var viewer = new ViewerFixture();
+            string notes = viewer.Write("notes.md");
+            string gone = viewer.PathOf("gone.md");
+
+            viewer.Build(gone, notes);
+
+            Assert.Equal([gone, notes], Assert.Single(viewer.Changes.SetPathsCalls).Order(StringComparer.Ordinal));
+            Assert.True(viewer.Changes.HasSubscribers);
+        });
+
+    [Fact]
+    public Task Disposing_the_composition_disposes_the_watcher() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture();
+            viewer.Build(viewer.Write("plan.md"));
+
+            viewer.Composition.Dispose();
+
+            Assert.True(viewer.Changes.Disposed);
+            Assert.False(viewer.Changes.HasSubscribers);
+        });
+
     /// <summary>
     /// Builds a viewer window or a main window over a temp data folder whose session file a test may seed. A viewer draws its
     /// pages on a <see cref="FakeDocumentSurface"/> that completes its renders, so the fixture can wait for every render
@@ -165,6 +203,9 @@ public sealed class MainWindowFactoryTests
 
         public FakeDocumentSurface Surface { get; } = new();
 
+        /// <summary>What the window built follows its documents' changes through.</summary>
+        public FakeDocumentChanges Changes { get; } = new();
+
         public ThemeBridge Bridge { get; }
 
         /// <summary>The app's one width store, over <c>widths.json</c> in the temp data folder.</summary>
@@ -177,10 +218,11 @@ public sealed class MainWindowFactoryTests
 
         /// <summary>Creates a viewer window over <paramref name="files"/>, drawn on <see cref="Surface"/>.</summary>
         /// <param name="files">The full paths the viewer shows.</param>
-        public void Build(params string[] files) => Composition = MainWindowFactory.CreateViewer(Bridge, Widths, files, Log, new Border(), Surface);
+        public void Build(params string[] files) =>
+            Composition = MainWindowFactory.CreateViewer(Bridge, Widths, files, Log, new ViewerParts(new Border(), Surface, Changes));
 
-        /// <summary>Creates a main window over the temp data folder's session.</summary>
-        public void BuildMain() => Composition = MainWindowFactory.Create(Bridge, Widths, Log);
+        /// <summary>Creates a main window over the temp data folder's session, following its documents through <see cref="Changes"/>.</summary>
+        public void BuildMain() => Composition = MainWindowFactory.Create(Bridge, Widths, Log, Changes);
 
         /// <summary>The full path of a file in the documents folder; it is not created.</summary>
         /// <param name="name">The file's name.</param>

@@ -28,8 +28,9 @@ public sealed class DocumentWindowState
     /// <param name="persist">True for the main window, which saves its session; false for a viewer window.</param>
     /// <param name="findRepoRoot">Reports the git work-tree root that contains a file, or null when it is in none.</param>
     /// <param name="fileExists">
-    /// Reports whether a document is still on disk. Only adding a document, replacing it with another and
-    /// <see cref="RefreshMissing"/> ask it; every other operation rebuilds the tree from the answers it already has.
+    /// Reports whether a document is still on disk. Only adding a document, replacing it with another,
+    /// <see cref="RefreshMissing()"/> (for every document or for some) and <see cref="ExistsOnDisk"/> ask it; every other
+    /// operation rebuilds the tree from the answers it already has.
     /// </param>
     /// <param name="options">The home folder and path comparison the document tree is built with.</param>
     public DocumentWindowState(bool persist, Func<string, string?> findRepoRoot, Func<string, bool> fileExists, GroupingOptions options)
@@ -293,10 +294,34 @@ public sealed class DocumentWindowState
     }
 
     /// <summary>Re-reads which documents are on disk, and returns whether any document's missing flag changed.</summary>
-    public bool RefreshMissing()
+    public bool RefreshMissing() => Refresh(documents);
+
+    /// <summary>
+    /// Re-reads whether the given open documents are on disk, leaving every other document's missing flag as it is, and returns
+    /// whether any flag changed. A path that is not open is ignored.
+    /// </summary>
+    /// <param name="paths">The full paths of the documents to check.</param>
+    public bool RefreshMissing(IEnumerable<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return Refresh([.. paths.Where(openPaths.Contains)]);
+    }
+
+    /// <summary>
+    /// Asks whether <paramref name="path"/> is on disk now, leaving its missing flag and every other part of the state as it
+    /// is, and raising no <see cref="Changed"/>.
+    /// </summary>
+    /// <param name="path">The full path of the document to check.</param>
+    public bool ExistsOnDisk(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return existsOnDisk(path);
+    }
+
+    private bool Refresh(IEnumerable<string> paths)
     {
         HashSet<string> before = MissingDocuments();
-        ProbeMissing(documents);
+        ProbeMissing(paths);
         Rebuild();
         bool changed = !before.SetEquals(MissingDocuments());
         if (changed)

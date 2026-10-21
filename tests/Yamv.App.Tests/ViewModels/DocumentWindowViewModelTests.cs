@@ -740,6 +740,559 @@ public sealed class DocumentWindowViewModelTests
         });
 
     [Fact]
+    public Task Opening_documents_sets_the_watched_paths() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            bool watchedBeforeRead = false;
+            fixture.Reader = path =>
+            {
+                watchedBeforeRead = fixture.Changes.SetPathsCalls.Count > 0;
+                return fixture.Files[path];
+            };
+
+            fixture.ViewModel.Open([RepoDocA, RepoRootDoc]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal<string>(fixture.State.Documents, Assert.Single(fixture.Changes.SetPathsCalls));
+            Assert.Contains(RepoRootDoc, fixture.State.Documents);
+            Assert.True(watchedBeforeRead, "the document was read before the window watched it");
+        });
+
+    [Fact]
+    public Task Closing_and_replacing_a_document_updates_the_watched_paths() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Files[RepoDocC] = "# C";
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            DocumentRow(fixture.ViewModel, RepoDocB).CloseCommand.Execute(null);
+            fixture.ViewModel.Replace(RepoDocA, RepoDocC);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            IReadOnlyList<IReadOnlyList<string>> calls = fixture.Changes.SetPathsCalls;
+            Assert.Equal(3, calls.Count);
+            Assert.Equal<string>([RepoDocA], calls[1]);
+            Assert.Equal<string>([RepoDocC], calls[2]);
+        });
+
+    [Fact]
+    public Task A_selection_change_does_not_call_SetPaths_again() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(RepoDocB, fixture.Surface.Shown[^1].DocumentPath);
+            Assert.Single(fixture.Changes.SetPathsCalls);
+        });
+
+    [Fact]
+    public Task A_change_to_the_selected_document_rereads_and_shows_it_again_at_the_same_scroll() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.RaiseScroll(0.3);
+            fixture.Files[RepoDocA] = "# Saved in an editor";
+
+            await fixture.ReportAsync(RepoDocA);
+
+            Assert.Equal(2, fixture.Surface.Shown.Count);
+            ShownDocument reloaded = fixture.Surface.Shown[1];
+            Assert.Equal(RepoDocA, reloaded.DocumentPath);
+            Assert.Equal(0.3, reloaded.Scroll);
+            Assert.Contains("Saved in an editor", reloaded.Html, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task A_change_to_another_document_greys_its_row_without_a_render() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Absent.Add(RepoDocB);
+            fixture.Files.Remove(RepoDocB);
+
+            await fixture.ReportAsync(RepoDocB);
+
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocB).IsMissing);
+            Assert.Equal(RepoDocA, fixture.ViewModel.SelectedPath);
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            Assert.Single(fixture.Surface.Shown);
+        });
+
+    [Fact]
+    public Task A_change_to_a_document_that_is_not_open_is_ignored() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            int probes = fixture.ExistsCalls;
+            fixture.Absent.Add(AlphaDoc);
+
+            await fixture.ReportAsync(AlphaDoc);
+
+            Assert.Equal(probes, fixture.ExistsCalls);
+            Assert.DoesNotContain(AlphaDoc, fixture.State.Documents);
+            Assert.Single(fixture.Surface.Shown);
+        });
+
+    [Fact]
+    public Task A_burst_of_reports_renders_the_latest_content_once() =>
+        Headless.RunAsync(async () =>
+        {
+            using var gate = new ManualResetEventSlim();
+            using var entered = new SemaphoreSlim(0);
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            int reads = 0;
+            fixture.Reader = path =>
+            {
+                string text = fixture.Files[path];
+                Interlocked.Increment(ref reads);
+                entered.Release();
+                WaitFor(gate);
+                return text;
+            };
+
+            foreach (string save in (string[])["# First save", "# Second save", "# Third save"])
+            {
+                fixture.Files[RepoDocA] = save;
+                fixture.RaiseFromPool(RepoDocA);
+                Dispatcher.UIThread.RunJobs();
+                WaitFor(entered);
+            }
+
+            gate.Set();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(3, reads);
+            Assert.Equal(2, fixture.Surface.Shown.Count);
+            Assert.Contains("Third save", fixture.Surface.Shown[1].Html, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task A_report_for_a_missing_selection_that_returned_renders_once() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Absent.Add(RepoDocA);
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            fixture.Absent.Remove(RepoDocA);
+
+            await fixture.ReportAsync(RepoDocA);
+
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            ShownDocument shown = Assert.Single(fixture.Surface.Shown);
+            Assert.Equal(RepoDocA, shown.DocumentPath);
+        });
+
+    [Fact]
+    public Task A_reload_with_unchanged_html_shows_nothing_new() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            int reads = 0;
+            fixture.Reader = path =>
+            {
+                Interlocked.Increment(ref reads);
+                return fixture.Files[path];
+            };
+
+            await fixture.ReportAsync(RepoDocA);
+
+            Assert.Equal(1, reads);
+            Assert.Single(fixture.Surface.Shown);
+        });
+
+    [Fact]
+    public Task A_report_after_dispose_does_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Files[RepoDocA] = "# Saved after the window went";
+
+            fixture.RaiseFromPool(RepoDocA);
+            fixture.ViewModel.Dispose();
+            Dispatcher.UIThread.RunJobs();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Single(fixture.Surface.Shown);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "error");
+        });
+
+    [Fact]
+    public Task Dispose_disposes_the_watcher_and_unsubscribes() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Changes.HasSubscribers);
+
+            fixture.ViewModel.Dispose();
+
+            Assert.True(fixture.Changes.Disposed);
+            Assert.False(fixture.Changes.HasSubscribers);
+        });
+
+    [Fact]
+    public Task A_throwing_SetPaths_is_logged_and_the_window_keeps_working() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Changes.ThrowOnSetPaths = new InvalidOperationException("The watch was refused.");
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.ViewModel.Open([RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error" && entry.Exception?.Message == "The watch was refused.");
+            Assert.Equal(2, fixture.Changes.SetPathsCalls.Count);
+            Assert.Equal([RepoDocA, RepoDocB], fixture.Surface.Shown.Select(shown => shown.DocumentPath));
+        });
+
+    [Fact]
+    public Task A_delete_only_report_keeps_the_page_for_500_ms_then_shows_the_missing_pane() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Absent.Add(RepoDocA);
+            fixture.Files.Remove(RepoDocA);
+
+            await fixture.ReportAsync(RepoDocA);
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(499));
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(1));
+            Dispatcher.UIThread.RunJobs();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocA).IsMissing);
+            Assert.Single(fixture.Surface.Shown);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level is "warning" or "error");
+        });
+
+    [Fact]
+    public Task A_delete_and_recreate_inside_500_ms_never_shows_the_missing_pane() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            bool everMissing = false;
+            fixture.ViewModel.PropertyChanged += (_, _) => everMissing |= fixture.ViewModel.SelectedIsMissing;
+            fixture.Absent.Add(RepoDocA);
+            fixture.Files.Remove(RepoDocA);
+
+            await fixture.ReportAsync(RepoDocA);
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(200));
+            fixture.Absent.Remove(RepoDocA);
+            fixture.Files[RepoDocA] = "# Re-created by the editor";
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(300));
+            Dispatcher.UIThread.RunJobs();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(everMissing, "the missing pane showed during the grace");
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            Assert.Equal(2, fixture.Surface.Shown.Count);
+            Assert.Contains("Re-created by the editor", fixture.Surface.Shown[1].Html, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task The_2_s_tick_inside_the_grace_does_not_show_the_missing_pane() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(1800));
+            fixture.Absent.Add(RepoDocA);
+            fixture.Files.Remove(RepoDocA);
+
+            await fixture.ReportAsync(RepoDocA);
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(300));
+            Dispatcher.UIThread.RunJobs();
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(200));
+            Dispatcher.UIThread.RunJobs();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            Assert.Single(fixture.Surface.Shown);
+        });
+
+    [Fact]
+    public Task An_in_use_reload_keeps_the_old_page_and_retries_on_the_next_event() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            int reads = 0;
+            bool locked = true;
+            fixture.Reader = path =>
+            {
+                Interlocked.Increment(ref reads);
+                return Volatile.Read(ref locked) ? throw InUse(path) : fixture.Files[path];
+            };
+            fixture.Files[RepoDocA] = "# Saved while locked";
+
+            await fixture.ReportAsync(RepoDocA);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal("", fixture.ViewModel.UnreadableReason);
+            Assert.Single(fixture.Surface.Shown);
+
+            Volatile.Write(ref locked, false);
+            await fixture.ReportAsync(RepoDocA);
+
+            Assert.Equal(2, reads);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal(2, fixture.Surface.Shown.Count);
+            Assert.Contains("Saved while locked", fixture.Surface.Shown[1].Html, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task An_in_use_reload_retries_on_the_2_s_tick() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            bool locked = true;
+            fixture.Reader = path => Volatile.Read(ref locked) ? throw InUse(path) : fixture.Files[path];
+            fixture.Files[RepoDocA] = "# Saved while locked";
+            await fixture.ReportAsync(RepoDocA);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+
+            Volatile.Write(ref locked, false);
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(2, fixture.Surface.Shown.Count);
+            Assert.Contains("Saved while locked", fixture.Surface.Shown[1].Html, StringComparison.Ordinal);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+        });
+
+    [Fact]
+    public Task An_in_use_reload_shows_the_cant_read_pane_only_after_10_s_of_failures() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            int reads = 0;
+            fixture.Reader = path =>
+            {
+                Interlocked.Increment(ref reads);
+                throw InUse(path);
+            };
+
+            await fixture.ReportAsync(RepoDocA);
+            for (int tick = 1; tick <= 4; tick++)
+            {
+                fixture.Time.Advance(TimeSpan.FromSeconds(2));
+                await fixture.ViewModel.WhenRendersSettled();
+            }
+
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(1900));
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.Equal(5, reads);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "warning");
+
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(100));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(6, reads);
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal(ReadFailure.InUseByAnotherProgram, fixture.ViewModel.UnreadableReason);
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+            Assert.Single(fixture.Surface.Shown);
+            Assert.Single(fixture.Log.Entries, entry => entry.Level == "warning");
+        });
+
+    [Fact]
+    public Task A_first_show_that_fails_in_use_shows_the_pane_at_once() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = path => SamePath(path, RepoDocB) ? throw InUse(path) : fixture.Files[path];
+
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal(ReadFailure.InUseByAnotherProgram, fixture.ViewModel.UnreadableReason);
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocB).IsUnreadable);
+        });
+
+    [Fact]
+    public Task An_access_denied_reload_shows_the_pane_at_once() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = path => throw new UnauthorizedAccessException($"{path} is not yours.");
+
+            await fixture.ReportAsync(RepoDocA);
+
+            Assert.True(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.Equal(ReadFailure.AccessDenied, fixture.ViewModel.UnreadableReason);
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+        });
+
+    [Fact]
+    public Task The_2_s_tick_before_any_report_keeps_the_page_for_the_grace() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Absent.Add(RepoDocA);
+            fixture.Files.Remove(RepoDocA);
+
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            Dispatcher.UIThread.RunJobs();
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            Assert.False(DocumentRow(fixture.ViewModel, RepoDocA).IsMissing);
+
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(500));
+            Dispatcher.UIThread.RunJobs();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocA).IsMissing);
+            Assert.Single(fixture.Surface.Shown);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level is "warning" or "error");
+        });
+
+    [Fact]
+    public Task Returning_to_a_document_inside_its_grace_shows_the_missing_pane() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Absent.Add(RepoDocA);
+            fixture.Files.Remove(RepoDocA);
+            await fixture.ReportAsync(RepoDocA);
+
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocA);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(RepoDocA, fixture.ViewModel.SelectedPath);
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            Assert.False(fixture.ViewModel.SelectedIsUnreadable);
+            Assert.False(DocumentRow(fixture.ViewModel, RepoDocA).IsUnreadable);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level is "warning" or "error");
+        });
+
+    [Fact]
+    public Task A_gone_read_that_ends_after_the_grace_starts_no_second_grace() =>
+        Headless.RunAsync(async () =>
+        {
+            using var gate = new ManualResetEventSlim();
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Absent.Add(RepoDocA);
+            fixture.Files.Remove(RepoDocA);
+            await fixture.ReportAsync(RepoDocA);
+            fixture.Reader = path =>
+            {
+                WaitFor(gate);
+                return fixture.Files.TryGetValue(path, out string? text) ? text : throw new FileNotFoundException("No such fake file.", path);
+            };
+
+            fixture.RaiseFromPool(RepoDocA);
+            Dispatcher.UIThread.RunJobs();
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(500));
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            gate.Set();
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Absent.Remove(RepoDocA);
+            fixture.Files[RepoDocA] = "# Back on disk";
+
+            await fixture.ReportAsync(RepoDocA);
+
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            Assert.Equal(2, fixture.Surface.Shown.Count);
+            Assert.Contains("Back on disk", fixture.Surface.Shown[1].Html, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task A_second_report_inside_the_grace_does_not_extend_it() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Absent.Add(RepoDocA);
+            fixture.Files.Remove(RepoDocA);
+            await fixture.ReportAsync(RepoDocA);
+
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(300));
+            await fixture.ReportAsync(RepoDocA);
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(200));
+            Dispatcher.UIThread.RunJobs();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            Assert.Single(fixture.Surface.Shown);
+        });
+
+    [Fact]
+    public Task A_failed_SetPaths_is_retried_only_when_the_documents_change() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Changes.ThrowOnSetPaths = new InvalidOperationException("The watch was refused.");
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.ToggleSidebarCommand.Execute(null);
+            Assert.Single(fixture.Changes.SetPathsCalls);
+            Assert.Single(fixture.Log.Entries, entry => entry.Level == "error");
+
+            fixture.ViewModel.Open([RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(2, fixture.Changes.SetPathsCalls.Count);
+        });
+
+    [Fact]
     public Task BuildSession_includes_sidebar_hidden_and_collapsed_groups() =>
         Headless.RunAsync(async () =>
         {
@@ -1018,6 +1571,7 @@ public sealed class DocumentWindowViewModelTests
             await fixture.ViewModel.WhenRendersSettled();
             fixture.Absent.Add(RepoDocA);
             fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(500));
             Assert.True(fixture.ViewModel.SelectedIsMissing);
 
             fixture.ViewModel.StepContentWidth(wider: true, WidePane);
@@ -1050,12 +1604,24 @@ public sealed class DocumentWindowViewModelTests
 
     private static bool SamePath(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>The read failure Windows reports while another program holds the file: a sharing violation.</summary>
+    private static IOException InUse(string path) => new($"{path} is in use.", unchecked((int)0x80070020));
+
     /// <summary>Waits for a test's gate, failing the read (and so the test) if it is never opened.</summary>
     private static void WaitFor(ManualResetEventSlim gate)
     {
         if (!gate.Wait(GateBackstop, TestContext.Current.CancellationToken))
         {
             throw new TimeoutException($"The test gate was not opened within {GateBackstop.TotalSeconds} s.");
+        }
+    }
+
+    /// <summary>Waits for one release of <paramref name="signal"/>, failing the test if none comes.</summary>
+    private static void WaitFor(SemaphoreSlim signal)
+    {
+        if (!signal.Wait(GateBackstop, TestContext.Current.CancellationToken))
+        {
+            throw new TimeoutException($"The test signal was not released within {GateBackstop.TotalSeconds} s.");
         }
     }
 
@@ -1095,8 +1661,11 @@ public sealed class DocumentWindowViewModelTests
             Widths = new WidthStore(WidthsFile, Log);
             Reader = path => Files.TryGetValue(path, out string? text) ? text : throw new FileNotFoundException("No such fake file.", path);
             State = new DocumentWindowState(persist, FindRepo, Exists, Plain);
-            ViewModel = new DocumentWindowViewModel(State, Surface, new DocumentWindowServices(Widths, path => Reader(path), Time, Log));
+            ViewModel = new DocumentWindowViewModel(State, Surface, new DocumentWindowServices(Widths, path => Reader(path), Time, Log, Changes));
         }
+
+        /// <summary>What the view model follows its documents' changes through.</summary>
+        public FakeDocumentChanges Changes { get; } = new();
 
         /// <summary>The folder of <see cref="WidthsFile"/>; not created until a width is written.</summary>
         public string WidthsFolder { get; }
@@ -1131,6 +1700,36 @@ public sealed class DocumentWindowViewModelTests
         public DocumentWindowState State { get; }
 
         public DocumentWindowViewModel ViewModel { get; }
+
+        /// <summary>
+        /// Raises a change report naming <paramref name="paths"/> on a thread-pool thread, as the watcher does, and returns once it
+        /// was raised. The UI thread is blocked meanwhile, so the work the report posts waits until the test pumps it.
+        /// </summary>
+        public void RaiseFromPool(params string[] paths)
+        {
+            // Not disposed: the pool thread may still be inside Set when the wait returns.
+            var raised = new ManualResetEventSlim();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    Changes.Raise(paths);
+                }
+                finally
+                {
+                    raised.Set();
+                }
+            });
+            WaitFor(raised);
+        }
+
+        /// <summary>Raises a change report from a pool thread, runs what it posted to the UI thread, and waits for the renders.</summary>
+        public async Task ReportAsync(params string[] paths)
+        {
+            RaiseFromPool(paths);
+            Dispatcher.UIThread.RunJobs();
+            await ViewModel.WhenRendersSettled();
+        }
 
         public async ValueTask DisposeAsync()
         {

@@ -10,6 +10,8 @@
 - **Disk-change bar**: the bar under the theme settings window's title bar that says the selected theme's file changed on disk while unsaved edits are open, with Reload and Keep mine; it takes the warning colours when the file no longer parses ([look.md](design/look.md)).
 - **Document surface**: what the window logic sees of the document page (`IDocumentSurface`, implemented by `DocumentView`); tests substitute a fake.
 - **Edit as text**: opening a user theme's `.json` file in the app the system associates with it (`IFileActions.OpenWithDefaultApp`, built by `OpenFileCommand`).
+- **First-stamp window**: the short time in which a change to a document in a polled folder is missed, between a subscriber's read of a newly opened document and the watcher's first length and write-time stamp of it (`DocumentFileWatcher`); a window calls `SetPaths` before reading to keep it to one thread-pool dispatch.
+- **Grace**: the 500 ms in which a shown document whose file went missing keeps its page before the missing pane shows, so an editor that saves by deleting and re-creating the file never flashes it; the file is read once more when it ends (`DocumentWindowViewModel`).
 - **Grace period**: the 300 ms after framework initialization on macOS during which launch-time file opens may arrive, before the main window is created.
 - **Group**: a top-level node of the sidebar tree, one per group root: a git repo or a folder.
 - **Group root**: the folder a document is grouped under in the tree: its git work-tree root, or its parent folder when it is not in a repo.

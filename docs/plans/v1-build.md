@@ -106,7 +106,7 @@ The user's choices are recorded in `docs/design/look.md`, and the mocks stay as 
 
 ## Step 6 — Extras
 
-- **Live reload**: a `FileSystemWatcher` per open file's directory, filtered to open files, with a trailing 150 ms debounce and a 1 s maximum wait (YAMV-9 ruling). It handles editors that save by write-temp-then-rename. The doc re-renders at the same scroll; a deleted file shows the missing state.
+- **Live reload**: a `FileSystemWatcher` per open file's directory, filtered to open files, with a trailing 150 ms debounce and a 1 s maximum wait (YAMV-9 ruling). It handles editors that save by write-temp-then-rename. The doc re-renders at the same source line (the `data-line` anchor, also on a tab switch and session restore), with find keeping its query and the match at the same source position. A deleted file keeps its page for a 500 ms grace, then shows the missing state; a file in use keeps a shown page for up to 10 s.
 - **Find**: Ctrl/Cmd+F opens the find bar from the mock. JS wraps matches in `<mark>`, Enter / Shift+Enter step through them, the bar shows a match count, and Esc clears.
 - **Drag-drop and File > Open** (multi-select, `.md`/`.markdown`/`.mdx`/`.txt`): add to the current window; only the main window persists.
 - **Links**: decided by Core's link policy under the rulings on YAMV-9: `http(s)`/`mailto` → the OS browser; a local document type (`.md .markdown .mdx .txt`) → opened in this window and added to its tree, with a `#fragment` scrolled to, missing or outside the group root included; another local file inside the group root (checked after resolving links) → the OS default app, at once for the viewable-type allowlist and after a confirm otherwise; everything else is ignored.

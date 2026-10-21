@@ -762,6 +762,8 @@ public sealed class ContentWidthViewModelTests
 
             fixture.Absent.Add(DocA);
             fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            Assert.False(popover.IsStale);
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(500));
 
             Assert.True(popover.IsStale);
             Assert.Null(fixture.ViewModel.ContentWidthPopover);
@@ -859,6 +861,8 @@ public sealed class ContentWidthViewModelTests
 
             fixture.Absent.Add(DocA);
             fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(500));
 
             Assert.True(fixture.ViewModel.SelectedIsMissing);
             Assert.False(fixture.ViewModel.CanEditContentWidth);

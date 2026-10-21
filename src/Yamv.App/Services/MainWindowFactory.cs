@@ -39,6 +39,32 @@ public static class MainWindowFactory
         ArgumentNullException.ThrowIfNull(bridge);
         ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(log);
+        var changes = new DocumentChanges(log);
+        try
+        {
+            return Create(bridge, widths, log, changes);
+        }
+        catch
+        {
+            changes.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Builds the main window as <see cref="Create(ThemeBridge, WidthStore, IAppLog)"/> does, following its documents' changes
+    /// through <paramref name="changes"/>: a test supplies a fake in place of a file watcher. The window's view model owns it.
+    /// </summary>
+    /// <param name="bridge">The app's theme bridge, which the window registers its document view with.</param>
+    /// <param name="widths">The app's one width store, which gives each document its content width.</param>
+    /// <param name="log">The process's log.</param>
+    /// <param name="changes">What reports the window's documents' changes on disk.</param>
+    internal static MainWindowComposition Create(ThemeBridge bridge, WidthStore widths, IAppLog log, IDocumentChanges changes)
+    {
+        ArgumentNullException.ThrowIfNull(bridge);
+        ArgumentNullException.ThrowIfNull(widths);
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(changes);
         var store = new SessionStore(AppPaths.SessionFile, log);
         SessionState session = store.Load();
         var view = new DocumentView(log);
@@ -48,7 +74,8 @@ public static class MainWindowFactory
         {
             var finder = new GitRootFinder(log);
             var state = new DocumentWindowState(persist: true, finder.FindWorkTreeRoot, File.Exists, GroupingOptions.ForCurrentPlatform);
-            viewModel = new DocumentWindowViewModel(state, view, new DocumentWindowServices(widths, File.ReadAllText, TimeProvider.System, log));
+            var services = new DocumentWindowServices(widths, File.ReadAllText, TimeProvider.System, log, changes);
+            viewModel = new DocumentWindowViewModel(state, view, services);
             viewModel.Restore(session);
             var window = new MainWindow(viewModel, view, view, log);
             RestoreLayout(window, session);
@@ -58,6 +85,7 @@ public static class MainWindowFactory
         catch
         {
             viewModel?.Dispose();
+            changes.Dispose();
             bridge.Unregister(view);
             throw;
         }
@@ -77,41 +105,53 @@ public static class MainWindowFactory
         ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(log);
         var view = new DocumentView(log);
-        return CreateViewer(bridge, widths, files, log, view, view);
+        var changes = new DocumentChanges(log);
+        try
+        {
+            return CreateViewer(bridge, widths, files, log, new ViewerParts(view, view, changes));
+        }
+        catch
+        {
+            changes.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
-    /// Builds a viewer window that draws its documents on <paramref name="surface"/>: a test supplies a fake surface, whose
-    /// renders complete headless, in place of a web view.
+    /// Builds a viewer window that draws its documents on the surface of <paramref name="parts"/> and follows their changes
+    /// through its changes seam: a test supplies a fake surface, whose renders complete headless, in place of a web view, and
+    /// a fake in place of a file watcher. The window's view model owns the changes seam.
     /// </summary>
     /// <param name="bridge">The app's theme bridge, which the window registers its document surface with.</param>
     /// <param name="widths">The app's one width store, which gives each document its content width.</param>
     /// <param name="files">The full paths the window shows.</param>
     /// <param name="log">The process's log.</param>
-    /// <param name="documentView">The control that draws the selected document.</param>
-    /// <param name="surface">The view model's surface.</param>
+    /// <param name="parts">The control that draws the document, the view model's surface and what reports the changes.</param>
     internal static MainWindowComposition CreateViewer(
         ThemeBridge bridge,
         WidthStore widths,
         IReadOnlyList<string> files,
         IAppLog log,
-        Control documentView,
-        IDocumentSurface surface
+        ViewerParts parts
     )
     {
         ArgumentNullException.ThrowIfNull(bridge);
         ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(parts);
+        (Control documentView, IDocumentSurface surface, IDocumentChanges changes) = parts;
         ArgumentNullException.ThrowIfNull(documentView);
         ArgumentNullException.ThrowIfNull(surface);
+        ArgumentNullException.ThrowIfNull(changes);
         bridge.Register(surface);
         DocumentWindowViewModel? viewModel = null;
         try
         {
             var finder = new GitRootFinder(log);
             var state = new DocumentWindowState(persist: false, finder.FindWorkTreeRoot, File.Exists, GroupingOptions.ForCurrentPlatform);
-            viewModel = new DocumentWindowViewModel(state, surface, new DocumentWindowServices(widths, File.ReadAllText, TimeProvider.System, log));
+            var services = new DocumentWindowServices(widths, File.ReadAllText, TimeProvider.System, log, changes);
+            viewModel = new DocumentWindowViewModel(state, surface, services);
             viewModel.Open(ExistingFirst(files));
             var window = new MainWindow(viewModel, documentView, surface, log);
             return new MainWindowComposition(window, viewModel, bridge, surface, session: null);
@@ -119,6 +159,7 @@ public static class MainWindowFactory
         catch
         {
             viewModel?.Dispose();
+            changes.Dispose();
             bridge.Unregister(surface);
             throw;
         }
@@ -173,6 +214,12 @@ public static class MainWindowFactory
         return ordered;
     }
 }
+
+/// <summary>The parts a viewer window is built over, which a test replaces with fakes.</summary>
+/// <param name="DocumentView">The control that draws the selected document.</param>
+/// <param name="Surface">The view model's surface.</param>
+/// <param name="Changes">What reports the window's documents' changes on disk; the window's view model owns it.</param>
+internal sealed record ViewerParts(Control DocumentView, IDocumentSurface Surface, IDocumentChanges Changes);
 
 /// <summary>
 /// The window and the objects that live as long as it: its view model, the theme bridge it registered with, and the session

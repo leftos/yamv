@@ -610,6 +610,83 @@ public sealed class DocumentWindowStateTests
     }
 
     [Fact]
+    public void RefreshMissing_for_given_paths_probes_only_those()
+    {
+        HashSet<string> absent = new(StringComparer.OrdinalIgnoreCase);
+        List<string> probed = [];
+        var state = new DocumentWindowState(
+            true,
+            FindRepo,
+            path =>
+            {
+                probed.Add(path);
+                return !absent.Contains(path);
+            },
+            Plain
+        );
+        state.Add([RepoDocA, RepoDocB, RepoRootDoc]);
+        absent.UnionWith([RepoDocA, RepoDocB]);
+        probed.Clear();
+
+        Assert.True(state.RefreshMissing([RepoDocA, AlphaDoc]));
+
+        Assert.Equal([RepoDocA], probed);
+        Assert.True(DocumentItemOf(state, RepoDocA).IsMissing);
+        Assert.False(DocumentItemOf(state, RepoDocB).IsMissing);
+        Assert.DoesNotContain(AlphaDoc, state.Documents);
+    }
+
+    [Fact]
+    public void RefreshMissing_for_given_paths_raises_Changed_only_on_a_flip()
+    {
+        HashSet<string> absent = new(StringComparer.OrdinalIgnoreCase);
+        var state = new DocumentWindowState(true, FindRepo, path => !absent.Contains(path), Plain);
+        state.Add([RepoDocA, RepoRootDoc]);
+        int changes = 0;
+        state.Changed += (_, _) => changes++;
+
+        Assert.False(state.RefreshMissing([RepoDocA]));
+        Assert.Equal(0, changes);
+
+        absent.Add(RepoDocA);
+        Assert.True(state.RefreshMissing([RepoDocA]));
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public void ExistsOnDisk_answers_from_the_disk_and_changes_no_state()
+    {
+        HashSet<string> absent = new(StringComparer.OrdinalIgnoreCase);
+        var state = new DocumentWindowState(true, FindRepo, path => !absent.Contains(path), Plain);
+        state.Add([RepoDocA, RepoRootDoc]);
+        int changes = 0;
+        state.Changed += (_, _) => changes++;
+
+        Assert.True(state.ExistsOnDisk(RepoDocA));
+        absent.Add(RepoDocA);
+
+        Assert.False(state.ExistsOnDisk(RepoDocA));
+        Assert.False(DocumentItemOf(state, RepoDocA).IsMissing);
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
+    public void ExistsOnDisk_leaves_a_missing_flag_set_when_the_file_returns()
+    {
+        HashSet<string> absent = new(StringComparer.OrdinalIgnoreCase) { RepoDocA };
+        var state = new DocumentWindowState(true, FindRepo, path => !absent.Contains(path), Plain);
+        state.Add([RepoDocA, RepoRootDoc]);
+        absent.Clear();
+        int changes = 0;
+        state.Changed += (_, _) => changes++;
+
+        Assert.True(state.ExistsOnDisk(RepoDocA));
+
+        Assert.True(DocumentItemOf(state, RepoDocA).IsMissing);
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
     public void ShowTree_ViewerWindow_IsHiddenUntilTwoDocuments()
     {
         DocumentWindowState state = Create(persist: false);
