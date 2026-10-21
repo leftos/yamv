@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV theme settings entry decisions</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1600px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 12px; font-size: 15.5px; max-width: 1480px; line-height: 1.5; }
+p.page code, section > p code, .cap code, .fcap code { font: 12.5px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+.anno-key { display: inline-block; width: 22px; height: 12px; border: 2px dashed #ffb27a; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+section { margin: 44px 0 0; padding-top: 28px; border-top: 1px solid rgba(255,255,255,.28); }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > p { color: #eef0f2; margin: 0 0 18px; font-size: 15px; max-width: 1480px; line-height: 1.5; }
+
+/* ---------- lanes side by side; one row per drawn state ---------- */
+.grid { display: grid; column-gap: 24px; row-gap: 16px; align-items: start; }
+.lane-h { padding-bottom: 4px; }
+.lane-h h3 { font: 600 16.5px "Inter V"; color: #fff; margin: 0 0 3px; }
+.lane-h h3 .q { display: inline-block; min-width: 54px; padding: 1px 7px; margin-right: 8px; border-radius: 5px; background: rgba(0,0,0,.28); font-size: 14px; text-align: center; }
+.lane-h p.cap { color: #f1f3f5; font-size: 13px; margin: 0; line-height: 1.42; }
+.strip-h { grid-column: 1 / -1; font: 600 11.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin-top: 10px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,.3); }
+.t { border-left: 3px solid rgba(255,255,255,.4); padding: 2px 0 4px 10px; }
+.t b { display: block; font: 700 19px "Inter V"; color: #fff; letter-spacing: -.01em; }
+.t span { display: block; font-size: 12.5px; color: #eef0f2; line-height: 1.38; margin-top: 3px; }
+.cell { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
+.fcap { color: #f1f3f5; font-size: 12.5px; margin: 0; line-height: 1.4; }
+.fcap b { color: #fff; }
+.zoom { width: max-content; flex: none; }
+.wide { margin-top: 26px; }
+.wide .pair { display: flex; gap: 24px; align-items: flex-start; margin-top: 8px; }
+.wide .fcaps { display: flex; gap: 24px; margin-top: 7px; }
+
+/* ---------- the document window: every colour is a token ---------- */
+.win { position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 10px; flex: none;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-family: "Inter V", sans-serif; font-size: 13px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; white-space: nowrap; position: relative; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .dot { color: var(--yamv-accent); margin-left: 6px; font-size: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--yamv-text-muted); margin-right: 6px; flex: none; position: relative; }
+.wbtn + .wbtn { margin-left: -2px; }
+.wbtn.hover { background: var(--yamv-hover-background); color: var(--yamv-text); }
+.wbtn.open { background: var(--yamv-selection-background); color: var(--yamv-accent); }
+.body { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+.col { box-sizing: content-box; max-width: 800px; margin: 0 auto; padding: 40px 44px 64px; }
+.side { flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 12px 8px; overflow: hidden; position: relative; }
+
+/* document */
+.md { font-family: "Inter V", sans-serif; font-size: 15.5px; line-height: 1.62; color: var(--yamv-text); }
+.md h1 { font-weight: 700; font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .5em; color: var(--yamv-heading); }
+.md h2 { font-weight: 700; font-size: 1.32em; line-height: 1.25; margin: 1.5em 0 .55em; padding-bottom: .3em; border-bottom: 1px solid var(--yamv-line); color: var(--yamv-heading); }
+.md p { margin: 0 0 1em; }
+.md ul { margin: 0 0 1em; padding-left: 1.6em; }
+.md li + li { margin-top: .2em; }
+.md a { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; }
+.md code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md pre { background: var(--yamv-code-background); border: 1px solid var(--yamv-code-line); border-radius: 8px; padding: 14px 16px; font: 13px/1.6 "JetBrains Mono V"; margin: 0 0 1.2em; white-space: pre; overflow: hidden; }
+.md pre code { background: none; padding: 0; font-size: inherit; }
+.k { color: var(--yamv-syntax-keyword); } .s { color: var(--yamv-syntax-string); } .c { color: var(--yamv-syntax-comment); font-style: italic; }
+.n { color: var(--yamv-syntax-number); } .ty { color: var(--yamv-syntax-type); }
+
+/* tree */
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--yamv-text); white-space: nowrap; }
+.grp-h .chev { width: 10px; color: var(--yamv-text-muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.badge.dir { color: var(--yamv-text-muted); border-color: var(--yamv-line); }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; font-size: 13px; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--yamv-text-muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+
+/* tooltip and the ⋯ menu (both their own popup windows over the page) */
+.tip { position: absolute; z-index: 8; background: var(--yamv-text); color: var(--yamv-page-background); font: 500 12px "Inter V"; padding: 5px 8px; border-radius: 5px; white-space: nowrap; }
+.menu { position: absolute; z-index: 8; width: 214px; background: var(--yamv-page-background); border: 1px solid var(--yamv-line); border-radius: 8px; padding: 4px;
+        box-shadow: 0 10px 22px var(--pop-shadow), 0 1px 3px var(--pop-shadow); font: 13px "Inter V"; color: var(--yamv-text); text-align: left; }
+.menu .mi { display: flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 5px; white-space: nowrap; }
+.menu .mi.hover { background: var(--yamv-hover-background); }
+.menu .mi .key { margin-left: auto; color: var(--yamv-text-muted); font-size: 12px; }
+
+/* macOS app menu: drawn by macOS, not tokens */
+.mac { position: relative; overflow: hidden; border-radius: 8px; box-shadow: 0 0 0 1px rgba(0,0,0,.25); font: 13px -apple-system, "Inter V", sans-serif; }
+.mac .bar { height: 24px; display: flex; align-items: center; gap: 18px; padding: 0 14px; font-size: 13px; }
+.mac .bar b { font-weight: 700; }
+.mac .bar .on { padding: 1px 8px; margin: 0 -8px; border-radius: 4px; }
+.mac .dd { position: absolute; left: 14px; top: 26px; width: 232px; border-radius: 7px; padding: 5px; }
+.mac .dd .mi { display: flex; height: 22px; align-items: center; padding: 0 10px; border-radius: 4px; }
+.mac .dd .mi .key { margin-left: auto; opacity: .55; }
+.mac .dd .mi.hi { background: #0a64d8; color: #fff; }
+.mac .dd .mi.hi .key { opacity: .85; }
+.mac .dd hr { border: 0; height: 1px; margin: 5px 10px; }
+.mac.light { background: linear-gradient(135deg, #b9c7d9, #d8c9d6); color: #1d1d1f; }
+.mac.light .bar { background: rgba(246,246,246,.86); }
+.mac.light .bar .on { background: rgba(0,0,0,.1); }
+.mac.light .dd { background: rgba(240,240,240,.97); box-shadow: 0 10px 28px rgba(0,0,0,.28), 0 0 0 .5px rgba(0,0,0,.25); }
+.mac.light .dd hr { background: rgba(0,0,0,.12); }
+.mac.dark { background: linear-gradient(135deg, #263042, #3a2b3c); color: #f2f2f7; }
+.mac.dark .bar { background: rgba(30,30,32,.86); }
+.mac.dark .bar .on { background: rgba(255,255,255,.16); }
+.mac.dark .dd { background: rgba(44,44,46,.97); box-shadow: 0 10px 28px rgba(0,0,0,.6), 0 0 0 .5px rgba(255,255,255,.18); }
+.mac.dark .dd hr { background: rgba(255,255,255,.14); }
+
+/* ---------- the theme settings window ---------- */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--yamv-line); border-radius: 6px;
+       background: var(--yamv-page-background); color: var(--yamv-text); font: 550 12.5px "Inter V"; white-space: nowrap; flex: none; }
+.btn.primary { background: var(--yamv-accent); border-color: var(--yamv-accent); color: #fff; }
+.btn.off { opacity: .45; }
+.btn.sm { height: 26px; font-size: 12px; padding: 0 10px; }
+.wbody { flex: 1; display: flex; min-height: 0; }
+.foot { height: 52px; flex: none; border-top: 1px solid var(--yamv-line); display: flex; align-items: center; gap: 8px; padding: 0 16px; background: var(--yamv-chrome-background); }
+.foot .spacer { flex: 1; }
+.tlist { width: 190px; flex: none; border-right: 1px solid var(--yamv-line); background: var(--yamv-sidebar-background); padding: 12px 8px; display: flex; flex-direction: column; }
+.sh { font: 600 10.5px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: var(--yamv-text-muted); padding: 6px 8px; }
+.sh + .trow, .trow + .trow { margin-top: 0; }
+.trow { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; }
+.trow.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.trow.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+.trow.bad .nm, .trow.gone .nm { color: var(--yamv-text-muted); }
+.trow.gone .chip { opacity: .45; }
+.trow .glyph { margin-left: auto; color: var(--yamv-warning); display: grid; place-items: center; }
+.trow.gone .glyph { color: var(--yamv-text-muted); }
+.chip { width: 22px; height: 14px; flex: none; display: flex; border-radius: 3px; overflow: hidden; box-shadow: 0 0 0 1px var(--yamv-line); }
+.chip span { flex: 1; position: relative; }
+.chip span i { position: absolute; left: 3px; right: 3px; bottom: 2px; height: 2px; border-radius: 1px; }
+.tlist .grow { flex: 1; }
+.appear { border-top: 1px solid var(--yamv-line); padding: 10px 8px 2px; }
+.appear .lbl { font-size: 11.5px; color: var(--yamv-text-muted); margin-bottom: 5px; }
+.select { height: 28px; border: 1px solid var(--yamv-line); border-radius: 6px; background: var(--yamv-page-background); display: flex; align-items: center; padding: 0 8px; font-size: 12.5px; color: var(--yamv-text); }
+.select .caret { margin-left: auto; color: var(--yamv-text-muted); font-size: 10px; }
+.tokens { width: 350px; flex: none; border-right: 1px solid var(--yamv-line); display: flex; flex-direction: column; min-height: 0; background: var(--yamv-page-background); }
+.thead { padding: 14px 16px 10px; border-bottom: 1px solid var(--yamv-line); flex: none; }
+.thead .tt { display: flex; align-items: center; gap: 8px; }
+.thead .tt b { font: 650 15px "Inter V"; color: var(--yamv-heading); }
+.thead .badge { margin-left: 0; font-size: 9.5px; letter-spacing: .05em; }
+.thead .badge.mute { color: var(--yamv-text-muted); border-color: var(--yamv-line); }
+.thead .badge.warn { color: var(--yamv-warning); background: var(--yamv-warning-background); border-color: var(--yamv-warning-line); }
+.thead .d { font-size: 11.5px; color: var(--yamv-text-muted); margin: 3px 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg { display: flex; border: 1px solid var(--yamv-line); border-radius: 7px; overflow: hidden; }
+.seg span { flex: 1; text-align: center; padding: 5px 0; font-size: 12.5px; color: var(--yamv-text-secondary); border-right: 1px solid var(--yamv-line); }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 600; }
+.hint { font-size: 11.5px; color: var(--yamv-text-muted); margin-top: 8px; line-height: 1.4; }
+.lock { display: flex; gap: 7px; align-items: flex-start; font-size: 11.5px; color: var(--yamv-text-secondary); margin-top: 8px; line-height: 1.4; }
+.lock svg { flex: none; color: var(--yamv-text-muted); margin-top: 1px; }
+.lock.info svg { color: var(--yamv-accent); }
+.lock.info b { font-weight: 600; color: var(--yamv-text); }
+.tscroll { flex: 1; min-height: 0; overflow: hidden; padding: 2px 16px 0; position: relative; }
+.gh { font: 600 10.5px "Inter V"; text-transform: uppercase; letter-spacing: .06em; color: var(--yamv-text-muted); margin: 12px 0 1px; }
+.tok { display: flex; align-items: center; gap: 9px; height: 38px; color: var(--yamv-text-secondary); }
+.tok .sw { width: 18px; height: 18px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(127,127,127,.35); flex: none;
+           background-image: linear-gradient(var(--c), var(--c)), repeating-conic-gradient(#ccc 0 25%, #fff 0 50%); background-size: auto, 8px 8px; }
+.tok .stk { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tok .tn { font: 10.5px "JetBrains Mono V"; color: var(--yamv-text-secondary); line-height: 1.2; }
+.tok .mod { color: var(--yamv-accent); font: 9px "Inter V"; margin-left: 5px; vertical-align: 1px; }
+.tok .fld { height: 20px; width: 112px; border: 1px solid var(--yamv-line); border-radius: 5px; background: var(--yamv-page-background); display: flex; align-items: center;
+            padding: 0 7px; font: 11px "JetBrains Mono V"; color: var(--yamv-text); }
+.tok.inh .fld { color: var(--yamv-text-muted); }
+.tok .reset { width: 16px; flex: none; color: var(--yamv-text-muted); display: grid; place-items: center; }
+.ro .tok > * { opacity: .55; }
+.ro .tok .fld { background: var(--yamv-chrome-background); }
+.prev { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--yamv-page-background); }
+.pv { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--yamv-page-background); color: var(--yamv-text); margin: 18px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--yamv-line); }
+.pv .ptb { height: 28px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--yamv-chrome-background);
+           border-bottom: 1px solid var(--yamv-line); font: 500 11px "Inter V"; color: var(--yamv-text-muted); white-space: nowrap; }
+.pv .ptb b { color: var(--yamv-text); font-weight: 600; }
+.pv .ptb .tag { margin-left: auto; font: 600 9.5px "Inter V"; letter-spacing: .06em; text-transform: uppercase; }
+.pv .pbody { flex: 1; display: flex; min-height: 0; }
+.pv .pdoc { flex: 1; min-width: 0; overflow: hidden; padding: 20px 18px 0; }
+.pv .ptree { width: 104px; flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 10px 0 0 6px; overflow: hidden; font-size: 11.5px; }
+.pv .ptree .g { padding: 4px 6px; font-weight: 650; color: var(--yamv-text); white-space: nowrap; }
+.pv .ptree .r { height: 23px; display: flex; align-items: center; padding: 0 6px 0 14px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; border-radius: 5px 0 0 5px; }
+.pv .ptree .r.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.pv .ptree .r.sel::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+.pmd { font-family: "Inter V", sans-serif; font-size: 13px; line-height: 1.6; color: var(--yamv-text); }
+.pmd h1 { font-weight: 700; font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .45em; color: var(--yamv-heading); }
+.pmd h2 { font-weight: 700; font-size: 1.32em; line-height: 1.25; margin: 1.1em 0 .5em; padding-bottom: .3em; border-bottom: 1px solid var(--yamv-line); color: var(--yamv-heading); }
+.pmd p { margin: 0 0 .9em; }
+.pmd a { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; }
+.pmd code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.pmd pre { background: var(--yamv-code-background); border: 1px solid var(--yamv-code-line); border-radius: 7px; padding: 10px 12px; font: 10.8px/1.6 "JetBrains Mono V"; margin: 0 0 1em; white-space: pre; overflow: hidden; }
+.pmd pre code { background: none; padding: 0; font-size: inherit; }
+.pmd blockquote { margin: 0; padding: .1em 0 .1em 1em; border-left: 3px solid var(--yamv-quote); color: var(--yamv-text-muted); }
+
+/* the changed-on-disk bar (Q2) */
+.dbar { flex: none; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 7px 12px 7px 14px; font-size: 12.5px; color: var(--yamv-text);
+        background: color-mix(in srgb, var(--yamv-accent) 9%, var(--yamv-page-background)); border-bottom: 1px solid var(--yamv-accent-soft); }
+.dbar .bi { color: var(--yamv-accent); display: grid; place-items: center; flex: none; }
+.dbar .bt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dbar .bt b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+.dbar .bt b .err { font-weight: 400; color: var(--yamv-text-secondary); }
+.dbar .l2 { font-size: 12px; color: var(--yamv-text-muted); display: flex; align-items: baseline; gap: 12px; min-width: 0; white-space: nowrap; line-height: 1.3; }
+.dbar .l2 .err { font: 11px "JetBrains Mono V"; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--yamv-text-secondary); }
+.dbar .lnk { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; flex: none; font-weight: 550; font-size: 12px; }
+.dbar.warn { background: var(--yamv-warning-background); border-bottom-color: var(--yamv-warning-line); }
+.dbar.warn .bi { color: var(--yamv-warning); }
+.strip { border-radius: 8px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.3), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); }
+.strip .stub { height: 26px; background: var(--yamv-page-background); display: flex; }
+.strip .stub span { border-right: 1px solid var(--yamv-line); }
+
+/* ---------- annotations: not UI ---------- */
+.note { position: absolute; z-index: 9; color: var(--anno); background: var(--anno-band); border: 1.5px solid var(--anno); border-radius: 6px; font: 650 17px "Inter V"; padding: 3px 9px; white-space: nowrap; }
+.mk { outline: 2.5px dashed var(--anno); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: opening theme settings, and two on-disk changes, three open questions</h1>
+<p class="page">Each frame is a YAMV window drawn at its real pixel size and scaled down, with every UI colour taken from a theme's tokens (Studio; Night Owl, a user theme, in Q3), light and dark. The title bar's tools are the ruled <b>Open…</b> folder button and the <b>⟷</b> content-width button, drawn in every document window; the Q1 entry is drawn only in Q1. <span class="anno-key"></span>Orange marks are annotations, not UI.</p>
+<p class="page">Code today: <code>.tmp/map-yamv-11-d.md</code> (sections 5 to 7, OPEN DECISIONS 1, 5, 9). Look: <code>docs/design/look.md</code> (Window, Theme settings window). Theme files: <code>docs/design/themes.md</code>. Title bar: <code>TitleBar.axaml</code> (<code>TitleBarTools</code>, left of the caption buttons).</p>
+
+<template id="ctl"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<section>
+  <h2>Q1 · How is the theme settings window opened from a document window?</h2>
+  <p>Main window 800 × 460 (tree 230 px), shown at 54%; details at 120%. Every lane keeps Ctrl+, (Cmd+, on macOS), and one settings window at a time: a second request brings the open one forward. The viewer row is a viewer window (one document, no tree), which shares the title bar.</p>
+  <div data-q="q1"></div>
+</section>
+
+<section>
+  <h2>Q2 · The open theme's file changed on disk while the window holds unsaved edits</h2>
+  <p>Ruled: the edits stay, and a bar says "This theme changed on disk" with <b>Reload</b> (drops your edits, loads the file) and <b>Keep mine</b> (keeps editing; your next save overwrites the file). With no unsaved edits the window reloads silently. Save patches the file's text to match the working copy, so after Keep mine it also puts back every token the outside edit changed. The settings window is 980 × 640, shown at 68%, editing Night Owl (Yours) with two unsaved tokens while the app uses Studio; the bar spans the window under its title bar, above the three columns. The detail rows draw the bars alone at the window's 760 px minimum width.</p>
+  <div data-q="q2"></div>
+</section>
+
+<section>
+  <h2>Q3 · The theme in use is deleted (or renamed) outside the app</h2>
+  <p>Night Owl is the theme in use, and the settings window is open on it with no unsaved edits, when <code>night-owl.yamv-theme.json</code> is deleted in Explorer. A rename outside the app is the same to the watcher: the old id is gone and a new id appears in Yours. Document window 760 × 540 and settings window 980 × 640, side by side, shown at 82%.</p>
+  <div data-q3></div>
+</section>
+
+<script>
+/* ---------- tokens ---------- */
+const STUDIO_L = { pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", quote: "#d0d7de", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  warning: "#9a6700", warningBackground: "#fff8c5", warningLine: "#e5d17b", codeBackground: "#f6f8fa", codeLine: "#e4e8ec",
+  syntaxKeyword: "#cf222e", syntaxString: "#0a3069", syntaxComment: "#6e7781", syntaxType: "#8250df", syntaxNumber: "#0550ae" };
+const STUDIO_D = { pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", quote: "#3d444d", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  warning: "#d29922", warningBackground: "#bb800926", warningLine: "#9e6a03", codeBackground: "#161b22", codeLine: "#262c34",
+  syntaxKeyword: "#ff7b72", syntaxString: "#a5d6ff", syntaxComment: "#8b949e", syntaxType: "#d2a8ff", syntaxNumber: "#79c0ff" };
+/* Night Owl, a user theme with both halves */
+const NIGHT_L = { pageBackground: "#fbfbfb", text: "#403f53", textSecondary: "#4b4a60", textMuted: "#6b7f8e", heading: "#2a2a3d", accent: "#4876d6", accentSoft: "#c3d3f3",
+  line: "#d9dde3", quote: "#c9d0d6", chromeBackground: "#f0f2f4", sidebarBackground: "#f0f2f4", selectionBackground: "#e0e7f7", selectionText: "#2a4a8f", hoverBackground: "#e6e9ec",
+  warning: "#a3620f", warningBackground: "#fff3d6", warningLine: "#e8c77e", codeBackground: "#f0f2f4", codeLine: "#e0e3e7",
+  syntaxKeyword: "#994cc3", syntaxString: "#c96765", syntaxComment: "#989fb1", syntaxType: "#4876d6", syntaxNumber: "#aa0982" };
+const NIGHT_D = { pageBackground: "#011627", text: "#d6deeb", textSecondary: "#c5cfe0", textMuted: "#7f97b2", heading: "#eef4ff", accent: "#82aaff", accentSoft: "#1d3b66",
+  line: "#1d3b53", quote: "#5f7e97", chromeBackground: "#010e1a", sidebarBackground: "#010e1a", selectionBackground: "#1d3b53", selectionText: "#ffffff", hoverBackground: "#0b2942",
+  warning: "#ffcb8b", warningBackground: "#ffcb8b1f", warningLine: "#a37a3f", codeBackground: "#0b2942", codeLine: "#1d3b53",
+  syntaxKeyword: "#c792ea", syntaxString: "#ecc48d", syntaxComment: "#637777", syntaxType: "#82aaff", syntaxNumber: "#f78c6c" };
+/* the two unsaved edits in Q2 */
+const EDITS = { light: { accent: "#0c969b", heading: "#994cc3" }, dark: { accent: "#7fdbca", heading: "#c792ea" } };
+const T = { studio: { light: STUDIO_L, dark: STUDIO_D }, night: { light: NIGHT_L, dark: NIGHT_D } };
+/* not tokens: popup shadow and the annotation colours */
+const EXTRA = {
+  light: "--pop-shadow:rgba(31,35,40,.2);--anno:#d9480f;--anno-ink:#fff;--anno-band:rgba(255,255,255,.94)",
+  dark: "--pop-shadow:rgba(0,0,0,.6);--anno:#ff922b;--anno-ink:#1a0f00;--anno-band:rgba(15,19,24,.94)",
+};
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (fam, half, over = {}) => Object.entries({ ...T[fam][half], ...over }).map(([k, v]) => `${kebab(k)}:${v}`).join(";") + ";" + EXTRA[half];
+
+/* ---------- glyphs ---------- */
+const CTL = document.getElementById("ctl").innerHTML;
+const CLOSE_ONLY = `<span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span>`;
+const GLYPH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const OPEN = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 12.6V3.2h4.1l1.5 1.5h5.3v2.1M1.8 12.6 3.7 7h10.6l-1.9 5.6z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`;
+const PALETTE = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 1.9C4.6 1.9 1.9 4.6 1.9 8s2.7 6.1 6.1 6.1c.8 0 1.3-.6 1.3-1.3 0-.35-.13-.66-.35-.9-.2-.24-.34-.55-.34-.9 0-.72.58-1.3 1.3-1.3h1.5c1.9 0 3.4-1.5 3.4-3.4C14.8 4.6 11.8 1.9 8 1.9z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/><circle cx="4.9" cy="8.3" r="1" fill="currentColor"/><circle cx="6.2" cy="5.2" r="1" fill="currentColor"/><circle cx="9.5" cy="4.8" r="1" fill="currentColor"/><circle cx="11.9" cy="7" r="1" fill="currentColor"/></svg>`;
+const MORE = `<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="3.4" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.6" cy="8" r="1.3" fill="currentColor"/></svg>`;
+const ICO = `<svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+const WARN = `<svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1.6 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12.1" r=".9" fill="currentColor"/></svg>`;
+const WARN16 = WARN.replace('width="14" height="14"', 'width="16" height="16"');
+const GONE = `<svg width="14" height="14" viewBox="0 0 16 16"><path d="M3.5 1.8h6l3 3v9.4h-9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2.2 1.6" stroke-linejoin="round"/></svg>`;
+const REFRESH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M2.7 6.6a5.4 5.4 0 0 1 9.9-1.8M13.3 9.4a5.4 5.4 0 0 1-9.9 1.8" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><path d="M12.9 1.9v3.1H9.8M3.1 14.1V11h3.1" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const INFO = `<svg width="13" height="13" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".95" fill="currentColor"/></svg>`;
+const LOCK = `<svg width="13" height="13" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`;
+const RESET = `<svg width="12" height="12" viewBox="0 0 16 16"><path d="M3.5 8a4.5 4.5 0 1 0 1.4-3.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M4.5 2v3h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+/* ---------- document windows ---------- */
+const DOCS = {
+  plan: `<h1>YAMV plan</h1>
+<p>The viewer opens Markdown files from any folder and keeps them in a tree beside the page. This file is a snapshot of the <a>Linear issues</a>.</p>
+<h2>Now</h2>
+<ul><li>Theme settings: open it from any window</li><li>Live reload of a theme when its file changes</li><li>Content width per folder, with the ⟷ popover</li></ul>
+<h2>Next</h2>
+<p>Drag and drop, and links that open other documents.</p>
+<pre><code><span class="k">dotnet</span> build Yamv.slnx -c Release
+<span class="c"># warnings are errors</span></code></pre>`,
+  notes: `<h1>Reading notes</h1>
+<p>Notes from the week's papers. The second one argues that measure matters more than font size for long reading, and that most people settle between 60 and 75 characters a line.</p>
+<h2>To follow up</h2>
+<ul><li>Find the original study the second paper cites</li><li>Try a narrower column for a week and see if it sticks</li></ul>`,
+};
+const row = (name, cls = "") => `<div class="row ${cls}">${ICO}<span class="nm">${name}</span></div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+const head = (name, badge) => `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge ${badge === "dir" ? "dir" : ""}">${badge}</span></div>`;
+function tree() {
+  const yamv = head("yamv", "git") + row("README.md") + folder("docs/plans") + row("MAIN.md", "in sel") + row("v1-build.md", "in");
+  const yaat = head("yaat", "git") + folder("docs") + row("ARCHITECTURE.md", "in") + row("glossary.md", "in");
+  const dl = head("~\\Downloads", "dir") + row("notes.md");
+  return `<div class="grp">${yamv}</div><div class="grp">${yaat}</div><div class="grp">${dl}</div>`;
+}
+/* the title bar's tools: Open…, then ⟷, then the Q1 entry ("a" palette, "b" ⋯, "c" or none: nothing) */
+function tools(entry, o = {}) {
+  let h = `<span class="wbtn">${OPEN}</span><span class="wbtn">${GLYPH}</span>`;
+  if (entry === "a") h += `<span class="wbtn ${o.cls ?? ""}">${PALETTE}${o.inner ?? ""}</span>`;
+  if (entry === "b") h += `<span class="wbtn ${o.cls ?? ""}">${MORE}${o.inner ?? ""}</span>`;
+  return h;
+}
+function win(o) {
+  const side = o.tree === false ? "" : `<div class="side" style="width:${o.treeW ?? 230}px">${tree()}</div>`;
+  return `<div class="win" style="width:${o.w}px;height:${o.h}px;${vars(o.fam ?? "studio", o.half)}">
+    <div class="titlebar"><span class="name">${o.title}</span><span>${o.loc ?? ""}</span><span class="spacer"></span>${o.tools ?? ""}${CTL}</div>
+    <div class="body"><div class="pane">${o.pane ?? ""}</div>${side}</div>${o.over ?? ""}</div>`;
+}
+const col = (html) => `<div class="col md">${html}</div>`;
+const note = (text, style) => `<div class="note" style="${style}">${text}</div>`;
+
+/* ---------- the theme settings window ---------- */
+const CHIPS = {
+  paper: ["#fbf8f2", "#a4542a", "#1d1a17", "#df9a6b"], studio: ["#ffffff", "#0969da", "#0f1318", "#4493f8"], ink: ["#f7f6f3", "#0d7c6c", "#0e1013", "#5eead4"],
+  "night-owl": ["#fbfbfb", "#4876d6", "#011627", "#82aaff"], "my-studio": ["#ffffff", "#1a7f37", "#0f1318", "#3fb950"],
+};
+const chip = (id) => { const [lb, la, db, da] = CHIPS[id]; return `<span class="chip"><span style="background:${lb}"><i style="background:${la}"></i></span><span style="background:${db}"><i style="background:${da}"></i></span></span>`; };
+const BUILTIN = [["paper", "Paper"], ["studio", "Studio"], ["ink", "Ink"]];
+const YOURS = [["night-owl", "Night Owl"], ["my-studio", "My Studio"]];
+/* l: { sel, state: { id: "bad" | "gone" }, hide: [ids], mark: id } */
+function themeList(l) {
+  const r = ([id, name]) => {
+    const st = (l.state ?? {})[id] ?? "";
+    const glyph = st === "bad" ? `<span class="glyph">${WARN}</span>` : st === "gone" ? `<span class="glyph">${GONE}</span>` : "";
+    return `<div class="trow ${l.sel === id ? "sel" : ""} ${st} ${l.mark === id ? "mk" : ""}">${chip(id)}<span class="nm">${name}</span>${glyph}</div>`;
+  };
+  const yours = YOURS.filter(([id]) => !(l.hide ?? []).includes(id));
+  return `<div class="tlist"><div class="sh">Built-in</div>${BUILTIN.map(r).join("")}<div class="sh" style="margin-top:16px">Yours</div>${yours.map(r).join("")}
+    <div class="grow"></div><div class="appear"><div class="lbl">Appearance</div><div class="select">Match system<span class="caret">▼</span></div></div></div>`;
+}
+const HINT = `<div class="hint">Grey values come from Shared or the defaults. ↺ removes a value from this tab.</div>`;
+function edHead(h) {
+  const tabs = ["Shared", "Light", "Dark"].map((n) => `<span class="${n === h.tab ? "on" : ""}">${n}</span>`).join("");
+  return `<div class="thead"><div class="tt"><b>${h.name}</b><span class="badge ${h.badgeCls ?? ""}">${h.badge}</span></div>
+    <div class="d">${h.desc}</div><div class="seg">${tabs}</div>${h.notes ?? HINT}</div>`;
+}
+const PAGE = ["pageBackground", "text", "textSecondary", "textMuted", "heading", "accent", "accentSoft", "line", "quote"];
+const CHROME = ["chromeBackground", "sidebarBackground", "selectionBackground", "selectionText", "hoverBackground"];
+/* r: { values, inherited: [names], unsaved: [names], ro } */
+function tokRows(r) {
+  const one = (name) => {
+    const v = r.values[name], inh = (r.inherited ?? []).includes(name), dirty = (r.unsaved ?? []).includes(name);
+    const dot = dirty ? '<span class="mod">●</span>' : "";
+    return `<div class="tok ${inh ? "inh" : ""}"><span class="sw" style="--c:${v}"></span><span class="stk"><span class="tn">${name}${dot}</span><span class="fld">${v}</span></span><span class="reset">${inh || r.ro ? "" : RESET}</span></div>`;
+  };
+  return `<div class="tscroll ${r.ro ? "ro" : ""}"><div class="gh">Page</div>${PAGE.map(one).join("")}<div class="gh">Chrome</div>${CHROME.map(one).join("")}</div>`;
+}
+function preview(fam, half, over = {}) {
+  return `<div class="prev"><div class="pv" style="${vars(fam, half, over)}">
+    <div class="ptb"><b>Release checklist.md</b><span>yamv / docs</span><span class="tag">${half}</span></div>
+    <div class="pbody"><div class="pdoc pmd"><h1>Release</h1><p>Run the <a>checklist</a> before you tag, and bump <code>version</code> first.</p>
+      <h2>Build</h2><pre><code><span class="k">dotnet</span> build <span class="s">"Yamv.slnx"</span> -c Release
+<span class="c"># warnings are errors</span></code></pre><blockquote>Ship on a Tuesday.</blockquote></div>
+    <div class="ptree"><div class="g">yamv</div><div class="r">README.md</div><div class="r sel">Release…</div><div class="r">notes.md</div></div></div></div></div>`;
+}
+const footUser = (off = {}) => `<div class="foot"><span class="btn">Import…</span><span class="btn ${off.exp ? "off" : ""}">Export…</span><span class="btn ${off.edit ? "off" : ""}">Edit as text</span>
+  <span class="spacer"></span><span class="btn ${off.revert ? "off" : ""}">Revert</span><span class="btn primary ${off.save ? "off" : ""}">Save</span></div>`;
+const footBuiltIn = () => `<div class="foot"><span class="btn">Import…</span><span class="btn">Export…</span><span class="spacer"></span><span class="btn off">Revert</span><span class="btn primary">Duplicate to edit</span></div>`;
+/* o: { fam, half, detail, dirty, bar, list, head, rows, prev, foot } */
+function settings(o) {
+  return `<div class="win" style="width:980px;height:640px;${vars(o.fam, o.half)}">
+    <div class="titlebar"><span class="name">Themes</span><span>${o.detail}</span>${o.dirty ? '<span class="dot">●</span>' : ""}<span class="spacer"></span>${CLOSE_ONLY}</div>
+    ${o.bar ?? ""}<div class="wbody">${themeList(o.list)}<div class="tokens">${edHead(o.head)}${tokRows(o.rows)}</div>${o.prev}</div>${o.foot}${o.over ?? ""}</div>`;
+}
+
+/* ---------- lanes side by side, one row per state ---------- */
+function grid({ lanes, strips, label = 130 }) {
+  let h = `<div class="grid" style="grid-template-columns:${label}px repeat(${lanes.length}, minmax(0,1fr))"><div></div>`;
+  h += lanes.map((l) => `<div class="lane-h"><h3><span class="q">${l.q}</span>${l.title}</h3><p class="cap">${l.cap}</p></div>`).join("");
+  for (const s of strips) {
+    if (s.title) h += `<div class="strip-h">${s.title}</div>`;
+    for (const r of s.rows) {
+      h += `<div class="t"><b>${r.t}</b><span>${r.ev}</span></div>`;
+      h += r.cells.map((c) => c === null ? "<div></div>" : `<div class="cell"><div class="zoom" style="zoom:${c.z ?? s.z}">${c.html}</div>${c.cap ? `<p class="fcap">${c.cap}</p>` : ""}</div>`).join("");
+    }
+  }
+  return h + "</div>";
+}
+
+/* ---------- Q1 ---------- */
+const TIP_A = `<div class="tip" style="top:33px;right:-30px">Theme settings… (Ctrl+,)</div>`;
+const MENU_B = `<div class="menu" style="top:32px;right:0"><div class="mi hover">Theme settings…<span class="key">Ctrl+,</span></div></div>`;
+function macMenu(half) {
+  return `<div class="mac ${half}" style="width:360px;height:196px">
+    <div class="bar"><b class="on">YAMV</b><span>Window</span><span>Help</span></div>
+    <div class="dd"><div class="mi">About YAMV</div><hr><div class="mi hi">Settings…<span class="key">⌘,</span></div><hr>
+      <div class="mi">Hide YAMV<span class="key">⌘H</span></div><div class="mi">Show All</div><hr><div class="mi">Quit YAMV<span class="key">⌘Q</span></div></div></div>`;
+}
+function q1() {
+  const z = 0.54, zd = 1.2;
+  const main = (half, entry, over = "") => win({ half, w: 800, h: 460, title: "MAIN.md", loc: "yamv / docs / plans", tools: tools(entry, { cls: "mk" }), pane: col(DOCS.plan), over });
+  const viewer = (half, entry, over = "") => win({ half, w: 800, h: 460, title: "notes.md", loc: "~\\Downloads", tree: false, tools: tools(entry, { cls: "mk" }), pane: col(DOCS.notes), over });
+  const keysNote = note("Ctrl+, · Cmd+, on macOS", "right:250px;top:48px");
+  const detail = (half, entry) => entry === "c" ? macMenu(half)
+    : win({ half, w: 360, h: 150, title: "MAIN.md", tree: false, pane: "",
+        tools: tools(entry, entry === "a" ? { cls: "hover", inner: TIP_A } : { cls: "open", inner: MENU_B }) });
+  const rowOf = (half, f, caps) => ["a", "b", "c"].map((k, i) => ({ html: f(half, k, k === "c" ? keysNote : ""), cap: caps[i] }));
+  return grid({
+    lanes: [
+      { q: "Q1 · A", title: "A palette button right of ⟷", cap: "A 28 px palette button in <code>TitleBarTools</code>, tooltip \"Theme settings… (Ctrl+,)\", in every window; worst case: a third icon in the bar, and each later setting needs its own button or a move to a menu." },
+      { q: "Q1 · B", title: "A ⋯ menu right of ⟷", cap: "A ⋯ button opens a small menu whose one entry is \"Theme settings…\", with room for later entries; worst case: until other entries arrive it is one entry behind two clicks, and the ⋯ says nothing of what is inside." },
+      { q: "Q1 · C", title: "No button: Ctrl/Cmd+, only", cap: "Ctrl+, on Windows; on macOS Cmd+, and the app menu's \"Settings…\"; worst case: on Windows nothing on screen says the window exists, so it is found only by knowing the shortcut." },
+    ],
+    strips: [
+      { title: "The main window", z, rows: [
+        { t: "Light", ev: "Studio light, documents open.", cells: rowOf("light", main, ["The palette sits right of ⟷ (dashed ring).", "The ⋯ sits right of ⟷ (dashed ring).", "Only Open… and ⟷ in the bar."]) },
+        { t: "Dark", ev: "Studio dark.", cells: rowOf("dark", main, ["Rest state, glyph in <code>textMuted</code>.", "Rest state, glyph in <code>textMuted</code>.", "Only Open… and ⟷ in the bar."]) },
+      ] },
+      { title: "Detail, at 120%", z: zd, rows: [
+        { t: "Light", ev: "Hovered or opened.", cells: [
+          { html: detail("light", "a"), cap: "Hover fill <code>hoverBackground</code>, the same as ⟷; the tooltip names the shortcut." },
+          { html: detail("light", "b"), cap: "Pressed fill <code>selectionBackground</code>; a popup window, so it can sit over the page." },
+          { html: detail("light", "c"), cap: "macOS only: the app menu, drawn by macOS (not tokens)." }] },
+        { t: "Dark", ev: "The same, dark.", cells: [
+          { html: detail("dark", "a"), cap: "The tooltip from the dark tokens." },
+          { html: detail("dark", "b"), cap: "The menu from the dark tokens." },
+          { html: detail("dark", "c"), cap: "The same menu in macOS dark mode." }] },
+      ] },
+      { title: "A viewer window (no tree), the same title bar", z, rows: [
+        { t: "Light", ev: "notes.md opened with yamv notes.md.", cells: rowOf("light", viewer, ["The same palette; the window opens owned by this viewer.", "The same ⋯ menu.", "The same: shortcut only."]) },
+        { t: "Dark", ev: "The same, dark.", cells: rowOf("dark", viewer, ["", "", ""]) },
+      ] },
+    ],
+  });
+}
+
+/* ---------- Q2 ---------- */
+const ERR = `The file is not valid theme JSON: '"' is invalid after a value. Expected either ',', '}', or ']'. Path: $.dark.tokens | LineNumber: 14 | BytePositionInLine: 6.`;
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const BTNS = (reloadOff) => `<span class="btn sm ${reloadOff ? "off" : ""}">Reload</span><span class="btn sm">Keep mine</span>`;
+const BARS = {
+  a: () => `<div class="dbar"><span class="bi">${REFRESH}</span><span class="bt"><b>This theme changed on disk</b></span>${BTNS(false)}</div>`,
+  b: () => `<div class="dbar"><span class="bi">${REFRESH}</span><span class="bt"><b>This theme changed on disk</b><span class="l2">3 tokens differ from your edits</span></span>${BTNS(false)}</div>`,
+  a2: () => `<div class="dbar warn"><span class="bi">${WARN16}</span><span class="bt"><b>This theme changed on disk and no longer loads: <span class="err">${esc(ERR)}</span></b></span>${BTNS(true)}</div>`,
+  b2: () => `<div class="dbar warn"><span class="bi">${WARN16}</span><span class="bt"><b>This theme changed on disk and no longer loads</b><span class="l2"><span class="err">${esc(ERR)}</span><span class="lnk">Edit as text</span></span></span>${BTNS(true)}</div>`,
+};
+function q2win(half, kind) {
+  const values = { ...NIGHT_L, ...(half === "dark" ? NIGHT_D : {}), ...EDITS[half] };
+  const bad = kind === "a2" || kind === "b2";
+  return settings({ fam: "studio", half, detail: "Night Owl", dirty: true, bar: BARS[kind](),
+    list: { sel: "night-owl", state: bad ? { "night-owl": "bad" } : {} },
+    head: { name: "Night Owl", badge: "Yours", desc: "night-owl.yamv-theme.json · light and dark", tab: half === "dark" ? "Dark" : "Light" },
+    rows: { values, inherited: ["textSecondary", "hoverBackground"], unsaved: ["heading", "accent"] },
+    prev: preview("night", half, EDITS[half]), foot: footUser() });
+}
+const stripBar = (half, kind) => `<div class="strip" style="width:760px;${vars("studio", half)}">${BARS[kind]()}<div class="stub"><span style="width:190px;background:var(--yamv-sidebar-background)"></span><span style="width:350px"></span></div></div>`;
+function q2() {
+  const z = 0.68, zd = 0.88;
+  return grid({
+    lanes: [
+      { q: "Q2 · A", title: "One line: text, Reload, Keep mine", cap: "A 42 px bar in the accent tint says \"This theme changed on disk\" beside Reload and Keep mine; worst case: it does not say what changed, so Keep mine then Save can overwrite an outside edit the user never saw." },
+      { q: "Q2 · B", title: "Two lines: the same, and what changed", cap: "The same bar with a second line, \"3 tokens differ from your edits\"; worst case: a change outside the tokens (css, name, a comment) has no count, so line 2 needs other wording, and every disk change needs a token diff." },
+    ],
+    strips: [
+      { title: "The changed file loads", z, rows: [
+        { t: "Light", ev: "Night Owl saved from another editor; the window has two unsaved tokens.", cells: [
+          { html: q2win("light", "a"), cap: "The bar sits above all three columns; the edits (dots) and the preview stay." },
+          { html: q2win("light", "b"), cap: "The second line, muted, counts the tokens the file now sets differently." }] },
+        { t: "Dark", ev: "The same, dark.", cells: [
+          { html: q2win("dark", "a"), cap: "Tint: 9% <code>accent</code> over <code>pageBackground</code>; border <code>accentSoft</code>." },
+          { html: q2win("dark", "b"), cap: "The same, from the dark tokens." }] },
+      ] },
+      { title: "The changed file no longer parses (A′ and B′)", z, rows: [
+        { t: "Light", ev: "The outside save left a stray quote on line 14.", cells: [
+          { html: q2win("light", "a2"), cap: "<b>A′</b>: the bar turns to the warning colours; Reload is disabled; the row gets the warning glyph." },
+          { html: q2win("light", "b2"), cap: "<b>B′</b>: the error moves to line 2, in mono, with an <b>Edit as text</b> link to fix the file." }] },
+        { t: "Dark", ev: "The same, dark.", cells: [
+          { html: q2win("dark", "a2"), cap: "Warning tint: <code>warningBackground</code>, border <code>warningLine</code>." },
+          { html: q2win("dark", "b2"), cap: "The same, from the dark tokens." }] },
+      ] },
+      { title: "Detail: the bars alone, at the window's 760 px minimum width, at 88%", z: zd, rows: [
+        { t: "Loads", ev: "Studio light.", cells: [{ html: stripBar("light", "a") }, { html: stripBar("light", "b") }] },
+        { t: "Fails", ev: "Studio light.", cells: [
+          { html: stripBar("light", "a2"), cap: "One line: the parser's message is cut off after a few words, at any width." },
+          { html: stripBar("light", "b2"), cap: "Line 2 holds more of it, but a long message is still cut; Edit as text stays visible." }] },
+      ] },
+    ],
+  });
+}
+
+/* ---------- Q3 ---------- */
+function q3pair(lane, half) {
+  const keep = lane === "a";
+  const fam = keep ? "night" : "studio";
+  const doc = win({ fam, half, w: 760, h: 540, treeW: 220, title: "MAIN.md", loc: "yamv / docs / plans", tools: tools("none"), pane: col(DOCS.plan),
+    over: note(keep ? "Night Owl, the last loaded version" : "Studio, at once", "right:236px;top:50px") });
+  const nightValues = half === "dark" ? NIGHT_D : NIGHT_L;
+  const sw = keep
+    ? settings({ fam: "night", half, detail: "Night Owl", list: { sel: "night-owl", state: { "night-owl": "gone" }, mark: "night-owl" },
+        head: { name: "Night Owl", badge: "Missing on disk", badgeCls: "warn", desc: "night-owl.yamv-theme.json · light and dark", tab: half === "dark" ? "Dark" : "Light",
+          notes: `<div class="lock info mk">${INFO}<span><b>Missing on disk.</b> Using the last loaded version.</span></div>` },
+        rows: { values: nightValues, inherited: ["textSecondary", "hoverBackground"], ro: true },
+        prev: preview("night", half), foot: footUser({ exp: true, edit: true, revert: true, save: true }) })
+    : settings({ fam: "studio", half, detail: "Studio", list: { sel: "studio", hide: ["night-owl"] },
+        head: { name: "Studio", badge: "Built-in", badgeCls: "mute", desc: "Neutral greys, blue accent. The default.", tab: half === "dark" ? "Dark" : "Light",
+          notes: `<div class="lock info mk">${INFO}<span><b>Night Owl was deleted; showing Studio</b></span></div><div class="lock">${LOCK}<span>Built-in themes are read-only. Duplicate this one to edit a copy in Yours.</span></div>` },
+        rows: { values: T.studio[half], ro: true },
+        prev: preview("studio", half), foot: footBuiltIn() });
+  return `<div class="pair"><div class="zoom" style="zoom:.82">${doc}</div><div class="zoom" style="zoom:.82">${sw}</div></div>`;
+}
+const Q3LANES = [
+  ["a", "Q3 · A", "Keep showing it", "The document keeps the last good Night Owl; the settings window lists it greyed, \"Missing on disk\", with the note \"Using the last loaded version\"; worst case: the theme now lives nowhere on disk, and the next start falls back to Studio without a word.",
+    ["The page and the chrome keep Night Owl; nothing on the document window says the file is gone.", "Night Owl stays in Yours, greyed with a dashed file glyph, and read-only: Export…, Edit as text and Save are off."]],
+  ["b", "Q3 · B", "Fall back to Studio at once", "Every window switches to the built-in Studio, and the settings window selects Studio with the note \"Night Owl was deleted; showing Studio\"; worst case: a sync tool or a git checkout that deletes and rewrites the file flips every window to Studio, and Night Owl must be chosen again.",
+    ["The page and the chrome switch to Studio the moment the watcher reports the delete.", "Night Owl is gone from Yours; Studio is selected, and the note sits above the read-only lock line."]],
+];
+function q3() {
+  let h = "";
+  for (const [k, q, title, cap, fcaps] of Q3LANES) for (const half of ["light", "dark"]) {
+    h += `<div class="wide"><div class="lane-h"><h3><span class="q">${q}</span>${title} · ${half}</h3><p class="cap">${cap}</p></div>${q3pair(k, half)}
+      <div class="fcaps"><p class="fcap" style="width:${760 * 0.82}px">${fcaps[0]}</p><p class="fcap" style="width:${980 * 0.82}px">${fcaps[1]}</p></div></div>`;
+  }
+  return h;
+}
+
+const QS = { q1, q2 };
+for (const el of document.querySelectorAll("[data-q]")) el.innerHTML = QS[el.dataset.q]();
+document.querySelector("[data-q3]").innerHTML = q3();
+</script>
+</body>
+</html>
