@@ -17,6 +17,7 @@ using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
 using Yamv.Core.Platform;
 using Yamv.Core.Session;
+using Yamv.Core.Widths;
 
 namespace Yamv.App.Tests.Views;
 
@@ -387,6 +388,76 @@ public sealed class MainWindowTests
 
             Assert.DoesNotContain(fixture.DocA, fixture.State.Documents);
             Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Forwarded_command_close_bracket_from_the_page_steps_the_width_wider() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(760)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+            bool mac = OperatingSystem.IsMacOS();
+
+            fixture.Surface.RaiseKey(new KeyForwardedEventArgs("]", ctrl: !mac, meta: mac, shift: false, alt: false));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(800, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new double?[] { 800 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task Command_and_the_physical_left_bracket_key_steps_the_width_whatever_key_the_layout_reports() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(763)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Window.KeyPress(Key.Oem8, CommandModifier, PhysicalKey.BracketLeft, "ü");
+            fixture.Settle();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(760, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new double?[] { 760 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task Command_and_the_physical_right_bracket_key_steps_the_width_wider() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(760)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Window.KeyPress(Key.OemPlus, CommandModifier, PhysicalKey.BracketRight, "+");
+            fixture.Settle();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(800, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new double?[] { 800 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task Command_and_a_left_bracket_key_code_from_another_physical_key_does_not_step() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Window.KeyPress(Key.OemOpenBrackets, CommandModifier, PhysicalKey.Digit8, "[");
+            fixture.Settle();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(File.Exists(fixture.WidthsFile));
+            Assert.Empty(fixture.Surface.ContentWidths);
         });
 
     [Fact]
@@ -780,12 +851,24 @@ public sealed class MainWindowTests
                 File.Exists,
                 new GroupingOptions(null, StringComparison.OrdinalIgnoreCase)
             );
-            ViewModel = new DocumentWindowViewModel(State, Surface, path => Reader(path), new FakeTimeProvider(), Log);
+            WidthsFile = Path.Combine(_root, "data", "widths.json");
+            Widths = new WidthStore(WidthsFile, Log);
+            ViewModel = new DocumentWindowViewModel(
+                State,
+                Surface,
+                new DocumentWindowServices(Widths, path => Reader(path), new FakeTimeProvider(), Log)
+            );
             Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             Window.Closed += (_, _) => IsClosed = true;
         }
 
         public bool IsClosed { get; private set; }
+
+        /// <summary>The window's widths file, in the fixture's temp folder.</summary>
+        public string WidthsFile { get; }
+
+        /// <summary>The view model's width store.</summary>
+        public WidthStore Widths { get; }
 
         public string Repo { get; }
 

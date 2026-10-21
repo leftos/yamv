@@ -114,8 +114,8 @@ public partial class HarnessWindow : Window
             RenderedDocument document = new MarkdownRenderer().Render(await File.ReadAllTextAsync(documentPath));
             Title = $"YAMV harness: {document.Title ?? Path.GetFileName(documentPath)}";
             await _view.SetThemeCssAsync(_dark ? DarkTheme : LightTheme);
-            await _view.SetContentWidthAsync(args.Contains("--full-width") ? null : 800);
-            await _view.ShowAsync(document, documentPath, GroupRoot(documentPath), ScrollOption(args), null);
+            double? width = args.Contains("--full-width") ? null : 800;
+            await _view.ShowAsync(new DocumentShow(document, documentPath, GroupRoot(documentPath), ScrollOption(args), null, width));
             _log.LogInfo($"Harness: showing {documentPath} ({(_dark ? "dark" : "light")})");
             if (args.Contains("--find"))
             {

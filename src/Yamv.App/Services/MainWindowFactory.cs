@@ -9,6 +9,7 @@ using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
 using Yamv.Core.Session;
 using Yamv.Core.Theming;
+using Yamv.Core.Widths;
 
 namespace Yamv.App.Services;
 
@@ -32,11 +33,13 @@ public static class MainWindowFactory
     /// </summary>
     /// <param name="application">The application whose resources the theme is written into.</param>
     /// <param name="bridge">The app's theme bridge, which the window registers its document view with.</param>
+    /// <param name="widths">The app's one width store, which gives each document its content width.</param>
     /// <param name="log">The process's log.</param>
-    public static MainWindowComposition Create(Application application, ThemeBridge bridge, IAppLog log)
+    public static MainWindowComposition Create(Application application, ThemeBridge bridge, WidthStore widths, IAppLog log)
     {
         ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(bridge);
+        ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(log);
         var store = new SessionStore(AppPaths.SessionFile, log);
         SessionState session = store.Load();
@@ -48,7 +51,7 @@ public static class MainWindowFactory
         {
             var finder = new GitRootFinder(log);
             var state = new DocumentWindowState(persist: true, finder.FindWorkTreeRoot, File.Exists, GroupingOptions.ForCurrentPlatform);
-            viewModel = new DocumentWindowViewModel(state, view, File.ReadAllText, TimeProvider.System, log);
+            viewModel = new DocumentWindowViewModel(state, view, new DocumentWindowServices(widths, File.ReadAllText, TimeProvider.System, log));
             viewModel.Restore(session);
             var window = new MainWindow(viewModel, view, view, log);
             RestoreLayout(window, session);
@@ -69,15 +72,23 @@ public static class MainWindowFactory
     /// </summary>
     /// <param name="application">The application whose resources the theme is written into.</param>
     /// <param name="bridge">The app's theme bridge, which the window registers its document view with.</param>
+    /// <param name="widths">The app's one width store, which gives each document its content width.</param>
     /// <param name="files">The full paths the window shows.</param>
     /// <param name="log">The process's log.</param>
-    public static MainWindowComposition CreateViewer(Application application, ThemeBridge bridge, IReadOnlyList<string> files, IAppLog log)
+    public static MainWindowComposition CreateViewer(
+        Application application,
+        ThemeBridge bridge,
+        WidthStore widths,
+        IReadOnlyList<string> files,
+        IAppLog log
+    )
     {
         ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(bridge);
+        ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(log);
         var view = new DocumentView(log);
-        return CreateViewer(application, bridge, files, log, view, view);
+        return CreateViewer(application, bridge, widths, files, log, view, view);
     }
 
     /// <summary>
@@ -86,6 +97,7 @@ public static class MainWindowFactory
     /// </summary>
     /// <param name="application">The application whose resources the theme is written into.</param>
     /// <param name="bridge">The app's theme bridge, which the window registers its document surface with.</param>
+    /// <param name="widths">The app's one width store, which gives each document its content width.</param>
     /// <param name="files">The full paths the window shows.</param>
     /// <param name="log">The process's log.</param>
     /// <param name="documentView">The control that draws the selected document.</param>
@@ -93,6 +105,7 @@ public static class MainWindowFactory
     internal static MainWindowComposition CreateViewer(
         Application application,
         ThemeBridge bridge,
+        WidthStore widths,
         IReadOnlyList<string> files,
         IAppLog log,
         Control documentView,
@@ -101,6 +114,7 @@ public static class MainWindowFactory
     {
         ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(bridge);
+        ArgumentNullException.ThrowIfNull(widths);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(documentView);
@@ -114,7 +128,7 @@ public static class MainWindowFactory
         {
             var finder = new GitRootFinder(log);
             var state = new DocumentWindowState(persist: false, finder.FindWorkTreeRoot, File.Exists, GroupingOptions.ForCurrentPlatform);
-            viewModel = new DocumentWindowViewModel(state, surface, File.ReadAllText, TimeProvider.System, log);
+            viewModel = new DocumentWindowViewModel(state, surface, new DocumentWindowServices(widths, File.ReadAllText, TimeProvider.System, log));
             viewModel.Open(ExistingFirst(files));
             var window = new MainWindow(viewModel, documentView, surface, log);
             return new MainWindowComposition(window, viewModel, bridge, surface, session: null);
@@ -177,7 +191,10 @@ public static class MainWindowFactory
     }
 }
 
-/// <summary>The window and the objects that live as long as it: its view model, the theme bridge it registered with, and the session saver of a main window.</summary>
+/// <summary>
+/// The window and the objects that live as long as it: its view model, the theme bridge it registered with, and the session
+/// saver of a main window.
+/// </summary>
 /// <param name="window">The window.</param>
 /// <param name="viewModel">The window's view model.</param>
 /// <param name="bridge">The app's theme bridge, which the window's document view is registered with.</param>

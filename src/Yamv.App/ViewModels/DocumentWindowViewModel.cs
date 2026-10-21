@@ -7,14 +7,15 @@ using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
 using Yamv.Core.Rendering;
 using Yamv.Core.Session;
+using Yamv.Core.Widths;
 
 namespace Yamv.App.ViewModels;
 
 /// <summary>
 /// One document window: its tree, its selection and the document its surface shows, kept in step with a
-/// <see cref="DocumentWindowState"/>. A selected document is read and rendered off the UI thread and shown only if it is still
-/// the selection when the render finishes. Missing documents are re-checked every two seconds and shown again when they
-/// reappear. Every member is called on the UI thread.
+/// <see cref="DocumentWindowState"/>. A selected document is read and rendered, and its content width resolved, off the UI
+/// thread; it is shown, with its width, only if it is still the selection when both finish. Missing documents are re-checked
+/// every two seconds and shown again when they reappear. Every member is called on the UI thread.
 /// </summary>
 public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 {
@@ -23,12 +24,14 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
     private readonly DocumentWindowState _state;
     private readonly IDocumentSurface _surface;
+    private readonly WidthStore _widths;
     private readonly Func<string, string> _readText;
     private readonly IAppLog _log;
     private readonly MarkdownRenderer _renderer = new();
     private readonly Dictionary<string, double> _scrollPositions;
     private readonly HashSet<string> _unreadable;
     private readonly HashSet<Task> _renders = [];
+    private Task _lastStep = Task.CompletedTask;
     private readonly Dictionary<string, bool> _folderExpansion;
     private readonly ITimer _missingTimer;
     private List<DocumentItemViewModel> _documentRows = [];
@@ -43,26 +46,22 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>Creates the view model of a window over <paramref name="state"/>, and starts the missing-file re-check.</summary>
     /// <param name="state">The window's documents, selection and layout.</param>
     /// <param name="surface">The view that draws the selected document.</param>
-    /// <param name="readText">Reads a document's markdown; called off the UI thread.</param>
-    /// <param name="timeProvider">The clock of the missing-file re-check.</param>
-    /// <param name="log">Where read failures are reported.</param>
-    public DocumentWindowViewModel(
-        DocumentWindowState state,
-        IDocumentSurface surface,
-        Func<string, string> readText,
-        TimeProvider timeProvider,
-        IAppLog log
-    )
+    /// <param name="services">The width store, the document reader, the clock and the log the window uses.</param>
+    public DocumentWindowViewModel(DocumentWindowState state, IDocumentSurface surface, DocumentWindowServices services)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(surface);
-        ArgumentNullException.ThrowIfNull(readText);
-        ArgumentNullException.ThrowIfNull(timeProvider);
-        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(services.Widths);
+        ArgumentNullException.ThrowIfNull(services.ReadText);
+        ArgumentNullException.ThrowIfNull(services.Time);
+        ArgumentNullException.ThrowIfNull(services.Log);
+        TimeProvider timeProvider = services.Time;
         _state = state;
         _surface = surface;
-        _readText = readText;
-        _log = log;
+        _widths = services.Widths;
+        _readText = services.ReadText;
+        _log = services.Log;
         _scrollPositions = new Dictionary<string, double>(state.PathComparer);
         _unreadable = new HashSet<string>(state.PathComparer);
         _folderExpansion = new Dictionary<string, bool>(state.PathComparer);
@@ -173,6 +172,24 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         RenderSelection();
     }
 
+    /// <summary>
+    /// Steps the shown document's width one grid value, writing the result to where that width comes from (the folder it is
+    /// inherited from, or the app default) and sending it to the page. With no document shown it does nothing; a write that
+    /// fails is logged and the page keeps its width. Each press steps once: a step starts after the one before it has
+    /// written and sent its width. <see cref="WhenRendersSettled"/> waits for the steps too.
+    /// </summary>
+    /// <param name="wider">True to step wider (Ctrl/Cmd+]), false to step narrower (Ctrl/Cmd+[).</param>
+    /// <param name="paneWidth">The document pane's width in px; the step compares against the text space it leaves.</param>
+    public void StepContentWidth(bool wider, double paneWidth)
+    {
+        if (_shownPath is not string path || !SamePath(path, _state.SelectedPath) || SelectedIsMissing || SelectedIsUnreadable)
+        {
+            return;
+        }
+
+        _lastStep = StepAfterAsync(_lastStep, path, wider, paneWidth);
+    }
+
     /// <summary>Removes a missing document from the window.</summary>
     [RelayCommand]
     public void RemoveMissing(string path) => _state.Close(path);
@@ -257,7 +274,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Completes once every render started so far has finished or been dropped.</summary>
-    internal Task WhenRendersSettled() => Task.WhenAll([.. _renders]);
+    internal Task WhenRendersSettled() => Task.WhenAll([.. _renders, _lastStep]);
 
     partial void OnSelectedItemChanged(TreeItemViewModel? value)
     {
@@ -570,9 +587,10 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private async Task RenderCoreAsync(string path, int generation)
     {
         RenderedDocument document;
+        ContentWidth width;
         try
         {
-            document = await Task.Run(() => _renderer.Render(_readText(path)));
+            (document, width) = await Task.Run(() => (_renderer.Render(_readText(path)), ResolveWidth(path)));
         }
         catch (IOException exception)
         {
@@ -593,7 +611,60 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         ClearUnreadable(path);
         double scroll = _scrollPositions.GetValueOrDefault(path);
         _shownPath = path;
-        await _surface.ShowAsync(document, path, group.Path, scroll, fragment: null);
+        // Nothing may be awaited between the check above and this call: a document that is no longer the selection is never shown.
+        await _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, Fragment: null, width.Px));
+    }
+
+    /// <summary>Runs one step once <paramref name="previous"/>, which never faults, has finished.</summary>
+    private async Task StepAfterAsync(Task previous, string path, bool wider, double paneWidth)
+    {
+        await previous;
+        await StepContentWidthAsync(path, wider, paneWidth);
+    }
+
+    private async Task StepContentWidthAsync(string path, bool wider, double paneWidth)
+    {
+        try
+        {
+            double textSpace = ContentWidth.TextSpace(paneWidth);
+            (ContentWidth stepped, bool written) = await Task.Run(() =>
+            {
+                (ContentWidth width, WidthSource source) = _widths.Resolve(path);
+                ContentWidth next = wider ? width.StepUp(textSpace) : width.StepDown(textSpace);
+                bool saved = source.Folder is string folder ? _widths.Set(folder, next) : _widths.SetDefault(next);
+                return (next, saved);
+            });
+            if (!written)
+            {
+                _log.LogWarning($"Cannot save the stepped content width of {path}; the page keeps its width.");
+                return;
+            }
+
+            if (!_disposed && SamePath(path, _shownPath))
+            {
+                await _surface.SetContentWidthAsync(stepped.Px);
+            }
+        }
+        // The step's task is only awaited by WhenRendersSettled, so its failure is logged here or nowhere.
+        catch (Exception exception)
+        {
+            _log.LogError($"Cannot step the content width of {path}.", exception);
+        }
+    }
+
+    /// <summary>The width stored for <paramref name="path"/>, the app default when the store fails; called off the UI thread.</summary>
+    private ContentWidth ResolveWidth(string path)
+    {
+        try
+        {
+            return _widths.Resolve(path).Width;
+        }
+        // Any failure of the store must still let the document show, at the app default.
+        catch (Exception exception)
+        {
+            _log.LogError($"Cannot resolve the content width of {path}; showing it at the app default.", exception);
+            return ContentWidth.AppDefault;
+        }
     }
 
     private void OnReadFailed(string path, Exception exception, int generation)
@@ -671,6 +742,13 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>One row of the tree's shape: its kind (repo group, folder group, folder or document), name, path and depth.</summary>
     private readonly record struct ShapeRow(char Kind, string Name, string Path, int Depth);
 }
+
+/// <summary>The services a <see cref="DocumentWindowViewModel"/> uses beside its state and surface.</summary>
+/// <param name="Widths">The app's one width store, which resolves and saves each document's content width.</param>
+/// <param name="ReadText">Reads a document's markdown; called off the UI thread.</param>
+/// <param name="Time">The clock of the missing-file re-check.</param>
+/// <param name="Log">Where read and width failures are reported.</param>
+public sealed record DocumentWindowServices(WidthStore Widths, Func<string, string> ReadText, TimeProvider Time, IAppLog Log);
 
 /// <summary>What kind of session change <see cref="DocumentWindowViewModel.SessionDirty"/> reports.</summary>
 /// <param name="scrollOnly">True when only the shown document's scroll position changed.</param>

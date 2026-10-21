@@ -28,6 +28,9 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private Uri? _documentUri;
     private ShowState? _lastShow;
     private double? _lastScroll;
+
+    /// <summary>The CSS value of the latest content width, from a show or a live change; null before either.</summary>
+    private string? _latestContentWidth;
     private int _generation;
     private TaskCompletionSource? _rendered;
 
@@ -54,33 +57,32 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     public event EventHandler<KeyForwardedEventArgs>? KeyForwarded;
 
     /// <summary>
-    /// Shows <paramref name="document"/>, restoring <paramref name="fragment"/> if given, else <paramref name="scroll"/>.
-    /// The task completes once the page has rendered it, math, diagrams and scroll position included, or once a newer
-    /// call replaces it.
+    /// Shows <paramref name="show"/>'s document at its content width, restoring its fragment if given, else its scroll
+    /// position. The task completes once the page has rendered it, math, diagrams and scroll position included, or once a
+    /// newer call replaces it. The width also becomes the latest content width, which a page that loads again gets back.
     /// </summary>
-    /// <param name="document">The rendered markdown.</param>
-    /// <param name="documentPath">The markdown file's path; relative links and images resolve against it.</param>
-    /// <param name="groupRoot">The folder <c>file:</c> images must stay inside.</param>
-    /// <param name="scroll">The scroll position as a fraction, 0 to 1, of the scrollable height.</param>
-    /// <param name="fragment">An element id to scroll to, which wins over <paramref name="scroll"/>.</param>
-    public Task ShowAsync(RenderedDocument document, string documentPath, string groupRoot, double scroll, string? fragment)
+    public Task ShowAsync(DocumentShow show)
     {
         Dispatcher.UIThread.VerifyAccess();
-        ArgumentNullException.ThrowIfNull(document);
-        string fullPath = Path.GetFullPath(documentPath);
+        ArgumentNullException.ThrowIfNull(show);
+        ArgumentNullException.ThrowIfNull(show.Document);
+        string width = CssWidth(show.ContentWidth, nameof(show));
+        string fullPath = Path.GetFullPath(show.DocumentPath);
         _documentUri = new Uri(fullPath);
         _lastScroll = null;
         int generation = ++_generation;
         var options = new RenderOptions(
             generation,
-            scroll,
-            fragment,
-            document.HasMermaid,
-            document.HasMath,
+            show.Scroll,
+            show.Fragment,
+            show.Document.HasMermaid,
+            show.Document.HasMath,
             FolderUri(Path.GetDirectoryName(fullPath) ?? fullPath),
-            FolderUri(groupRoot)
+            FolderUri(show.GroupRoot),
+            width
         );
-        _lastShow = new ShowState(document.Html, options);
+        TakeOverContentWidth(width);
+        _lastShow = new ShowState(show.Document.Html, options);
         string script = RenderScript(_lastShow);
         _rendered?.TrySetResult();
         var rendered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -95,17 +97,47 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         return RunAsync(CallKind.Theme, "setTheme", $"window.yamv.setTheme({Json(css)})");
     }
 
-    /// <summary>Sets the content column's maximum width in px; null makes it full width.</summary>
+    /// <summary>Changes the shown document's text measure in px, live; null makes it full width.</summary>
     public Task SetContentWidthAsync(double? px)
     {
         Dispatcher.UIThread.VerifyAccess();
-        if (px is double value && (!double.IsFinite(value) || value <= 0))
+        string width = CssWidth(px, nameof(px));
+        _latestContentWidth = width;
+        return RunAsync(CallKind.ContentWidth, "setContentWidth", ContentWidthScript(width));
+    }
+
+    /// <summary>
+    /// Makes <paramref name="width"/>, which a show carries, the latest content width: it is remembered for a reload, so the
+    /// replayed render and the replayed width agree, and a width call still queued, older than the show, is dropped.
+    /// </summary>
+    private void TakeOverContentWidth(string width)
+    {
+        _latestContentWidth = width;
+        Remember(new StateCall(CallKind.ContentWidth, "setContentWidth", ContentWidthScript(width)));
+        int queued = _pending.FindIndex(pending => pending.Kind == CallKind.ContentWidth);
+        if (queued >= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(px), px, "A content width is a positive number of px, or null for full width.");
+            _pending[queued].Completion.TrySetResult(ScriptOutcome.NotRun);
+            _pending.RemoveAt(queued);
+        }
+    }
+
+    private static string ContentWidthScript(string width) => $"window.yamv.setContentWidth({Json(width)})";
+
+    /// <summary>The CSS value of a content width: <c>"760px"</c>, or <c>"none"</c> for full width.</summary>
+    private static string CssWidth(double? px, string parameterName)
+    {
+        if (px is not double value)
+        {
+            return "none";
         }
 
-        string width = px is double pixels ? pixels.ToString(CultureInfo.InvariantCulture) + "px" : "none";
-        return RunAsync(CallKind.ContentWidth, "setContentWidth", $"window.yamv.setContentWidth({Json(width)})");
+        if (!double.IsFinite(value) || value <= 0)
+        {
+            throw new ArgumentOutOfRangeException(parameterName, px, "A content width is a positive number of px, or null for full width.");
+        }
+
+        return value.ToString(CultureInfo.InvariantCulture) + "px";
     }
 
     /// <summary>Focuses the page, opens the in-page find bar and focuses its field.</summary>
@@ -253,16 +285,25 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         _ = DrainAsync();
     }
 
-    /// <summary>A replayed show opens the document where the page last reported it scrolled to, when it did.</summary>
+    /// <summary>
+    /// A replayed show opens the document at the latest content width, from a show or a live change, whichever came last,
+    /// and where the page last reported it scrolled to, when it did.
+    /// </summary>
     private string ReplayScript(StateCall state)
     {
-        if (state.Kind != CallKind.Show || _lastShow is null || _lastScroll is not double scroll)
+        if (state.Kind != CallKind.Show || _lastShow is null)
         {
             return state.Script;
         }
 
-        _log.LogInfo($"Replaying the document at its last reported scroll position {scroll.ToString("F3", CultureInfo.InvariantCulture)}");
-        return RenderScript(_lastShow with { Options = _lastShow.Options with { Scroll = scroll, Fragment = null } });
+        RenderOptions options = _lastShow.Options with { ContentWidth = _latestContentWidth ?? _lastShow.Options.ContentWidth };
+        if (_lastScroll is double scroll)
+        {
+            _log.LogInfo($"Replaying the document at its last reported scroll position {scroll.ToString("F3", CultureInfo.InvariantCulture)}");
+            options = options with { Scroll = scroll, Fragment = null };
+        }
+
+        return RenderScript(_lastShow with { Options = options });
     }
 
     private async Task DrainAsync()

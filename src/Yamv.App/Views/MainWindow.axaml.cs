@@ -187,7 +187,7 @@ public partial class MainWindow : Window
     /// <summary>Runs a window shortcut before any control sees the key, so focus navigation never takes Ctrl+Tab.</summary>
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
-        if (KeyName(e.Key) is not string key)
+        if (KeyName(e) is not string key)
         {
             return;
         }
@@ -209,13 +209,21 @@ public partial class MainWindow : Window
 
     private void OnKeyForwarded(object? sender, KeyForwardedEventArgs e) => RunShortcut(e.Key, e.Ctrl, e.Meta, e.Shift, e.Alt);
 
-    /// <summary>The key's name as the page's <c>KeyboardEvent.key</c> gives it, for the keys a shortcut uses; else null.</summary>
-    private static string? KeyName(Key key) =>
-        key switch
+    /// <summary>
+    /// The key's name as the page forwards it, for the keys a shortcut uses; else null. <c>[</c> and <c>]</c> are the physical
+    /// keys in the US positions, whatever key the layout reports; letters and Tab are the key the layout reports.
+    /// </summary>
+    private static string? KeyName(KeyEventArgs e) =>
+        e.PhysicalKey switch
         {
-            >= Key.A and <= Key.Z => ((char)('a' + (key - Key.A))).ToString(),
-            Key.Tab => "Tab",
-            _ => null,
+            PhysicalKey.BracketLeft => "[",
+            PhysicalKey.BracketRight => "]",
+            _ => e.Key switch
+            {
+                >= Key.A and <= Key.Z => ((char)('a' + (e.Key - Key.A))).ToString(),
+                Key.Tab => "Tab",
+                _ => null,
+            },
         };
 
     /// <summary>Runs the view model command of the shortcut these keys make, if any; returns whether one ran.</summary>
@@ -258,6 +266,12 @@ public partial class MainWindow : Window
                 break;
             case ShortcutCommand.OpenFiles:
                 RunLogged(OpenFilesAsync, "Open files");
+                break;
+            case ShortcutCommand.NarrowerWidth:
+                _viewModel!.StepContentWidth(wider: false, DocumentColumn.Bounds.Width);
+                break;
+            case ShortcutCommand.WiderWidth:
+                _viewModel!.StepContentWidth(wider: true, DocumentColumn.Bounds.Width);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown shortcut command.");

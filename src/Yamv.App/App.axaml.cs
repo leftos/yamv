@@ -11,6 +11,7 @@ using Yamv.Core;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Launch;
 using Yamv.Core.Theming;
+using Yamv.Core.Widths;
 
 namespace Yamv.App;
 
@@ -105,8 +106,11 @@ public partial class App : Application
         IAppLog log = Log;
         ThemeBridge bridge = MainWindowFactory.CreateBridge(this, log);
         _bridge = bridge;
+        var widths = new WidthStore(AppPaths.WidthsFile, log);
         _mainWindow =
-            ViewerFiles.Count == 0 ? MainWindowFactory.Create(this, bridge, log) : MainWindowFactory.CreateViewer(this, bridge, ViewerFiles, log);
+            ViewerFiles.Count == 0
+                ? MainWindowFactory.Create(this, bridge, widths, log)
+                : MainWindowFactory.CreateViewer(this, bridge, widths, ViewerFiles, log);
         if (ViewerFiles.Count == 0 && Activation is { } gate)
         {
             ConnectGate(gate, _mainWindow.Window);

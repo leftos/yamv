@@ -6,6 +6,7 @@ A quiet markdown viewer for Windows and macOS.
 - `yamv a.md b.md` opens a separate viewer window with just those files. It remembers nothing: it saves no session, opens at the default size and place, shows the tree only with 2+ documents, closes when its last document closes, and takes its theme from the saved session without changing it.
 - A file that does not exist opens as a missing document (**Locate…**, **Remove from list**) instead of failing; `yamv a.md gone.md` opens one viewer with `a.md` selected and `gone.md` as a missing row.
 - Ctrl+O (Cmd+O on macOS), or the empty window's **Open files…** button, picks one or more markdown or text files and opens them; a file that is already open is selected instead of added twice.
+- Ctrl+[ and Ctrl+] (Cmd+[ and Cmd+] on macOS) make the text column 40 px narrower or wider, saved for the folder the document's width comes from, or for all documents when no folder has one. The keys are the ones in the US `[` and `]` positions, whatever the layout prints on them.
 - Right-click a document, folder or group in the tree for Reveal in Explorer (Finder on macOS), Copy path, and for documents and groups, Close and Close group.
 - A missing document's **Locate…** picks the file that replaces it, in the same place in the tree.
 - A document whose file exists but cannot be read (in use by another program, or access denied) shows a can't-read pane with the reason, **Retry** (Ctrl+R, Cmd+R on macOS) and **Remove from list**; YAMV retries when the file changes, and its tree row stays normal with a warning mark.

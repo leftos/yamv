@@ -78,9 +78,48 @@ public sealed class ShortcutsTests
         Assert.Null(Shortcuts.Match(key, ctrl: false, meta: false, shift: false, alt: false, isMac: false));
 
     [Theory]
+    [InlineData("[", ShortcutCommand.NarrowerWidth)]
+    [InlineData("]", ShortcutCommand.WiderWidth)]
+    public void Match_CtrlBracketOnWindows_StepsTheWidth(string key, ShortcutCommand expected) =>
+        Assert.Equal(expected, Shortcuts.Match(key, ctrl: true, meta: false, shift: false, alt: false, isMac: false));
+
+    [Theory]
+    [InlineData("[", ShortcutCommand.NarrowerWidth)]
+    [InlineData("]", ShortcutCommand.WiderWidth)]
+    public void Match_CmdBracketOnMac_StepsTheWidth(string key, ShortcutCommand expected) =>
+        Assert.Equal(expected, Shortcuts.Match(key, ctrl: false, meta: true, shift: false, alt: false, isMac: true));
+
+    [Theory]
+    [InlineData("[", false)]
+    [InlineData("]", false)]
+    [InlineData("[", true)]
+    [InlineData("]", true)]
+    public void Match_ShiftWithTheCommandKeyAndABracket_IsNothing(string key, bool isMac) =>
+        Assert.Null(Shortcuts.Match(key, ctrl: !isMac, meta: isMac, shift: true, alt: false, isMac));
+
+    [Theory]
+    [InlineData("[", false)]
+    [InlineData("]", false)]
+    [InlineData("[", true)]
+    [InlineData("]", true)]
+    public void Match_AltWithTheCommandKeyAndABracket_IsNothing(string key, bool isMac) =>
+        Assert.Null(Shortcuts.Match(key, ctrl: !isMac, meta: isMac, shift: false, alt: true, isMac));
+
+    [Theory]
+    [InlineData("[")]
+    [InlineData("]")]
+    public void Match_BracketWithoutAModifier_IsNothing(string key) =>
+        Assert.Null(Shortcuts.Match(key, ctrl: false, meta: false, shift: false, alt: false, isMac: false));
+
+    [Theory]
+    [InlineData("[")]
+    [InlineData("]")]
+    public void Match_CtrlBracketOnMac_IsNothing(string key) =>
+        Assert.Null(Shortcuts.Match(key, ctrl: true, meta: false, shift: false, alt: false, isMac: true));
+
+    [Theory]
     [InlineData("p")]
     [InlineData("1")]
-    [InlineData("[")]
     [InlineData("F5")]
     [InlineData("")]
     public void Match_AnotherKey_IsNothing(string key) =>

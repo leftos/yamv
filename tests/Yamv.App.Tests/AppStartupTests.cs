@@ -14,6 +14,7 @@ using Yamv.Core.Grouping;
 using Yamv.Core.Launch;
 using Yamv.Core.Session;
 using Yamv.Core.Theming;
+using Yamv.Core.Widths;
 
 namespace Yamv.App.Tests;
 
@@ -218,7 +219,8 @@ public sealed class AppStartupTests
             var bridge = new ThemeBridge(new ThemeCatalog(themes, log), Application.Current!, log);
             var surface = new FakeDocumentSurface();
             var state = new DocumentWindowState(false, _ => null, _ => true, new GroupingOptions(null, StringComparison.OrdinalIgnoreCase));
-            var viewModel = new DocumentWindowViewModel(state, surface, _ => "", new FakeTimeProvider(), log);
+            var widths = new WidthStore(Path.Combine(themes, "widths.json"), log);
+            var viewModel = new DocumentWindowViewModel(state, surface, new DocumentWindowServices(widths, _ => "", new FakeTimeProvider(), log));
             var window = new MainWindow(viewModel, new Border(), surface, log);
             var composition = new MainWindowComposition(window, viewModel, bridge, surface, session: null);
             try

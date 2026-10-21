@@ -17,18 +17,19 @@ public interface IDocumentSurface
     /// <summary>An app shortcut was pressed while the page had focus.</summary>
     event EventHandler<KeyForwardedEventArgs>? KeyForwarded;
 
-    /// <summary>Shows a rendered document, restoring <paramref name="fragment"/> if given, else <paramref name="scroll"/>.</summary>
-    /// <param name="document">The rendered markdown.</param>
-    /// <param name="documentPath">The markdown file's path; relative links and images resolve against it.</param>
-    /// <param name="groupRoot">The folder <c>file:</c> images must stay inside.</param>
-    /// <param name="scroll">The scroll position as a fraction, 0 to 1, of the scrollable height.</param>
-    /// <param name="fragment">An element id to scroll to, which wins over <paramref name="scroll"/>.</param>
-    Task ShowAsync(RenderedDocument document, string documentPath, string groupRoot, double scroll, string? fragment);
+    /// <summary>
+    /// Shows a rendered document at its content width, restoring its fragment if given, else its scroll position. The page
+    /// hides the outgoing document before it applies the width, so the incoming one shows once, at its own width.
+    /// </summary>
+    Task ShowAsync(DocumentShow show);
 
     /// <summary>Replaces the page's theme block with <paramref name="css"/>.</summary>
     Task SetThemeCssAsync(string css);
 
-    /// <summary>Sets the content column's maximum width in px; null makes it full width.</summary>
+    /// <summary>
+    /// Changes the shown document's content width in px, live; null makes it full width. A show carries its own width, so
+    /// this is for a change while a document stays shown.
+    /// </summary>
     Task SetContentWidthAsync(double? px);
 
     /// <summary>Opens the in-page find bar and focuses its field.</summary>
@@ -40,3 +41,19 @@ public interface IDocumentSurface
     /// <summary>Removes every find highlight.</summary>
     Task ClearFindAsync();
 }
+
+/// <summary>A document for <see cref="IDocumentSurface.ShowAsync"/> to show, and how.</summary>
+/// <param name="Document">The rendered markdown.</param>
+/// <param name="DocumentPath">The markdown file's path; relative links and images resolve against it.</param>
+/// <param name="GroupRoot">The folder <c>file:</c> images must stay inside.</param>
+/// <param name="Scroll">The scroll position as a fraction, 0 to 1, of the scrollable height.</param>
+/// <param name="Fragment">An element id to scroll to, which wins over <paramref name="Scroll"/>.</param>
+/// <param name="ContentWidth">The text measure in px, or null for full width.</param>
+public sealed record DocumentShow(
+    RenderedDocument Document,
+    string DocumentPath,
+    string GroupRoot,
+    double Scroll,
+    string? Fragment,
+    double? ContentWidth
+);

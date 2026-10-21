@@ -286,9 +286,10 @@
     window.scrollTo(0, fraction * scrollableHeight());
   }
 
-  // Swaps in a document. The HTML is parsed into an inert template first, so nothing in it loads before it is
-  // sanitized and its images are checked. Posts { type: "rendered", generation } when math, diagrams and the scroll
-  // position are done (or the render failed), unless a newer render has started; the host's generation numbers it.
+  // Swaps in a document at options.contentWidth ("760px" or "none"), when given. The HTML is parsed into an inert
+  // template first, so nothing in it loads before it is sanitized and its images are checked. Posts
+  // { type: "rendered", generation } when math, diagrams and the scroll position are done (or the render failed),
+  // unless a newer render has started; the host's generation numbers it.
   async function render(bodyHtml, options) {
     const settings = options || {};
     const generation = Number.isInteger(settings.generation) ? settings.generation : renderGeneration + 1;
@@ -297,6 +298,10 @@
     window.clearTimeout(scrollTimer);
     findState = { query: findState.query, marks: [], index: -1 };
     content.classList.add("yamv-pending");
+    // The incoming document's width is set only once the outgoing one is hidden, so the outgoing one never reflows at it.
+    if (typeof settings.contentWidth === "string") {
+      setContentWidth(settings.contentWidth);
+    }
     try {
       const template = document.createElement("template");
       template.innerHTML = bodyHtml;

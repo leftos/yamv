@@ -78,8 +78,20 @@ internal sealed class PageMessage
     public int? Generation { get; init; }
 }
 
-/// <summary>The options object passed to the page's <c>yamv.render</c>.</summary>
-internal sealed record RenderOptions(int Generation, double Scroll, string? Fragment, bool HasMermaid, bool HasMath, string DocBase, string RootBase);
+/// <summary>
+/// The options object passed to the page's <c>yamv.render</c>. <c>ContentWidth</c> is the CSS value (<c>"760px"</c> or
+/// <c>"none"</c>) the page sets once the outgoing document is hidden.
+/// </summary>
+internal sealed record RenderOptions(
+    int Generation,
+    double Scroll,
+    string? Fragment,
+    bool HasMermaid,
+    bool HasMath,
+    string DocBase,
+    string RootBase,
+    string ContentWidth
+);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(PageMessage))]

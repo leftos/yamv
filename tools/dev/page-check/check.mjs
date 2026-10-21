@@ -281,6 +281,51 @@ try {
   await page.evaluate(() => window.yamv.setContentWidth("none"));
   width = await widthOf();
   check("none spans the viewport width", width.outer === width.viewport && width.content === width.viewport - 88, width);
+
+  // A render carries its document's width and applies it only once the outgoing document is hidden.
+  await render({ ...baseOptions, generation: 20, contentWidth: "600px" });
+  width = await widthOf();
+  check("a render at 600px shows its document at a 600 px text measure", width.content === 600, width);
+  // Mutation records keep the order the changes were made in, so replaying them gives the content's class at each
+  // width change, which an observer callback (run after the render's synchronous part) cannot see.
+  const widthChanges = await page.evaluate(async ([html, options]) => {
+    const root = document.documentElement;
+    const content = document.getElementById("yamv-content");
+    const records = [];
+    const observer = new MutationObserver((list) => records.push(...list));
+    observer.observe(root, { attributes: true, attributeFilter: ["style"], attributeOldValue: true });
+    observer.observe(content, { attributes: true, attributeFilter: ["class"], attributeOldValue: true });
+    await window.yamv.render(html, options);
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+    const valueAfter = (index) => {
+      const next = records.slice(index + 1).find((record) => record.target === records[index].target);
+      return (next ? next.oldValue : records[index].target.getAttribute(records[index].attributeName)) || "";
+    };
+    const firstClass = records.find((record) => record.target === content);
+    let contentClass = firstClass ? firstClass.oldValue || "" : content.className;
+    const seen = [];
+    records.forEach((record, index) => {
+      if (record.target === content) {
+        contentClass = valueAfter(index);
+        return;
+      }
+      const style = document.createElement("div").style;
+      style.cssText = valueAfter(index);
+      seen.push({
+        width: style.getPropertyValue("--yamv-content-width"),
+        hidden: contentClass.split(/\s+/).includes("yamv-pending"),
+      });
+    });
+    return seen;
+  }, [fixture, { ...baseOptions, generation: 21, contentWidth: "1000px" }]);
+  check(
+    "the width changes from 600px to 1000px only while the outgoing document is hidden",
+    widthChanges.length > 0 && widthChanges.every((change) => change.hidden) && widthChanges.at(-1).width === "1000px",
+    widthChanges,
+  );
+  width = await widthOf();
+  check("the 1000px document shows at its width", width.content === 1000, width);
 } finally {
   await browser.close();
 }

@@ -16,6 +16,12 @@ public readonly record struct ContentWidth
     /// <summary>The grid Ctrl+[ and Ctrl+] step on, in px; the grid starts at <see cref="MinimumPx"/>.</summary>
     public const double StepPx = 40;
 
+    /// <summary>
+    /// The page's side padding around the text, in px: the two 44 px paddings of <c>.yamv-content</c> in <c>yamv.css</c>.
+    /// A width is the text measure inside them.
+    /// </summary>
+    public const double SidePaddingPx = 88;
+
     private const double FullFraction = 0.95;
 
     private ContentWidth(double? px)
@@ -110,6 +116,12 @@ public readonly record struct ContentWidth
         double previous = MinimumPx + ((Math.Ceiling((px - MinimumPx) / StepPx) - 1) * StepPx);
         return FromPx(Math.Max(previous, MinimumPx));
     }
+
+    /// <summary>
+    /// The room a pane of <paramref name="paneWidth"/> px leaves for the text: the pane less <see cref="SidePaddingPx"/>, never
+    /// below 1 px. The steps, the slider and Full compare a width against this, not against the pane.
+    /// </summary>
+    public static double TextSpace(double paneWidth) => Math.Max(paneWidth - SidePaddingPx, 1);
 
     private static double LargestStepBelow(double paneWidth) =>
         paneWidth <= MinimumPx ? MinimumPx : MinimumPx + ((Math.Ceiling((paneWidth - MinimumPx) / StepPx) - 1) * StepPx);

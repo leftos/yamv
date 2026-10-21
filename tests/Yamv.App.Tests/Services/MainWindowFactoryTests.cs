@@ -7,6 +7,7 @@ using Yamv.App.Views;
 using Yamv.Core;
 using Yamv.Core.Session;
 using Yamv.Core.Theming;
+using Yamv.Core.Widths;
 
 namespace Yamv.App.Tests.Services;
 
@@ -88,6 +89,22 @@ public sealed class MainWindowFactoryTests
             Assert.Equal(ThemeCatalog.DefaultThemeId, viewer.Bridge.RequestedThemeId);
         });
 
+    [Fact]
+    public Task Viewer_shows_its_document_at_its_stored_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture();
+            string plan = viewer.Write("plan.md");
+            Assert.True(viewer.Widths.Set(viewer.Documents, ContentWidth.FromPx(720)));
+
+            viewer.Build(plan);
+            await viewer.ViewModel.WhenRendersSettled();
+
+            ShownDocument shown = Assert.Single(viewer.Surface.Shown);
+            Assert.Equal(plan, shown.DocumentPath);
+            Assert.Equal(720, shown.ContentWidth);
+        });
+
     /// <summary>
     /// Builds viewer windows over a temp data folder whose session file a test may seed, drawing their pages on a
     /// <see cref="FakeDocumentSurface"/> that completes its renders, so the fixture can wait for every render before it
@@ -106,6 +123,7 @@ public sealed class MainWindowFactoryTests
             Directory.CreateDirectory(DataFolder);
             Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, DataFolder);
             Bridge = new ThemeBridge(new ThemeCatalog(AppPaths.ThemesDirectory, Log), Application.Current!, Log);
+            Widths = new WidthStore(Path.Combine(DataFolder, "widths.json"), Log);
         }
 
         public string Documents { get; }
@@ -120,6 +138,9 @@ public sealed class MainWindowFactoryTests
 
         public ThemeBridge Bridge { get; }
 
+        /// <summary>The app's one width store, over <c>widths.json</c> in the temp data folder.</summary>
+        public WidthStore Widths { get; }
+
         /// <summary>The window the test built; null until <see cref="Build"/>.</summary>
         public MainWindowComposition Composition { get; private set; } = null!;
 
@@ -128,7 +149,7 @@ public sealed class MainWindowFactoryTests
         /// <summary>Creates a viewer window over <paramref name="files"/>, drawn on <see cref="Surface"/>.</summary>
         /// <param name="files">The full paths the viewer shows.</param>
         public void Build(params string[] files) =>
-            Composition = MainWindowFactory.CreateViewer(Application.Current!, Bridge, files, Log, new Border(), Surface);
+            Composition = MainWindowFactory.CreateViewer(Application.Current!, Bridge, Widths, files, Log, new Border(), Surface);
 
         /// <summary>The full path of a file in the documents folder; it is not created.</summary>
         /// <param name="name">The file's name.</param>

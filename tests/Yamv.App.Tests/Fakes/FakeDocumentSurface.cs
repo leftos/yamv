@@ -1,5 +1,4 @@
 using Yamv.App.Controls;
-using Yamv.Core.Rendering;
 
 namespace Yamv.App.Tests.Fakes;
 
@@ -19,27 +18,67 @@ public sealed class FakeDocumentSurface : IDocumentSurface
     /// <summary>Every <see cref="ShowAsync"/> call, oldest first.</summary>
     public List<ShownDocument> Shown { get; } = [];
 
+    /// <summary>The width each <see cref="ShowAsync"/> call showed its document at, oldest first; null is Full.</summary>
+    public List<double?> ShownWidths => [.. Shown.Select(shown => shown.ContentWidth)];
+
+    /// <summary>Every width passed to <see cref="SetContentWidthAsync"/>, oldest first; null is Full.</summary>
+    public List<double?> ContentWidths { get; } = [];
+
+    /// <summary>
+    /// Every recorded call in the order it came: a <see cref="ShownDocument"/>, a <see cref="ContentWidthSet"/> or a
+    /// <see cref="ThemeCssSet"/>.
+    /// </summary>
+    public List<object> Calls { get; } = [];
+
+    /// <summary>
+    /// When set, the next show or content width call is recorded and then returns this source's task, which the test
+    /// completes; <see cref="CallHeld"/> completes when that call arrives. It holds one call, then clears itself.
+    /// </summary>
+    public TaskCompletionSource? HoldNextCall { get; set; }
+
+    /// <summary>Completes when a call <see cref="HoldNextCall"/> holds has arrived.</summary>
+    public TaskCompletionSource CallHeld { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     /// <summary>Called after each <see cref="ShowAsync"/> is recorded.</summary>
     public Action<ShownDocument>? OnShown { get; set; }
 
     /// <summary>Every css passed to <see cref="SetThemeCssAsync"/>, oldest first.</summary>
     public List<string> ThemeCss { get; } = [];
 
-    public Task ShowAsync(RenderedDocument document, string documentPath, string groupRoot, double scroll, string? fragment)
+    public Task ShowAsync(DocumentShow show)
     {
-        var shown = new ShownDocument(document.Html, documentPath, groupRoot, scroll, fragment);
+        var shown = new ShownDocument(show.Document.Html, show.DocumentPath, show.GroupRoot, show.Scroll, show.Fragment, show.ContentWidth);
         Shown.Add(shown);
+        Calls.Add(shown);
         OnShown?.Invoke(shown);
-        return Task.CompletedTask;
+        return Completion();
     }
 
     public Task SetThemeCssAsync(string css)
     {
         ThemeCss.Add(css);
+        Calls.Add(new ThemeCssSet(css));
         return Task.CompletedTask;
     }
 
-    public Task SetContentWidthAsync(double? px) => Task.CompletedTask;
+    public Task SetContentWidthAsync(double? px)
+    {
+        ContentWidths.Add(px);
+        Calls.Add(new ContentWidthSet(px));
+        return Completion();
+    }
+
+    private Task Completion()
+    {
+        if (HoldNextCall is not { } hold)
+        {
+            return Task.CompletedTask;
+        }
+
+        HoldNextCall = null;
+        CallHeld.TrySetResult();
+        return hold.Task;
+    }
 
     public Task OpenFindAsync() => Task.CompletedTask;
 
@@ -55,4 +94,10 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 }
 
 /// <summary>One <see cref="FakeDocumentSurface.ShowAsync"/> call.</summary>
-public sealed record ShownDocument(string Html, string DocumentPath, string GroupRoot, double Scroll, string? Fragment);
+public sealed record ShownDocument(string Html, string DocumentPath, string GroupRoot, double Scroll, string? Fragment, double? ContentWidth);
+
+/// <summary>One <see cref="FakeDocumentSurface.SetContentWidthAsync"/> call; a null width is Full.</summary>
+public sealed record ContentWidthSet(double? Px);
+
+/// <summary>One <see cref="FakeDocumentSurface.SetThemeCssAsync"/> call.</summary>
+public sealed record ThemeCssSet(string Css);

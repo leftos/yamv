@@ -92,4 +92,11 @@ public sealed class ContentWidthTests
 
     [Fact]
     public void ToSlider_PxWiderThanThePane_IsClampedToTheTravel() => Assert.Equal(1, ContentWidth.FromPx(2000).ToSlider(WidePane));
+
+    [Theory]
+    [InlineData(1000, 912)]
+    [InlineData(88, 1)]
+    [InlineData(50, 1)]
+    public void TextSpace_IsThePaneLessItsSidePaddingAndNeverBelowOne(double paneWidth, double expected) =>
+        Assert.Equal(expected, ContentWidth.TextSpace(paneWidth));
 }

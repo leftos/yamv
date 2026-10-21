@@ -12,6 +12,7 @@ using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
 using Yamv.Core.Session;
 using Yamv.Core.Theming;
+using Yamv.Core.Widths;
 
 namespace Yamv.App.Tests.Services;
 
@@ -180,7 +181,12 @@ public sealed class MainWindowSessionTests
             File.WriteAllText(DocB, "# B");
             SessionFile = Path.Combine(_root, "data", "session.json");
             var state = new DocumentWindowState(persist: true, _ => null, File.Exists, new GroupingOptions(null, StringComparison.OrdinalIgnoreCase));
-            ViewModel = new DocumentWindowViewModel(state, Surface, File.ReadAllText, new FakeTimeProvider(), Log);
+            var widths = new WidthStore(Path.Combine(_root, "data", "widths.json"), Log);
+            ViewModel = new DocumentWindowViewModel(
+                state,
+                Surface,
+                new DocumentWindowServices(widths, File.ReadAllText, new FakeTimeProvider(), Log)
+            );
             Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             Bridge = new ThemeBridge(new ThemeCatalog(Path.Combine(_root, "themes"), Log), Application.Current!, Log);
             _session = new MainWindowSession(Window, ViewModel, Bridge, new SessionStore(SessionFile, Log), Time, Log);
