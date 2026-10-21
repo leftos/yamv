@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -10,6 +9,7 @@ using Yamv.App.ViewModels;
 using Yamv.App.Views;
 using Yamv.Core;
 using Yamv.Core.Diagnostics;
+using Yamv.Core.Instance;
 using Yamv.Core.Launch;
 using Yamv.Core.Settings;
 using Yamv.Core.Theming;
@@ -53,43 +53,45 @@ public partial class App : Application
     /// </summary>
     public const string ThemeSettingsEntryVariable = "YAMV_DEV_THEME_SETTINGS_ENTRY";
 
-    private MainWindowComposition? _mainWindow;
+    private readonly List<DocumentWindow> _viewers = [];
+    private DocumentWindow? _main;
     private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
     private SettingsWriter? _settingsWriter;
     private SettingsWatcher? _settingsWatcher;
     private IDisposable? _themesSync;
     private ThemeSettingsHost? _themeSettingsHost;
+    private WidthStore? _widths;
 
     /// <summary>The shutdown check a held shutdown waits on, or null; a request while it runs starts no second one.</summary>
     private Task? _shutdownCheck;
     private IAppLog? _log;
     private ActivationGate? _connectedGate;
 
-    /// <summary>Unhooks the main window's <c>Closed</c> handler and runs its start's stop action if it has not run yet.</summary>
-    private Action? _releaseMainWindowHooks;
+    /// <summary>The current start's stop action, until it has run; it runs at most once per start.</summary>
+    private Action? _pendingStop;
 
     /// <summary>
-    /// The current start's own closed flag, set only by that start's main window, so an activate posted after it closed finds no
-    /// window; null for a viewer or harness start.
+    /// Set once the last document window has closed or the app is exiting: from then on an open request is answered
+    /// <c>closing</c>, never carried out. A start clears it.
     /// </summary>
-    private StrongBox<bool>? _mainWindowClosed;
+    private bool _stopping;
 
-    /// <summary>The files a viewer launch opens: empty for a main launch. Set before Avalonia starts.</summary>
+    /// <summary>The files the first window opens: empty for a main launch. Set before Avalonia starts.</summary>
     internal static IReadOnlyList<string> ViewerFiles { get; set; } = [];
 
     /// <summary>The log <c>Program</c> made for the process, or null when it made none. Set before Avalonia starts.</summary>
     internal static IAppLog? ProcessLog { get; set; }
 
     /// <summary>
-    /// The gate the instance server's <c>activate</c> messages pass through, for a main launch; null for viewer and harness
-    /// launches. Set before Avalonia starts.
+    /// The gate the instance server's <c>activate</c> messages pass through; null for harness launches. Set before Avalonia starts.
     /// </summary>
     internal static ActivationGate? Activation { get; set; }
 
     /// <summary>
-    /// Stops the main instance answering second launches while it keeps the lock, for a main launch; null for viewer and harness
-    /// launches. Run once when the main window has closed, before the app's exit saves the session. Set before Avalonia starts.
+    /// Starts stopping the app answering launches while it keeps the lock, and returns at once: it must never wait on the
+    /// instance server. Run once when the last document window has closed, before the main session's last save, or by the
+    /// app's exit when no window closed first; null for harness launches. Set before Avalonia starts.
     /// </summary>
     internal static Action? StopAnswering { get; set; }
 
@@ -126,6 +128,9 @@ public partial class App : Application
     /// after it is released.
     /// </summary>
     internal SettingsWriter? SettingsWriter => _settingsWriter;
+
+    /// <summary>The open viewer windows, the most recently active last.</summary>
+    internal IReadOnlyList<Window> ViewerWindows => [.. _viewers.Select(viewer => (Window)viewer.Composition.Window)];
 
     /// <summary>The process's one log: <see cref="ProcessLog"/> when set, else one made when the first window is built.</summary>
     private IAppLog Log => _log ??= ProcessLog ?? new FileAppLog(AppPaths.LogFile);
@@ -247,18 +252,122 @@ public partial class App : Application
     /// <summary>
     /// The window a start shows: with <c>YAMV_DEV_HARNESS</c> at <c>1</c>, the theme settings window when
     /// <c>YAMV_DEV_THEME_SETTINGS</c> is <c>1</c> too, else the dev harness; otherwise the main window, or a viewer window
-    /// over <see cref="ViewerFiles"/> when the launch named files.
+    /// over <see cref="ViewerFiles"/> when the launch named files. The gate is marked ready when that window first shows.
     /// </summary>
     internal Window CreateStartWindow()
     {
-        ReleaseMainWindow();
         if (Environment.GetEnvironmentVariable(HarnessVariable) == "1")
         {
             return Environment.GetEnvironmentVariable(ThemeSettingsHarnessVariable) == "1" ? CreateThemeSettingsHarness() : new HarnessWindow();
         }
 
+        _stopping = false;
+        _pendingStop = StopAnswering;
+        MainWindow window = ViewerFiles.Count == 0 ? AddMain().Window : AddViewer(ViewerFiles).Window;
+        ApplyDevWidthPopover(window);
+        ApplyDevThemeSettingsEntry(window);
+        if (Activation is { } gate)
+        {
+            ConnectGate(gate, window);
+        }
+
+        return window;
+    }
+
+    /// <summary>
+    /// Opens a viewer window over <paramref name="files"/> for a launch's <paramref name="request"/>, on the UI thread. A stopping
+    /// app answers <c>closing</c>; a request the server already abandoned opens nothing; otherwise the request is answered
+    /// <c>opened</c> as soon as it is taken, before the window shows, and a window that then fails to open is the app's to report.
+    /// </summary>
+    /// <returns>True when the app took the request, whether or not its window then opened.</returns>
+    internal bool OpenViewer(IReadOnlyList<string> files, InstanceRequest request)
+    {
+        if (_stopping)
+        {
+            request.Complete(InstanceReply.Closing);
+            Log.LogInfo($"Open: the app is closing; answered closing to an open of {files.Count} file(s).");
+            return false;
+        }
+
+        if (!request.TryBegin())
+        {
+            Log.LogInfo($"Open: an open of {files.Count} file(s) was abandoned before the app took it; opening nothing.");
+            return false;
+        }
+
+        request.Complete(InstanceReply.Opened);
+        ShowNewViewer(files);
+        return true;
+    }
+
+    /// <summary>
+    /// Builds, shows and activates a viewer window over <paramref name="files"/>. A window that fails to show is logged, forgotten
+    /// and closed, so no window is left that the app does not follow.
+    /// </summary>
+    internal void ShowNewViewer(IReadOnlyList<string> files)
+    {
+        MainWindowComposition? composition = null;
+        try
+        {
+            composition = AddViewer(files);
+            composition.Window.Show();
+            composition.Window.Activate();
+        }
+        // The launcher was already told opened, so the app itself reports a window that could not open.
+        catch (Exception exception)
+        {
+            Log.LogError($"Open: the viewer window for {files.Count} file(s) could not open.", exception);
+            if (composition is not null)
+            {
+                Forget(composition);
+                CloseFailedWindow(composition.Window);
+            }
+        }
+    }
+
+    /// <summary>Closes a viewer window that failed to show, so no window the app no longer follows keeps the process alive.</summary>
+    private void CloseFailedWindow(Window window)
+    {
+        try
+        {
+            window.Close();
+        }
+        // The window is already forgotten; a close that fails too is logged, never rethrown into the UI job.
+        catch (Exception exception)
+        {
+            Log.LogError("Open: a viewer window that failed to show could not be closed either.", exception);
+        }
+    }
+
+    private MainWindowComposition AddMain()
+    {
+        (ThemeBridge bridge, WidthStore widths) = Shared();
+        MainWindowComposition composition = MainWindowFactory.Create(bridge, widths, Log);
+        _main = Track(composition);
+        return composition;
+    }
+
+    private MainWindowComposition AddViewer(IReadOnlyList<string> files)
+    {
+        (ThemeBridge bridge, WidthStore widths) = Shared();
+        MainWindowComposition composition = MainWindowFactory.CreateViewer(bridge, widths, files, Log);
+        _viewers.Add(Track(composition));
+        return composition;
+    }
+
+    /// <summary>
+    /// The bridge, the settings writer and the width store every document window shares, made with the first window: the
+    /// bridge applies <c>settings.json</c> once, and the writer saves each theme pick back.
+    /// </summary>
+    private (ThemeBridge Bridge, WidthStore Widths) Shared()
+    {
+        if (_bridge is { } bridge && _widths is { } widths)
+        {
+            return (bridge, widths);
+        }
+
         IAppLog log = Log;
-        ThemeBridge bridge = MainWindowFactory.CreateBridge(this, log);
+        bridge = MainWindowFactory.CreateBridge(this, log);
         _bridge = bridge;
         _themesSync = CreateThemesSync(bridge, log);
         _themeSettingsHost = ThemeSettingsHost.Create(bridge, log);
@@ -269,69 +378,83 @@ public partial class App : Application
         _settingsWatcher = CreateSettingsWatcher(settings, _settingsWriter, log);
         _settingsWatcher.Changed += OnSettingsFileChanged;
         bridge.RequestChanged += OnThemeRequestChanged;
-        var widths = new WidthStore(AppPaths.WidthsFile, log);
-        _mainWindow =
-            ViewerFiles.Count == 0 ? MainWindowFactory.Create(bridge, widths, log) : MainWindowFactory.CreateViewer(bridge, widths, ViewerFiles, log);
-        if (
-            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
-            && Environment.GetEnvironmentVariable(WidthPopoverVariable) is { Length: > 0 } popoverStart
-            && _mainWindow.Window is MainWindow documentWindow
-        )
-        {
-            documentWindow.WidthPopoverWhenShown = popoverStart switch
-            {
-                "1" => DevWidthPopover.Open,
-                "clearall" => DevWidthPopover.AskClearAll,
-                "folder" => DevWidthPopover.SelectDocumentFolder,
-                _ => throw new InvalidOperationException($"{WidthPopoverVariable} is '{popoverStart}'; use 1, clearall or folder."),
-            };
-        }
-
-        _mainWindow.Window.ThemeSettingsRequested += OnThemeSettingsRequested;
-        ApplyDevThemeSettingsEntry(_mainWindow.Window);
-        if (ViewerFiles.Count == 0 && Activation is { } gate)
-        {
-            ConnectGate(gate, _mainWindow.Window);
-        }
-
-        if (ViewerFiles.Count == 0)
-        {
-            HookMainWindowClosed(_mainWindow.Window, StopAnswering);
-        }
-
-        return _mainWindow.Window;
+        widths = new WidthStore(AppPaths.WidthsFile, log);
+        _widths = widths;
+        return (bridge, widths);
     }
 
     /// <summary>
-    /// When the main window has closed, marks this start's window closed for <see cref="BringMainWindowForward"/> and runs this
-    /// start's <paramref name="stopAnswering"/>: <c>Closed</c>, unlike <c>Closing</c>, cannot be cancelled.
-    /// <see cref="ReleaseMainWindow"/> unhooks this and runs the action too when it has not run yet, before it saves the session,
-    /// so the order holds whichever of the window's <c>Closed</c> and the app's exit comes first. The action runs at most once.
+    /// Follows a document window until it closes: its activations order the viewers, its theme settings requests open the theme
+    /// settings window, and its close forgets it.
     /// </summary>
-    private void HookMainWindowClosed(Window window, Action? stopAnswering)
+    private DocumentWindow Track(MainWindowComposition composition)
     {
-        var closed = new StrongBox<bool>();
-        Action? pending = stopAnswering;
-        void RunStopAnsweringOnce()
+        var tracked = new DocumentWindow(composition);
+        MainWindow window = composition.Window;
+        void OnActivated(object? sender, EventArgs e)
         {
-            Action? action = pending;
-            pending = null;
-            action?.Invoke();
+            if (_viewers.Remove(tracked))
+            {
+                _viewers.Add(tracked);
+            }
         }
 
-        void OnClosed(object? sender, EventArgs e)
-        {
-            window.Closed -= OnClosed;
-            closed.Value = true;
-            RunStopAnsweringOnce();
-        }
+        void OnClosed(object? sender, EventArgs e) => OnDocumentWindowClosed(tracked);
 
+        window.Activated += OnActivated;
         window.Closed += OnClosed;
-        _mainWindowClosed = closed;
-        _releaseMainWindowHooks = () =>
+        window.ThemeSettingsRequested += OnThemeSettingsRequested;
+        tracked.Unhook = () =>
         {
+            window.Activated -= OnActivated;
             window.Closed -= OnClosed;
-            RunStopAnsweringOnce();
+            window.ThemeSettingsRequested -= OnThemeSettingsRequested;
+        };
+        return tracked;
+    }
+
+    /// <summary>
+    /// Forgets the closed window. When it was the last document window, the app stops answering first; then the window's
+    /// composition is disposed, which saves the main window's session.
+    /// </summary>
+    private void OnDocumentWindowClosed(DocumentWindow tracked)
+    {
+        tracked.Unhook();
+        if (ReferenceEquals(_main, tracked))
+        {
+            _main = null;
+        }
+
+        _viewers.Remove(tracked);
+        if (_main is null && _viewers.Count == 0)
+        {
+            RunStopOnce();
+        }
+
+        tracked.Composition.Dispose();
+    }
+
+    /// <summary>
+    /// Tells <paramref name="window"/> what to do with its content-width popover once shown, from <see cref="WidthPopoverVariable"/>,
+    /// read only when <c>YAMV_DATA_DIR</c> points at a dev data folder.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The variable is set to a value other than <c>1</c>, <c>clearall</c> or <c>folder</c>.</exception>
+    private static void ApplyDevWidthPopover(MainWindow window)
+    {
+        if (
+            string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
+            || Environment.GetEnvironmentVariable(WidthPopoverVariable) is not { Length: > 0 } popoverStart
+        )
+        {
+            return;
+        }
+
+        window.WidthPopoverWhenShown = popoverStart switch
+        {
+            "1" => DevWidthPopover.Open,
+            "clearall" => DevWidthPopover.AskClearAll,
+            "folder" => DevWidthPopover.SelectDocumentFolder,
+            _ => throw new InvalidOperationException($"{WidthPopoverVariable} is '{popoverStart}'; use 1, clearall or folder."),
         };
     }
 
@@ -359,8 +482,8 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Shows the theme settings window owned by the document window that asked for it. A failure to open it is logged and, in
-    /// the start's own window, shown as a toast, since nothing else would catch it on the UI thread.
+    /// Shows the theme settings window owned by the document window that asked for it. A failure to open it is logged and shown
+    /// as a toast in the window that asked, since nothing else would catch it on the UI thread.
     /// </summary>
     private void OnThemeSettingsRequested(object? sender, EventArgs e)
     {
@@ -372,14 +495,44 @@ public partial class App : Application
         catch (Exception exception)
         {
             Log.LogError("Theme settings: could not open the window.", exception);
-            if (_mainWindow is { } composition && ReferenceEquals(composition.Window, sender))
-            {
-                composition.ViewModel.Toasts.Show(ToastKind.Warning, "Couldn't open the theme settings");
-            }
+            TrackedComposition(sender)?.ViewModel.Toasts.Show(ToastKind.Warning, "Couldn't open the theme settings");
         }
     }
 
-    /// <summary>Brings the main window forward on each activate the gate raises, and marks the gate ready on its first show.</summary>
+    /// <summary>The composition of the tracked document window <paramref name="window"/>, or null when the app does not follow it.</summary>
+    private MainWindowComposition? TrackedComposition(object? window)
+    {
+        if (_main is { } main && ReferenceEquals(main.Composition.Window, window))
+        {
+            return main.Composition;
+        }
+
+        return _viewers.Find(viewer => ReferenceEquals(viewer.Composition.Window, window))?.Composition;
+    }
+
+    /// <summary>Forgets a viewer whose window failed to show, and disposes what it owns.</summary>
+    private void Forget(MainWindowComposition composition)
+    {
+        DocumentWindow? tracked = _viewers.Find(viewer => ReferenceEquals(viewer.Composition, composition));
+        if (tracked is not null)
+        {
+            _viewers.Remove(tracked);
+            tracked.Unhook();
+        }
+
+        composition.Dispose();
+    }
+
+    /// <summary>Marks the app stopping and runs this start's stop action, once.</summary>
+    private void RunStopOnce()
+    {
+        _stopping = true;
+        Action? stop = _pendingStop;
+        _pendingStop = null;
+        stop?.Invoke();
+    }
+
+    /// <summary>Brings a window forward on each activate the gate raises, and marks the gate ready on the start window's first show.</summary>
     private void ConnectGate(ActivationGate gate, Window window)
     {
         _connectedGate = gate;
@@ -394,17 +547,29 @@ public partial class App : Application
     }
 
     /// <summary>Raised on whichever thread asked; the work moves to the UI thread and never blocks the asker.</summary>
-    private void OnActivateRequested(object? sender, EventArgs e) => Dispatcher.UIThread.Post(BringMainWindowForward);
+    private void OnActivateRequested(object? sender, EventArgs e) => Dispatcher.UIThread.Post(BringWindowForward);
 
-    private void BringMainWindowForward()
+    /// <summary>Brings the main window forward, or with no main window open the most recently active viewer window.</summary>
+    private void BringWindowForward()
     {
-        Window? window = _mainWindow?.Window;
-        if (window is null || _mainWindowClosed is { Value: true })
+        if (_main is { } main)
+        {
+            Raise(main.Composition.Window);
+            Log.LogInfo("Activate: main window brought forward.");
+        }
+        else if (_viewers.Count > 0)
+        {
+            Raise(_viewers[^1].Composition.Window);
+            Log.LogInfo("Activate: viewer window brought forward.");
+        }
+        else
         {
             Log.LogInfo("Activate: no main window to bring forward.");
-            return;
         }
+    }
 
+    private static void Raise(Window window)
+    {
         if (window.WindowState == WindowState.Minimized)
         {
             window.WindowState = WindowState.Normal;
@@ -412,28 +577,35 @@ public partial class App : Application
 
         window.Show();
         window.Activate();
-        Log.LogInfo("Activate: main window brought forward.");
     }
 
     /// <summary>
-    /// Disposes the theme settings host, closing its window without the unsaved-edits confirm, then what the start window owns,
-    /// then the themes folder watcher, then the settings file watcher, then the settings writer, waiting up to 2 s for the theme
-    /// picks still being saved, then the bridge the app owns, once the app exits. A second call does nothing more.
+    /// Releases what the app owns when it exits: disposes the theme settings host, closing its window without the unsaved-edits
+    /// confirm, runs the stop action if no last window closed first, disposes every document window's composition (saving the
+    /// main session), then the themes folder watcher, then the settings file watcher, then the settings writer, waiting up to
+    /// 2 s for the theme picks still being saved, then the bridge. Safe to call more than once.
     /// </summary>
     internal void ReleaseMainWindow()
     {
         _themeSettingsHost?.Dispose();
         _themeSettingsHost = null;
+        RunStopOnce();
         _connectedGate?.Activate -= OnActivateRequested;
         _connectedGate = null;
-        Action? releaseHooks = _releaseMainWindowHooks;
-        _releaseMainWindowHooks = null;
-        releaseHooks?.Invoke();
+        if (_main is { } main)
+        {
+            _main = null;
+            main.Unhook();
+            main.Composition.Dispose();
+        }
 
-        _mainWindow?.Window.ThemeSettingsRequested -= OnThemeSettingsRequested;
-        _mainWindow?.Dispose();
-        _mainWindow = null;
-        _mainWindowClosed = null;
+        foreach (DocumentWindow viewer in _viewers)
+        {
+            viewer.Unhook();
+            viewer.Composition.Dispose();
+        }
+
+        _viewers.Clear();
         _themesSync?.Dispose();
         _themesSync = null;
         ReleaseSettingsWatcher();
@@ -442,6 +614,7 @@ public partial class App : Application
         _settingsWriter = null;
         _bridge?.Dispose();
         _bridge = null;
+        _widths = null;
         _harnessBridge?.Dispose();
         _harnessBridge = null;
     }
@@ -580,6 +753,14 @@ public partial class App : Application
             pendingImport = null;
         };
         return window;
+    }
+
+    /// <summary>A main or viewer window the app follows, with what unhooks the app's handlers from it.</summary>
+    private sealed class DocumentWindow(MainWindowComposition composition)
+    {
+        public MainWindowComposition Composition { get; } = composition;
+
+        public Action Unhook { get; set; } = () => { };
     }
 
     /// <summary>
