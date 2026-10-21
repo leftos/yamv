@@ -565,6 +565,93 @@ public sealed class ContentWidthPopoverTests
             await fixture.SettleAsync();
         });
 
+    [Fact]
+    public Task The_slider_fills_the_track_with_the_accent_up_to_the_knob() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Window.Resources["YamvAccent"] = Brushes.Orange;
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.FromPx(760)));
+            fixture.Window.Width = 1600;
+            ContentWidthViewModel popover = await fixture.OpenPopoverAsync(fixture.DocA);
+
+            Assert.InRange(popover.SliderPosition, 0.01, 0.99);
+            AssertFillReachesTheKnob(fixture.Popover, Brushes.Orange);
+        });
+
+    [Fact]
+    public Task At_Full_the_fill_spans_the_whole_track_up_to_the_knob() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Window.Resources["YamvAccent"] = Brushes.Orange;
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.Full));
+            fixture.Window.Width = 1600;
+            ContentWidthViewModel popover = await fixture.OpenPopoverAsync(fixture.DocA);
+
+            Assert.Equal(1, popover.SliderPosition);
+            AssertFillReachesTheKnob(fixture.Popover, Brushes.Orange);
+        });
+
+    [Fact]
+    public Task A_click_on_the_track_either_side_of_the_knob_leaves_the_width_where_it_is() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.FromPx(760)));
+            fixture.Window.Width = 1600;
+            ContentWidthViewModel popover = await fixture.OpenPopoverAsync(fixture.DocA);
+            double position = popover.SliderPosition;
+            byte[] saved = File.ReadAllBytes(fixture.WidthsFile);
+            Assert.InRange(position, 0.01, 0.99);
+
+            Rect track = InSlider(fixture.Popover, SliderPart(fixture.Popover, "PART_Track"));
+            Rect thumb = InSlider(fixture.Popover, SliderPart(fixture.Popover, "Thumb"));
+            Point leftOfKnob = new(track.Left + 4, track.Center.Y);
+            Point rightOfKnob = new(track.Right - 4, track.Center.Y);
+            Assert.True(leftOfKnob.X < thumb.Left, $"The first press at {leftOfKnob} is not left of the knob {thumb}.");
+            Assert.True(rightOfKnob.X > thumb.Right, $"The second press at {rightOfKnob} is not right of the knob {thumb}.");
+
+            fixture.ClickSliderAt(leftOfKnob);
+            await fixture.SettleAsync();
+            Assert.Equal(position, popover.SliderPosition);
+
+            fixture.ClickSliderAt(rightOfKnob);
+            await fixture.SettleAsync();
+            Assert.Equal(position, popover.SliderPosition);
+            Assert.Equal(saved, File.ReadAllBytes(fixture.WidthsFile));
+        });
+
+    /// <summary>
+    /// Asserts the slider's accent fill runs from the track's start at 8 px, as the mock's <c>.fill</c> does inside
+    /// <c>.track</c>, to the knob's left edge, and is painted with <paramref name="accent"/>: the filled span is
+    /// <c>PART_DecreaseButton</c> and the accent is the border it holds.
+    /// </summary>
+    private static void AssertFillReachesTheKnob(ContentWidthPopover view, IBrush accent)
+    {
+        Control decrease = SliderPart(view, "PART_DecreaseButton");
+        Control thumb = SliderPart(view, "Thumb");
+        Border fill = decrease.GetVisualDescendants().OfType<Border>().Single();
+        Rect decreaseBounds = InSlider(view, decrease);
+        Rect thumbBounds = InSlider(view, thumb);
+        Rect fillBounds = InSlider(view, fill);
+        string state =
+            $"the fill is {decreaseBounds}, the knob {thumbBounds}, the accent border {fillBounds}, the track "
+            + $"{InSlider(view, SliderPart(view, "PART_Track"))}, the fill's desired size {decrease.DesiredSize}.";
+
+        Assert.True(decreaseBounds.Width > 1, $"The accent fill has no width: {state}");
+        Assert.True(
+            Math.Abs(decreaseBounds.Right - thumbBounds.Left) <= 1,
+            $"The fill ends at {decreaseBounds.Right} px and the knob starts at {thumbBounds.Left} px: {state}"
+        );
+        Assert.True(Math.Abs(fillBounds.Left - 8) <= 1, $"The fill starts at {fillBounds.Left} px, not where the track does at 8 px: {state}");
+        Assert.Same(accent, fill.Background);
+    }
+
+    /// <summary><paramref name="control"/>'s bounds in the slider's coordinates.</summary>
+    private static Rect InSlider(ContentWidthPopover view, Control control) =>
+        new(control.TranslatePoint(default, view.WidthSlider)!.Value, control.Bounds.Size);
+
     /// <summary>
     /// Asserts the rim's geometry covers points 1 px inside the arrow's tip and the card's bottom corners; the rim's 1 px stroke
     /// runs half a px inside the outline.
@@ -697,6 +784,9 @@ public sealed class ContentWidthPopoverTests
 
         /// <summary>Presses and releases the left button over the middle of <paramref name="control"/>, in whichever top level shows it.</summary>
         public void ClickIn(Control control) => ClickAt(control, new Point(control.Bounds.Width / 2, control.Bounds.Height / 2));
+
+        /// <summary>Presses and releases the left button at <paramref name="point"/>, in the slider's coordinates.</summary>
+        public void ClickSliderAt(Point point) => ClickAt(Popover.WidthSlider, point);
 
         /// <summary>
         /// Clicks an enabled link with the pointer, 4 px in from its left edge: headless text is about twice as wide as real text,
