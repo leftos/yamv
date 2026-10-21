@@ -7,10 +7,13 @@
 ### Window and launch (4/5 done)
 - [/] YAMV-8 Launch modes: main vs viewer, activating the main instance, macOS file activation
 
-### Features (1/4 done)
+### Features (1/7 done)
 - [/] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
 - [/] YAMV-10 Content width: per-folder slider (480 px to Full) in a title-bar popover
+- [ ] YAMV-50 Content width step: scrollbar in the pane measure, other instances, steps during a render, letter layouts
 - [/] YAMV-11 Theme settings window, Import notice and a watcher on the user themes folder
+- [ ] YAMV-48 Toast for failed operations: never only a log line
+- [ ] YAMV-49 Link policy: case-sensitive folder tie-break and device-path test rows
 
 ### Document read and panes (0/6 done)
 - [ ] YAMV-44 CSharpier: three .axaml files on main are unformatted; ThemePreview's reformat changes its text
@@ -48,3 +51,5 @@
 - [ ] YAMV-26 Instance coordinator: stale socket unlink on slow exit, elevated vs normal launch
 - [ ] YAMV-30 Theme files: broken links, UTF-16 files, write-size check, FIFO hang
 - [ ] YAMV-42 Summarize a document or selection through cloud models (bring-your-own-key / OAuth)
+- [!] YAMV-51 Adopt the shared Avalonia driver (agents drive the real window; queued file picks)
+- [ ] YAMV-52 Shared driver: drive the real OS file dialog
