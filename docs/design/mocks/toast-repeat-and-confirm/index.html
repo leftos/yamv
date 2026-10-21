@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV toast repeats and open confirm</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1720px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 12px; font-size: 15.5px; max-width: 1560px; line-height: 1.5; }
+p.page code, section > p code, .cap code, .fcap code { font: 12.5px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+.anno-key { display: inline-block; width: 22px; height: 12px; border: 2px dashed #ffb27a; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+section { margin: 44px 0 0; padding-top: 28px; border-top: 1px solid rgba(255,255,255,.28); }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 4px; }
+section > p { color: #eef0f2; margin: 0 0 18px; font-size: 15px; max-width: 1560px; line-height: 1.5; }
+
+/* ---------- lanes side by side; time runs down the left column ---------- */
+.grid { display: grid; column-gap: 24px; row-gap: 16px; align-items: start; }
+.lane-h { padding-bottom: 4px; }
+.lane-h h3 { font: 600 16.5px "Inter V"; color: #fff; margin: 0 0 3px; }
+.lane-h h3 .q { display: inline-block; min-width: 54px; padding: 1px 7px; margin-right: 8px; border-radius: 5px; background: rgba(0,0,0,.28); font-size: 14px; text-align: center; }
+.lane-h p.cap { color: #f1f3f5; font-size: 13px; margin: 0; line-height: 1.42; }
+.strip-h { grid-column: 1 / -1; font: 600 11.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin-top: 10px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,.3); }
+.t { border-left: 3px solid rgba(255,255,255,.4); padding: 2px 0 4px 10px; }
+.t b { display: block; font: 700 21px "Inter V"; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.t span { display: block; font-size: 12.5px; color: #eef0f2; line-height: 1.38; margin-top: 3px; }
+.cell { display: flex; gap: 14px; align-items: flex-start; }
+.cell.below { flex-direction: column; gap: 7px; }
+.fcap { color: #f1f3f5; font-size: 12.5px; margin: 0; line-height: 1.4; }
+.fcap b { color: #fff; }
+.zoom { width: max-content; flex: none; }
+
+/* ---------- the app window: every colour is a Studio token ---------- */
+.win { position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 10px; flex: none;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-family: "Inter V", sans-serif; font-size: 13px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; white-space: nowrap; position: relative; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--yamv-text-muted); margin-right: 6px; flex: none; position: relative; }
+.wbtn + .wbtn { margin-left: -2px; }
+.body { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+.col { box-sizing: content-box; max-width: 800px; margin: 0 auto; padding: 40px 44px 64px; }
+.side { flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 12px 8px; overflow: hidden; position: relative; }
+
+/* document */
+.md { font-family: "Inter V", sans-serif; font-size: 15.5px; line-height: 1.62; color: var(--yamv-text); }
+.md h1 { font-weight: 700; font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .5em; color: var(--yamv-heading); }
+.md h2 { font-weight: 700; font-size: 1.32em; line-height: 1.25; margin: 1.6em 0 .55em; padding-bottom: .3em; border-bottom: 1px solid var(--yamv-line); color: var(--yamv-heading); }
+.md p { margin: 0 0 1em; }
+.md ul { margin: 0 0 1em; padding-left: 1.6em; }
+.md li + li { margin-top: .2em; }
+.md a { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; }
+.md code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md .new { outline: 2px dashed var(--anno); outline-offset: 3px; border-radius: 2px; }
+
+.btn { display: inline-flex; align-items: center; height: 30px; padding: 0 14px; border: 1px solid var(--yamv-line); border-radius: 6px; background: var(--yamv-page-background); color: var(--yamv-text); font: 550 12.5px "Inter V"; white-space: nowrap; }
+.btn.def { border-color: var(--yamv-accent); box-shadow: 0 0 0 2px var(--yamv-accent-soft); }
+.btn.sm { height: 24px; padding: 0 10px; font-size: 12px; border-radius: 5px; }
+
+/* tree */
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--yamv-text); white-space: nowrap; }
+.grp-h .chev { width: 10px; color: var(--yamv-text-muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.badge.dir { color: var(--yamv-text-muted); border-color: var(--yamv-line); }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; font-size: 13px; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--yamv-text-muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+
+/* toasts (the approved card, reload-and-drop lane A) */
+.toast { position: relative; overflow: hidden; display: flex; align-items: center; gap: 9px; background: var(--yamv-page-background); border: 1px solid var(--yamv-line); border-radius: 8px;
+         padding: 8px 10px 9px 12px; font: 13px "Inter V"; color: var(--yamv-text); white-space: nowrap; box-shadow: 0 10px 22px var(--toast-shadow), 0 1px 3px var(--toast-shadow); }
+.toast > svg { flex: none; color: var(--yamv-warning); }
+.toast code { font: 12px "JetBrains Mono V"; background: var(--yamv-code-background); padding: 1px 5px; border-radius: 4px; }
+.toast .x { color: var(--yamv-text-muted); font-size: 12px; margin-left: 8px; }
+.toast .timer { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--yamv-text-muted); opacity: .55; }
+.tstack { position: absolute; z-index: 6; display: flex; flex-direction: column; gap: 8px; }
+.tstack.a { left: 0; right: 0; bottom: 16px; align-items: center; }
+/* Repeat B: the count */
+.toast .count { font: 650 11.5px "Inter V"; font-variant-numeric: tabular-nums; color: var(--yamv-text-secondary); background: var(--yamv-hover-background);
+                border: 1px solid var(--yamv-line); border-radius: 9px; padding: 0 7px; line-height: 17px; margin-left: -1px; }
+/* Repeat A: the pulse frame */
+.toast.pulse { transform: scale(1.04); border-color: color-mix(in srgb, var(--yamv-warning) 70%, var(--yamv-line));
+               box-shadow: 0 0 0 4px color-mix(in srgb, var(--yamv-warning) 30%, transparent), 0 10px 22px var(--toast-shadow), 0 1px 3px var(--toast-shadow); }
+/* Confirm C: the ask card in the toast place */
+.toast.ask { padding: 7px 8px 7px 12px; gap: 8px; }
+.toast.ask > svg { color: var(--yamv-accent); }
+.toast.ask b { font-weight: 650; }
+.toast.ask .btn:first-of-type { margin-left: 8px; }
+
+/* Confirm A: scrim and card, each its own window over the pane */
+.scrim { position: absolute; inset: 0; z-index: 5; background: var(--scrim); }
+.dlg { position: absolute; z-index: 6; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 404px; background: var(--yamv-page-background); color: var(--yamv-text);
+       border: 1px solid var(--yamv-line); border-radius: 10px; padding: 18px 20px 16px; box-shadow: 0 18px 44px var(--toast-shadow), 0 2px 6px var(--toast-shadow); font: 13px/1.5 "Inter V"; }
+.dlg .h { display: flex; align-items: center; gap: 10px; font: 650 16px "Inter V"; color: var(--yamv-heading); margin-bottom: 8px; }
+.dlg .h svg { color: var(--yamv-accent); flex: none; }
+.dlg p { margin: 0 0 16px; color: var(--yamv-text-secondary); }
+.dlg .b { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Confirm B: a Windows 11 task dialog, drawn by the OS, so not themed */
+.wmb { position: absolute; z-index: 8; width: 430px; background: #fff; color: #000; border: 1px solid #a8a8a8; border-radius: 8px; overflow: hidden;
+       box-shadow: 0 16px 40px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.18); font: 12px/1.45 "Segoe UI", "Inter V", sans-serif; }
+.wmb .tb { height: 32px; display: flex; align-items: center; padding-left: 12px; font-size: 12px; color: #1a1a1a; }
+.wmb .tb .xx { margin-left: auto; width: 46px; height: 32px; display: grid; place-items: center; font-size: 13px; color: #333; }
+.wmb .c { display: flex; gap: 12px; padding: 8px 18px 20px 16px; }
+.wmb .c svg { flex: none; margin-top: 2px; }
+.wmb .i { font-size: 15.5px; color: #1c3f94; margin-bottom: 8px; line-height: 1.3; }
+.wmb .f { background: #f0f0f0; border-top: 1px solid #dfdfdf; padding: 11px 12px; display: flex; justify-content: flex-end; gap: 8px; }
+.wmb .wb { min-width: 80px; height: 26px; display: grid; place-items: center; padding: 0 12px; background: #fdfdfd; border: 1px solid #d0d0d0; border-bottom-color: #bcbcbc; border-radius: 4px; font-size: 12px; color: #1a1a1a; }
+.wmb .wb.def { border: 1px solid #005fb8; box-shadow: inset 0 0 0 1px #005fb8; }
+
+/* ---------- annotations: not UI ---------- */
+.note { position: absolute; z-index: 9; color: var(--anno); background: var(--anno-band); border: 1.5px solid var(--anno); border-radius: 6px; font: 650 17px "Inter V"; padding: 3px 9px; white-space: nowrap; }
+.lbl { font: 600 11px "Inter V"; letter-spacing: .06em; text-transform: uppercase; color: var(--yamv-text-muted); margin: 0 0 6px 2px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: toast repeats and the open-file confirm, two open questions</h1>
+<p class="page">Each frame is a Studio main window drawn at its real pixel size and scaled down, in light and, in one row per question, dark. The document is on the left, the tree on the right. Options are lanes side by side; time runs down the page, one row per moment, named in the left column. <span class="anno-key"></span>Orange marks are annotations, not UI.</p>
+<p class="page">The toast is the approved one: <code>docs/design/look.md</code> (Window, Toast) and <code>docs/design/mocks/reload-and-drop/index.html</code>, Toast lane A. A toast, and anything else over the page, is its own borderless window, since the page is a native web view nothing can be drawn over.</p>
+
+<template id="ctl"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<section>
+  <h2>Repeat · The same failure toasts again while its card is still up</h2>
+  <p>Window 700 × 420, shown at 60%; details at 125%. "The same" here means the same text; a different failure always gets its own card. The thin line at a card's foot is the time left of its 5 s. Windows repeats a held key about 30 times a second, so a held Ctrl+] with <code>widths.json</code> locked fails about 45 times in 1.5 s.</p>
+  <div data-q="repeat"></div>
+</section>
+
+<section>
+  <h2>Confirm · Before opening a file type YAMV doesn't show</h2>
+  <p>Ruled: a local file that is not a document type and not on the viewable allowlist asks first, naming the file and its type, before it opens with the default app. Here <code>README.md</code> links <code>tools/setup.ps1</code> (dashed: the clicked link). Window 760 × 440, shown at 60%; details at 100%.</p>
+  <div data-q="confirm"></div>
+</section>
+
+<script>
+const LIGHT = { pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  warning: "#9a6700", warningBackground: "#fff8c5", warningLine: "#e5d17b", codeBackground: "#f6f8fa", codeLine: "#e4e8ec" };
+const DARK = { pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  warning: "#d29922", warningBackground: "#bb800926", warningLine: "#9e6a03", codeBackground: "#161b22", codeLine: "#262c34" };
+/* not tokens: the toast shadow, the scrim and the annotation colours */
+const EXTRA = {
+  light: "--toast-shadow:rgba(31,35,40,.18);--scrim:rgba(31,35,40,.32);--anno:#d9480f;--anno-band:rgba(255,255,255,.94)",
+  dark: "--toast-shadow:rgba(0,0,0,.6);--scrim:rgba(0,0,0,.52);--anno:#ff922b;--anno-band:rgba(15,19,24,.94)",
+};
+const T = { light: LIGHT, dark: DARK };
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (th) => Object.entries(T[th]).map(([k, v]) => `${kebab(k)}:${v}`).join(";") + ";" + EXTRA[th];
+
+const CTL = document.getElementById("ctl").innerHTML;
+const GLYPH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const OPEN = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 12.6V3.2h4.1l1.5 1.5h5.3v2.1M1.8 12.6 3.7 7h10.6l-1.9 5.6z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`;
+const MORE = `<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="12.5" cy="8" r="1.2" fill="currentColor"/></svg>`;
+const ICO = `<svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+const WARN = `<svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1.6 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12.1" r=".9" fill="currentColor"/></svg>`;
+/* a file with an arrow out: "opens outside YAMV" */
+const EXT = (s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 16 16"><path d="M8.2 14.2H3V1.8h5.6l3 3v2.6" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/><path d="M9.6 14.2l4.6-4.6M10.6 9.6h3.6v3.6" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const WINWARN = `<svg width="32" height="32" viewBox="0 0 32 32"><path d="M16 3.2 30 28H2z" fill="#ffc83d" stroke="#c99a12" stroke-width="1" stroke-linejoin="round"/><path d="M16 11.5v8.5" stroke="#1a1a1a" stroke-width="2.6" stroke-linecap="round"/><circle cx="16" cy="23.8" r="1.6" fill="#1a1a1a"/></svg>`;
+
+/* ---------- documents and tree ---------- */
+const DOCS = {
+  plan: `<h1>YAMV plan</h1>
+<p>The viewer opens Markdown files from any folder and keeps them in a tree beside the page. This file is a snapshot of the <a>Linear issues</a>, and the diagram is in <a>notes/diagram.png</a>.</p>
+<h2>Now</h2>
+<ul><li>Content width per folder, with the ⟷ popover</li><li>Theme settings: live preview and the colour picker</li></ul>
+<h2>Next</h2>
+<p>Drag and drop, and links that open other documents.</p>`,
+  readme: `<h1>YAMV</h1>
+<p>Yet Another Markdown Viewer: a fast, quiet window for reading Markdown, on Windows and macOS.</p>
+<h2>Getting started</h2>
+<p>Run <a class="new">tools/setup.ps1</a> once to install the git hooks and the .NET tools, then build with <code>dotnet build Yamv.slnx</code>.</p>
+<h2>Docs</h2>
+<ul><li><a>docs/ARCHITECTURE.md</a>: where things live</li><li><a>docs/design/look.md</a>: the chosen look</li></ul>`,
+};
+const row = (name, cls = "") => `<div class="row ${cls}">${ICO}<span class="nm">${name}</span></div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+const head = (name, badge) => `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge ${badge === "dir" ? "dir" : ""}">${badge}</span></div>`;
+function tree(sel) {
+  const r = (name, indent) => row(name, (indent ? "in" : "") + (sel === name ? " sel" : ""));
+  const yamv = head("yamv", "git") + r("README.md") + folder("docs/plans") + r("MAIN.md", 1) + r("live-reload.md", 1) + r("v1-build.md", 1);
+  const yaat = head("yaat", "git") + folder("docs") + r("ARCHITECTURE.md", 1) + r("glossary.md", 1);
+  const dl = head("~\\Downloads", "dir") + r("notes.md");
+  return `<div class="grp">${yamv}</div><div class="grp">${yaat}</div><div class="grp">${dl}</div>`;
+}
+function win(o) {
+  return `<div class="win" style="width:${o.w}px;height:${o.h}px;${vars(o.theme ?? "light")}">
+    <div class="titlebar"><span class="name">${o.title}</span><span>${o.loc ?? ""}</span><span class="spacer"></span><span class="wbtn">${OPEN}</span><span class="wbtn">${GLYPH}</span><span class="wbtn">${MORE}</span>${CTL}</div>
+    <div class="body"><div class="pane"><div class="col md">${o.doc}</div>${o.paneOv ?? ""}</div><div class="side" style="width:${o.treeW}px">${tree(o.sel)}</div></div>${o.over ?? ""}</div>`;
+}
+const note = (text, style) => `<div class="note" style="${style}">${text}</div>`;
+
+/* ---------- lanes side by side, time down the left ---------- */
+function grid({ lanes, strips }) {
+  let h = `<div class="grid" style="grid-template-columns:150px repeat(${lanes.length}, minmax(0,1fr))"><div></div>`;
+  h += lanes.map((l) => `<div class="lane-h"><h3><span class="q">${l.q}</span>${l.title}</h3><p class="cap">${l.cap}</p></div>`).join("");
+  for (const s of strips) {
+    if (s.title) h += `<div class="strip-h">${s.title}</div>`;
+    for (const r of s.rows) {
+      h += `<div class="t"><b>${r.t}</b><span>${r.ev}</span></div>`;
+      h += r.cells.map((c) => c === null ? "<div></div>" : `<div class="cell below"><div class="zoom" style="zoom:${c.z ?? s.z}">${c.html}</div>${c.cap ? `<p class="fcap">${c.cap}</p>` : ""}</div>`).join("");
+    }
+  }
+  return h + "</div>";
+}
+
+/* ---------- Repeat ---------- */
+const LINK = [WARN, "<code>notes/diagram.png</code> doesn't exist"];
+const WIDTH = [WARN, "Couldn't save the width; see the log"];
+const toast = ([icon, text], o = {}) => `<div class="toast ${o.pulse ? "pulse" : ""}">${icon}<span>${text}</span>${o.n ? `<span class="count">×${o.n}</span>` : ""}<span class="x">✕</span><span class="timer" style="width:${o.t ?? 100}%"></span></div>`;
+const MID = { w: 700, h: 420, treeW: 230, title: "MAIN.md", loc: "yamv / docs / plans", sel: "MAIN.md", doc: DOCS.plan };
+const stackWin = (cards, th = "light", ov = "") => win({ ...MID, theme: th, paneOv: `<div class="tstack a">${cards.join("")}</div>` + ov });
+const repeatCards = {
+  /* the link clicked twice, 2 s apart */
+  after: {
+    a: [toast(LINK, { pulse: true })],
+    b: [toast(LINK, { n: 2 })],
+    c: [toast(LINK, { t: 60 }), toast(LINK)],
+  },
+  /* Ctrl+] held 1.5 s while the link card is up */
+  held: {
+    a: [toast(LINK, { t: 30 }), toast(WIDTH, { pulse: true })],
+    b: [toast(LINK, { t: 30 }), toast(WIDTH, { n: 45 })],
+    c: [toast(WIDTH), toast(WIDTH), toast(WIDTH)],
+  },
+};
+const detail = (inner, th = "light") => `<div style="${vars(th)};padding:16px 18px;background:var(--yamv-page-background);border-radius:8px;width:max-content;display:flex;flex-direction:column;gap:8px;align-items:center">${inner}</div>`;
+function repeat() {
+  const z = 0.6;
+  const same = (cards, cap) => ["a", "b", "c"].map(() => ({ html: stackWin(cards), cap }));
+  const pulseNote = () => note("pulse", "left:196px;bottom:58px");
+  return grid({
+    lanes: [
+      { q: "Repeat · A", title: "One card, restarted with a pulse", cap: "The repeat puts the card's timer back to 5 s and the card pulses once; worst case: a held Ctrl+] keeps one card up and pulsing, and nothing says the save failed 45 times." },
+      { q: "Repeat · B", title: "One card with a count", cap: "The repeat puts the timer back to 5 s and adds a count: “Couldn't save the width; see the log ×3”; worst case: a held key runs the count up at key-repeat speed, ×45 in 1.5 s, a number that says little." },
+      { q: "Repeat · C", title: "No merging: a new card each time", cap: "Each repeat is a card of its own, up to the cap of three, the oldest evicted; worst case: a held key fills the stack with three identical cards and evicts a different failure before it was read." },
+    ],
+    strips: [
+      { title: "Case 1 · A link to notes/diagram.png, which does not exist, is clicked twice, 2 s apart", z, rows: [
+        { t: "0 s", ev: "The first click fails.", cells: same([toast(LINK)], "One card; its 5 s timer is full.") },
+        { t: "2 s, before", ev: "Just before the second click.", cells: same([toast(LINK, { t: 60 })], "<b>Before</b>: one card, 3 s left.") },
+        { t: "2 s, after", ev: "The second click fails the same way.", cells: [
+          { html: stackWin(repeatCards.after.a, "light", pulseNote()), cap: "<b>After</b>: the same card, its timer back to 5 s, in a 200 ms pulse (104% and a warning ring), then it settles." },
+          { html: stackWin(repeatCards.after.b), cap: "<b>After</b>: the same card with ×2, its timer back to 5 s." },
+          { html: stackWin(repeatCards.after.c), cap: "<b>After</b>: a second, identical card below the first; each fades on its own timer, the first at 5 s, the second at 7 s." }] },
+      ] },
+      { title: "Case 2 · The link card is up when Ctrl+] is held for 1.5 s and widths.json is locked", z, rows: [
+        { t: "0 s", ev: "The link card is 2 s old; Ctrl+] goes down and the first save fails.", cells: same([toast(LINK, { t: 60 }), toast(WIDTH)], "Two different failures, two cards.") },
+        { t: "1.5 s", ev: "Ctrl+] comes up after about 45 failed saves.", cells: [
+          { html: stackWin(repeatCards.held.a, "light", note("pulsed 45 times", "left:156px;bottom:98px")), cap: "The link card is still there, 1.5 s left; the width card pulsed with every repeat and has 5 s left." },
+          { html: stackWin(repeatCards.held.b), cap: "The link card is still there; the width card's count ran up to ×45." },
+          { html: stackWin(repeatCards.held.c, "light", note("link card evicted", "right:12px;top:10px")), cap: "Three identical width cards, churned 30 times a second; the link card was evicted at the third failure, unread." }] },
+      ] },
+      { title: "Studio dark · case 1, after the second click", z, rows: [
+        { t: "2 s, after", ev: "The same moment from the dark tokens.", cells: [
+          { html: stackWin(repeatCards.after.a, "dark", pulseNote()), cap: "The pulse ring is the warning colour at 30%." },
+          { html: stackWin(repeatCards.after.b, "dark"), cap: "The count chip takes the hover fill." },
+          { html: stackWin(repeatCards.after.c, "dark"), cap: "Two cards." }] },
+      ] },
+      { title: "Detail · at 125%", z: 1.25, rows: [
+        { t: "Cards", ev: "The card alone, light.", cells: [
+          { html: detail(`<div class="lbl">Before</div>${toast(LINK, { t: 60 })}<div class="lbl" style="margin-top:10px">After, mid-pulse</div>${toast(LINK, { pulse: true })}`), cap: "Before and after: the timer refills and the card pulses once." },
+          { html: detail(toast(WIDTH, { n: 3 })), cap: "The count sits between the text and ×." },
+          { html: detail(toast(LINK, { t: 60 }) + toast(LINK)), cap: "Two separate cards." }] },
+      ] },
+    ],
+  });
+}
+
+/* ---------- Confirm ---------- */
+const WIDE = { w: 760, h: 440, treeW: 220, title: "README.md", loc: "yamv", sel: "README.md", doc: DOCS.readme };
+const BODY = "It's a PowerShell script (.ps1). YAMV doesn't show this type; it will open with the app Windows uses for it.";
+const card = () => `<div class="dlg"><div class="h">${EXT(18)}Open setup.ps1?</div><p>${BODY}</p><div class="b"><span class="btn">Open</span><span class="btn def">Cancel</span></div></div>`;
+const osBox = (style) => `<div class="wmb" style="${style}"><div class="tb">YAMV<span class="xx">✕</span></div>
+  <div class="c">${WINWARN}<div><div class="i">Open setup.ps1?</div><div>${BODY}</div></div></div>
+  <div class="f"><span class="wb">Open</span><span class="wb def">Cancel</span></div></div>`;
+const ask = () => `<div class="toast ask">${EXT(15)}<span>Open <b>setup.ps1</b>? It's a PowerShell script (.ps1).</span><span class="btn sm">Open</span><span class="btn sm def">Cancel</span></div>`;
+function confirmWin(opt, th) {
+  if (opt === "a") return win({ ...WIDE, theme: th, paneOv: `<div class="scrim"></div>${card()}` });
+  if (opt === "b") return win({ ...WIDE, theme: th, over: osBox("left:165px;top:140px") });
+  return win({ ...WIDE, theme: th, paneOv: `<div class="tstack a">${ask()}</div>` });
+}
+function confirm() {
+  const z = 0.6;
+  const cells = (th, caps) => ["a", "b", "c"].map((k, i) => ({ html: confirmWin(k, th), cap: caps[i] }));
+  return grid({
+    lanes: [
+      { q: "Confirm · A", title: "In-app card with a scrim", cap: "A card window centred over the pane and a dimmed scrim window over the pane only, Cancel the default; worst case: two windows to keep over the pane as it moves and resizes, while the tree beside it stays live." },
+      { q: "Confirm · B", title: "The OS message box", cap: "Windows' own dialog (on macOS, its alert) with the same text; worst case: on Windows it stays light in a dark window, is set in Segoe UI rather than the theme, and centres on the whole window." },
+      { q: "Confirm · C", title: "A toast-sized ask at the bottom centre", cap: "The question on one line with Open and Cancel where toasts appear, no scrim; Esc or a click elsewhere cancels; worst case: a click back into the page cancels without a word, and the sentence about the default app doesn't fit." },
+    ],
+    strips: [
+      { z, rows: [
+        { t: "Light", ev: "tools/setup.ps1 is clicked in README.md.", cells: cells("light", [
+          "The pane dims; the title bar and tree stay as they are. Enter and Esc both cancel.",
+          "Drawn by Windows: a task dialog, since a plain message box only offers OK and Cancel, not Open. Modal to the whole window.",
+          "Sits where toasts appear; a failure toast arriving now stacks above it. No timer: it waits for an answer."]) },
+        { t: "Dark", ev: "The same click, Studio dark.", cells: cells("dark", [
+          "The card and scrim from the dark tokens.",
+          "The dialog stays light: Windows does not theme it.",
+          "The ask card from the dark tokens."]) },
+      ] },
+      { title: "Detail · at 100%", z: 1, rows: [
+        { t: "Alone", ev: "The confirm by itself, light.", cells: [
+          { html: `<div style="${vars("light")};position:relative;width:444px;height:196px;background:var(--scrim);border-radius:8px">${card()}</div>`, cap: "Title, the sentence naming file and type, Open and Cancel (default, accent ring)." },
+          { html: `<div style="position:relative;width:432px;height:196px">${osBox("left:0;top:0")}</div>`, cap: "Windows 11 task dialog: warning icon, the title as its main instruction, Cancel as the default button." },
+          { html: `<div style="${vars("light")};padding:16px 12px;background:var(--yamv-page-background);border-radius:8px;width:max-content">${ask()}</div>`, cap: "One line: the file and its type; \"with the app Windows uses\" is left out to fit." }] },
+      ] },
+    ],
+  });
+}
+
+const QS = { repeat, confirm };
+for (const el of document.querySelectorAll("[data-q]")) el.innerHTML = QS[el.dataset.q]();
+</script>
+</body>
+</html>
