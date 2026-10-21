@@ -483,21 +483,35 @@
 
   const pageHandledKeys = new Set(["c", "a"]);
   const fieldEditingKeys = new Set(["v", "x", "z", "y"]);
+  // The physical keys in the US bracket positions: a layout may print something else there.
+  const bracketKeys = { BracketLeft: "[", BracketRight: "]" };
   const navigationKeys = new Set([
     "Home", "End", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete", "PageUp", "PageDown",
   ]);
 
-  // The keys the host may want as shortcuts: an F-key, or Ctrl/Cmd with a letter, a digit, a bracket or Tab.
-  function isShortcut(key, command) {
+  // The keys the host may want as shortcuts: an F-key, or Ctrl/Cmd with a letter, a digit, a physical bracket or Tab.
+  function isShortcut(key, command, bracket) {
     if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) {
       return true;
     }
-    return command && (/^[\p{L}\p{Nd}]$/u.test(key) || key === "[" || key === "]" || key === "Tab");
+    if (bracket) {
+      return true;
+    }
+    return command && (/^[\p{L}\p{Nd}]$/u.test(key) || key === "Tab");
+  }
+
+  // Ctrl/Cmd alone on a physical bracket key names that bracket, whatever the layout prints on the key.
+  function bracketShortcut(event) {
+    const bracket = bracketKeys[event.code];
+    return bracket && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey ? bracket : null;
   }
 
   // `key` follows the keyboard layout and `code` names the physical key, so a Greek or Cyrillic layout
   // reports its own letter where the host's shortcuts and the page's own keys know the Latin one.
-  function shortcutKey(event) {
+  function shortcutKey(event, bracket) {
+    if (bracket) {
+      return bracket;
+    }
     if (/^\p{L}$/u.test(event.key) && !/^[a-zA-Z]$/.test(event.key)) {
       const physical = /^Key([A-Z])$/.exec(event.code);
       if (physical) {
@@ -512,7 +526,8 @@
     if (event.getModifierState("AltGraph") || navigationKeys.has(event.key)) {
       return;
     }
-    const forwarded = shortcutKey(event);
+    const bracket = bracketShortcut(event);
+    const forwarded = shortcutKey(event, bracket);
     const key = forwarded.length === 1 ? forwarded.toLowerCase() : forwarded;
     const command = event.ctrlKey || event.metaKey;
     if (command && key === "f") {
@@ -531,7 +546,7 @@
     if (command && event.target === findField && fieldEditingKeys.has(key)) {
       return;
     }
-    if (isShortcut(key, command)) {
+    if (isShortcut(key, command, bracket)) {
       event.preventDefault();
       post({ type: "key", key: forwarded, ctrl: event.ctrlKey, meta: event.metaKey, shift: event.shiftKey, alt: event.altKey });
     }

@@ -39,6 +39,9 @@ public static class AppPaths
 
     public static string SessionFile => Path.Combine(DataDirectory, "session.json");
 
+    /// <summary>The per-folder content widths, beside <see cref="SessionFile"/>.</summary>
+    public static string WidthsFile => Path.Combine(DataDirectory, "widths.json");
+
     public static string MainLockFile => Path.Combine(DataDirectory, "main.lock");
 
     public static string LogFile => Path.Combine(DataDirectory, "logs", "yamv.log");

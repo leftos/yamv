@@ -4,10 +4,10 @@ How wide the document's text column is. It is a viewer setting and not part of t
 
 ## Values
 
-- A width is a number of px from 480 up to the pane's width, or **Full**, which uses the whole pane minus its 44 px side padding.
+- A width is the text measure: a number of px from 480 up to the pane's width minus its 88 px of side padding, or **Full**. A stored 760 draws 760 px text lines inside the column's 44 px side paddings (an 848 px column box), and Full fills the pane minus those paddings.
 - The slider snaps to Full within the last 5% of its travel. The readout says `760 px` or `Full`.
-- When the pane is narrower than a stored px width, the column is the pane width. The stored value is never changed by a window resize.
-- The app default starts at 800 px.
+- When the pane is narrower than a stored px width plus the side padding, the column is the pane width. The stored value is never changed by a window resize.
+- The app default starts at 800 px, which is also the page's fallback text measure when the host has set none.
 
 ## Where a width comes from
 
@@ -26,5 +26,5 @@ How wide the document's text column is. It is a viewer setting and not part of t
   - **Clear all overrides here**, which removes every folder width at or below the group root.
 - When the popover opens, the selected segment is the source of the current width: the folder it is inherited from, or All documents. Moving the slider therefore edits that source. Picking a narrower segment first creates an override there.
 - The selected segment's source is shown as "Inherited from `<folder>`" when it differs from the selected segment.
-- **Ctrl+[** / **Ctrl+]** (Cmd on macOS) step the current source's width on a 40 px grid that starts at 480. From a width off the grid, one press snaps to the next grid value (from 763 px, up goes to 800 and down to 760); from a grid value it moves by 40. Stepping down stops at 480. Stepping past the pane width becomes Full, and stepping down from Full goes to the largest grid value below the pane width.
+- **Ctrl+[** / **Ctrl+]** (Cmd on macOS) are the physical keys in the US `[` / `]` positions, whatever the keyboard layout prints on them, with Ctrl (Cmd) alone (no Shift, no Alt). The page forwards them to the host as `[` / `]`, and a `[` or `]` typed from any other physical key is not forwarded as a shortcut. They step the current source's width on a 40 px grid that starts at 480. From a width off the grid, one press snaps to the next grid value (from 763 px, up goes to 800 and down to 760); from a grid value it moves by 40. Stepping down stops at 480. Stepping past the pane width becomes Full, and stepping down from Full goes to the largest grid value below the pane width.
 - The page applies the width with no reload: the host sets `--yamv-content-width` (a px value, or `none` for Full) on the page.

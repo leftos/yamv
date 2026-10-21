@@ -22,6 +22,7 @@ public sealed class AppPathsTests
     {
         Assert.Equal(folder, AppPaths.DataDirectory);
         Assert.Equal(Path.Combine(folder, "session.json"), AppPaths.SessionFile);
+        Assert.Equal(Path.Combine(folder, "widths.json"), AppPaths.WidthsFile);
         Assert.Equal(Path.Combine(folder, "logs", "yamv.log"), AppPaths.LogFile);
         Assert.Equal(Path.Combine(folder, "themes"), AppPaths.ThemesDirectory);
     }

@@ -224,6 +224,63 @@ try {
   check("A letter on a digit key is forwarded unchanged", keys.forwarded.length === 1 && keys.forwarded[0].key === "ě", keys);
   keys = await pressLayout({ key: "ς", code: "KeyW", ctrlKey: false });
   check("Without Ctrl a Greek letter is neither forwarded nor blocked", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
+
+  // The bracket shortcuts are the physical keys in the US bracket positions, whatever the layout prints there,
+  // with Ctrl (Cmd) and no other modifier.
+  keys = await pressLayout({ key: "ü", code: "BracketLeft", ctrlKey: true });
+  check(
+    "Ctrl+[ on a German layout is forwarded as [",
+    keys.forwarded.length === 1 && keys.forwarded[0].key === "[" && keys.forwarded[0].ctrl === true && keys.seen.at(-1).prevented,
+    keys,
+  );
+  keys = await pressLayout({ key: "+", code: "BracketRight", ctrlKey: true });
+  check(
+    "Ctrl+] on a German layout is forwarded as ]",
+    keys.forwarded.length === 1 && keys.forwarded[0].key === "]" && keys.forwarded[0].ctrl === true && keys.seen.at(-1).prevented,
+    keys,
+  );
+  keys = await pressLayout({ key: "[", code: "BracketLeft", ctrlKey: true });
+  check("Ctrl+[ on a US layout is forwarded as [", keys.forwarded.length === 1 && keys.forwarded[0].key === "[", keys);
+  keys = await pressLayout({ key: "+", code: "BracketRight", metaKey: true });
+  check(
+    "Cmd+] on a German layout is forwarded as ]",
+    keys.forwarded.length === 1 && keys.forwarded[0].key === "]" && keys.forwarded[0].meta === true,
+    keys,
+  );
+  keys = await pressLayout({ key: "ü", code: "BracketLeft", ctrlKey: true, altKey: true, modifierAltGraph: true });
+  check(
+    "AltGr+[ is neither forwarded nor blocked",
+    keys.seen.at(-1)?.altGraph === true && keys.forwarded.length === 0 && !keys.seen.at(-1).prevented,
+    keys,
+  );
+  keys = await pressLayout({ key: "{", code: "BracketLeft", ctrlKey: true, shiftKey: true });
+  check("Ctrl+Shift+[ is neither forwarded nor blocked", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
+  keys = await pressLayout({ key: "[", code: "Minus", ctrlKey: true });
+  check("A [ typed on another physical key is neither forwarded nor blocked", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
+  keys = await pressLayout({ key: "[", code: "BracketLeft", ctrlKey: true, altKey: true });
+  check("Ctrl+Alt+[ without AltGr is neither forwarded nor blocked", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
+
+  // The content width is the text measure: the column's box adds its 44 px side paddings.
+  await page.setViewportSize({ width: 1200, height: 800 });
+  const widthOf = () => page.evaluate(() => {
+    const element = document.getElementById("yamv-content");
+    const style = getComputedStyle(element);
+    const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    return {
+      content: element.clientWidth - padding,
+      outer: element.getBoundingClientRect().width,
+      viewport: document.documentElement.clientWidth,
+    };
+  });
+  await page.evaluate(() => document.documentElement.style.removeProperty("--yamv-content-width"));
+  let width = await widthOf();
+  check("With no width set the text measure is 800 px", width.content === 800 && width.outer === 888, width);
+  await page.evaluate(() => window.yamv.setContentWidth("760px"));
+  width = await widthOf();
+  check("760 px sets a 760 px text measure in an 848 px column", width.content === 760 && width.outer === 848, width);
+  await page.evaluate(() => window.yamv.setContentWidth("none"));
+  width = await widthOf();
+  check("none spans the viewport width", width.outer === width.viewport && width.content === width.viewport - 88, width);
 } finally {
   await browser.close();
 }

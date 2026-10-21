@@ -71,8 +71,9 @@ body {
 ::selection { background: var(--yamv-selection-background); color: var(--yamv-selection-text); }
 
 /* ---------- content column ---------- */
-/* --yamv-content-width is set by the host: a px value, or none for full width. */
-.yamv-content { max-width: var(--yamv-content-width, 800px); margin: 0 auto; padding: 40px 44px 64px; }
+/* --yamv-content-width is set by the host: a px value, or none for full width. The value is the text measure,
+   so the column's box is content-box: its 44 px side paddings come on top of it, and none fills the pane minus them. */
+.yamv-content { box-sizing: content-box; max-width: var(--yamv-content-width, 800px); margin: 0 auto; padding: 40px 44px 64px; }
 .yamv-content.yamv-pending { visibility: hidden; }
 
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-family: var(--yamv-heading-font), "Inter V", sans-serif; color: var(--yamv-heading); line-height: 1.25; }
