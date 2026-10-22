@@ -6,19 +6,19 @@
 
 ### Window and launch (5/5 done)
 
-### Features (2/14 done)
+### Features (4/16 done)
 - [/] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
 - [ ] YAMV-50 Content width step: scrollbar in the pane measure, other instances, steps during a render, letter layouts
 - [/] YAMV-11 Theme settings window, Import notice and a watcher on the user themes folder
-- [ ] YAMV-48 Toast for failed operations: never only a log line
-- [ ] YAMV-49 Link policy: case-sensitive folder tie-break and device-path test rows
-- [/] YAMV-53 Settings file: app-wide settings in one shared, watched settings.json
-- [ ] YAMV-80 Content-width slider draws no accent fill left of the knob
+- [/] YAMV-48 Toast for failed operations: never only a log line
+- [/] YAMV-49 Link policy: case-sensitive folder tie-break and device-path test rows
 - [ ] YAMV-63 Content width popover: stale cached width, store exceptions, Reset-before-EndDrag segment
 - [ ] YAMV-69 Content-width popover: keep the keyboard focus ring when the Clear all question moves focus
 - [ ] YAMV-79 Content-width popover follows a window resize while open
 - [ ] YAMV-56 Width popover: preview an unreachable width on an example document, with a toast
 - [ ] YAMV-81 Tail switch: the view follows text appended to a document
+- [ ] YAMV-84 Content-width popover: a view test that drags the knob
+- [ ] YAMV-88 Link policy: no network I/O before the UNC guard; reject relative link targets
 
 ### Document read and panes (0/11 done)
 - [ ] YAMV-44 CSharpier: three .axaml files on main are unformatted; ThemePreview's reformat changes its text
@@ -33,7 +33,7 @@
 - [ ] YAMV-77 Scroll anchor follow-ups: empty-text ties, Core-generated page fixtures, oversized render records
 - [ ] YAMV-82 Scroll anchor edges: raw-HTML find blocks, a bad session entry, test names
 
-### Theme settings hardening (0/9 done)
+### Theme settings hardening (0/11 done)
 - [ ] YAMV-31 Theme settings window: confirm and focus hardening, one default theme id
 - [ ] YAMV-40 ThemeBridge: remove its merged dictionary on dispose; expose IsDisposed for tests
 - [ ] YAMV-36 Token editor: open on the shown appearance's tab, copyable built-in values, focus visuals
@@ -43,6 +43,8 @@
 - [ ] YAMV-75 Theme catalog repeats its invalid-file warning on every reload
 - [ ] YAMV-78 ThemeBridge: test that an Apply of another theme ends the kept bad streak
 - [ ] YAMV-68 Toast when the theme in use goes bad or is deleted outside the app
+- [ ] YAMV-85 Theme settings: bring the window forward before a shutdown's unsaved-changes confirm
+- [ ] YAMV-86 macOS: Edit as text and open-with failures escape RunOpen
 
 ### Instance and launch hardening (0/8 done)
 - [ ] YAMV-34 Pid file: pin the reader's share mode and the move retry in tests
@@ -78,3 +80,4 @@
 - [ ] YAMV-52 Shared driver: drive the real OS file dialog
 - [ ] YAMV-57 Core: one shared atomic-file helper for the five temp-then-replace stores
 - [ ] YAMV-61 csharpier formats .axaml and breaks inline Runs: settle XAML formatting and the format command
+- [ ] YAMV-87 Boil settled mocks down to a decision record and a rebuild recipe
