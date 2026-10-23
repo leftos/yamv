@@ -34,7 +34,8 @@ public static partial class RealPath
     /// <param name="path">A file or folder path, which need not exist.</param>
     /// <returns>
     /// Null when a link points at a network share or a device, when the links form a loop or a chain longer than
-    /// <see cref="MaxLinkHops"/>, or when a folder on the way cannot be read.
+    /// <see cref="MaxLinkHops"/>, when a folder on the way cannot be read, or when a segment's name matches more than one entry in
+    /// its folder ignoring case, none of them exactly.
     /// </returns>
     /// <remarks>
     /// <c>..</c> segments are collapsed by <see cref="Path.GetFullPath(string)"/> before the walk. Links are followed one hop at a
@@ -72,10 +73,11 @@ public static partial class RealPath
 
     /// <summary>
     /// Whether <paramref name="path"/> is a Windows network share or device path (<c>\\server\share</c>, <c>\\?\</c>,
-    /// <c>\\.\</c>), which no file-system call may touch: touching a share sends the user's credentials to its host.
+    /// <c>\\.\</c>, <c>\??\</c>), which no file-system call may touch: touching a share sends the user's credentials to its host.
     /// </summary>
     internal static bool IsUncOrDevice(string path) =>
-        OperatingSystem.IsWindows() && path.Length >= 2 && IsSeparator(path[0]) && IsSeparator(path[1]);
+        OperatingSystem.IsWindows()
+        && ((path.Length >= 2 && IsSeparator(path[0]) && IsSeparator(path[1])) || path.StartsWith(@"\??\", StringComparison.Ordinal));
 
     private static bool IsSeparator(char character) => character is '\\' or '/';
 
@@ -104,7 +106,8 @@ public static partial class RealPath
 
     /// <summary>
     /// Walks <paramref name="full"/> segment by segment: returns the result when no segment is a link, else the path through
-    /// the first link's immediate target, to be walked again from its root.
+    /// the first link's immediate target, to be walked again from its root. Returns null with no restart when a segment names an
+    /// ambiguous entry, which leaves the whole path unresolvable.
     /// </summary>
     private static (ResolvedPath? Resolved, string? Restart) WalkToFirstLink(string full, Action<string> touching)
     {
@@ -122,7 +125,12 @@ public static partial class RealPath
         bool isDirectory = false;
         for (int index = 0; index < segments.Length; index++)
         {
-            Entry? entry = FindEntry(current, segments[index], touching);
+            (Entry? entry, MatchOutcome match) = FindEntry(current, segments[index], touching);
+            if (match == MatchOutcome.Ambiguous)
+            {
+                return (null, null);
+            }
+
             if (entry is null)
             {
                 return (new ResolvedPath(Path.Combine([current, .. segments[index..]]), Exists: false, IsDirectory: false), null);
@@ -144,44 +152,73 @@ public static partial class RealPath
 
     /// <summary>
     /// The entry of <paramref name="parent"/> that <paramref name="name"/> names, read from the folder's own listing so its name
-    /// is the one stored on disk; null when there is none.
+    /// is the one stored on disk, and which of <see cref="MatchOutcome"/>'s cases it is.
     /// </summary>
     /// <remarks>
     /// An entry whose name matches ordinally wins, so a case-sensitive folder holding <c>Repo</c> and <c>repo</c> gives the one
-    /// named; otherwise the single entry that matches ignoring case, which is what a case-insensitive folder opens. On Windows a
-    /// name the listing does not hold may be an 8.3 short name, so it is expanded to its long name and looked up again.
+    /// named; otherwise the single entry that matches ignoring case, which is what a case-insensitive folder opens. A name that
+    /// matches more than one entry ignoring case, and none of them exactly, is ambiguous and names no entry at all: resolving it
+    /// to whichever entry the OS would pick would open a file the path was not checked as. On Windows a name the listing does not
+    /// hold may be an 8.3 short name, so it is expanded to its long name and looked up again.
     /// </remarks>
-    private static Entry? FindEntry(string parent, string name, Action<string> touching)
+    private static (Entry? Entry, MatchOutcome Match) FindEntry(string parent, string name, Action<string> touching)
     {
-        Entry? entry = MatchEntry(parent, name, touching);
-        if (entry is not null || !OperatingSystem.IsWindows())
+        (Entry? entry, MatchOutcome match) = MatchEntry(parent, name, touching);
+        if (match != MatchOutcome.None || !OperatingSystem.IsWindows())
         {
-            return entry;
+            return (entry, match);
         }
 
         string? longName = LongName(Path.Combine(parent, name), touching);
-        return longName is null || longName == name ? null : MatchEntry(parent, longName, touching);
+        return longName is null || longName == name ? (null, MatchOutcome.None) : MatchEntry(parent, longName, touching);
     }
 
-    private static Entry? MatchEntry(string parent, string name, Action<string> touching)
+    /// <summary>
+    /// The one entry of <paramref name="parent"/>'s listing that <paramref name="name"/> names, and the outcome that says how many
+    /// entries matched it.
+    /// </summary>
+    private static (Entry? Entry, MatchOutcome Match) MatchEntry(string parent, string name, Action<string> touching)
     {
         touching(parent);
-        List<Entry> matches =
+        List<Entry> entries =
         [
-            .. new FileSystemEnumerable<Entry>(parent, (ref entry) => new Entry(entry.FileName.ToString(), entry.Attributes), ListAll)
-            {
-                ShouldIncludePredicate = (ref entry) => entry.FileName.Equals(name, StringComparison.OrdinalIgnoreCase),
-            },
+            .. new FileSystemEnumerable<Entry>(parent, (ref entry) => new Entry(entry.FileName.ToString(), entry.Attributes), ListAll),
         ];
-        foreach (Entry match in matches)
+        (int index, MatchOutcome match) = ChooseMatch([.. entries.Select(entry => entry.Name)], name);
+        return (index < 0 ? null : entries[index], match);
+    }
+
+    /// <summary>
+    /// Which of <paramref name="names"/> the entry <paramref name="name"/> names: the one that matches ordinally, else the single
+    /// one that matches ignoring case, with <see cref="MatchOutcome.Ambiguous"/> when several match ignoring case and none exactly.
+    /// </summary>
+    internal static (int Index, MatchOutcome Match) ChooseMatch(IReadOnlyList<string> names, string name)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        int single = -1;
+        int matches = 0;
+        for (int index = 0; index < names.Count; index++)
         {
-            if (match.Name == name)
+            if (!string.Equals(names[index], name, StringComparison.OrdinalIgnoreCase))
             {
-                return match;
+                continue;
             }
+
+            if (string.Equals(names[index], name, StringComparison.Ordinal))
+            {
+                return (index, MatchOutcome.One);
+            }
+
+            single = index;
+            matches++;
         }
 
-        return matches.Count == 1 ? matches[0] : null;
+        return matches switch
+        {
+            0 => (-1, MatchOutcome.None),
+            1 => (single, MatchOutcome.One),
+            _ => (-1, MatchOutcome.Ambiguous),
+        };
     }
 
     /// <summary>The full path of the immediate target of the link at <paramref name="path"/>; null when it is no link.</summary>
@@ -208,6 +245,19 @@ public static partial class RealPath
 
     [LibraryImport("kernel32.dll", EntryPoint = "GetLongPathNameW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     private static partial uint GetLongPathName(string shortPath, [Out] char[] longPath, uint bufferLength);
+
+    /// <summary>What a folder's listing holds for a name.</summary>
+    internal enum MatchOutcome
+    {
+        /// <summary>The listing holds the name exactly, or one entry that matches it ignoring case.</summary>
+        One,
+
+        /// <summary>The listing holds no entry that matches the name, even ignoring case.</summary>
+        None,
+
+        /// <summary>The listing holds more than one entry that matches ignoring case, and none of them exactly.</summary>
+        Ambiguous,
+    }
 
     /// <summary>A folder entry as its parent's listing holds it.</summary>
     private readonly record struct Entry(string Name, FileAttributes Attributes)

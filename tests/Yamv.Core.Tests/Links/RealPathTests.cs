@@ -111,6 +111,20 @@ public sealed class RealPathTests : IDisposable
         Assert.DoesNotContain(touched, path => path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(@"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\a.png")]
+    [InlineData(@"\??\C:\Windows\notepad.exe")]
+    [InlineData(@"\??\UNC\192.0.2.1\share\a.png")]
+    public void Resolve_DevicePath_IsUnresolvableWithoutTouchingIt(string path)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Device paths exist only on Windows.");
+        List<string> touched = [];
+
+        Assert.Null(RealPath.Resolve(path, touched.Add));
+
+        Assert.Empty(touched);
+    }
+
     [Fact]
     public async Task Resolve_JunctionToAnInsideFolder_ResolvesThroughIt()
     {
@@ -162,6 +176,48 @@ public sealed class RealPathTests : IDisposable
         );
     }
 
+    [Fact]
+    public async Task Resolve_NameMatchingMoreThanOneEntryInACaseSensitiveFolder_IsUnresolvable()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows makes a single folder case-sensitive.");
+        string folder = Path.Combine(tempRoot, "sensitive");
+        Directory.CreateDirectory(folder);
+        string? refusal = await TryCaseSensitive(folder);
+        Assert.SkipWhen(refusal is not null, $"This machine does not let the test make a folder case-sensitive: {refusal}");
+        File.WriteAllText(Path.Combine(folder, "a.png"), "lower");
+        File.WriteAllText(Path.Combine(folder, "A.PNG"), "upper");
+        Directory.CreateDirectory(Path.Combine(folder, "sub"));
+        Directory.CreateDirectory(Path.Combine(folder, "SUB"));
+        Assert.SkipWhen(Directory.EnumerateFileSystemEntries(folder).Count() < 4, "The folder did not keep its names apart.");
+        string real = Path.Combine(realRoot, "sensitive");
+
+        Assert.Equal(
+            new ResolvedPath(Path.Combine(real, "a.png"), Exists: true, IsDirectory: false),
+            RealPath.Resolve(Path.Combine(folder, "a.png"))
+        );
+        Assert.Equal(
+            new ResolvedPath(Path.Combine(real, "A.PNG"), Exists: true, IsDirectory: false),
+            RealPath.Resolve(Path.Combine(folder, "A.PNG"))
+        );
+        Assert.Null(RealPath.Resolve(Path.Combine(folder, "a.PNG")));
+        Assert.Null(RealPath.Resolve(Path.Combine(folder, "Sub", "x.png")));
+    }
+
+    [Fact]
+    public void ChooseMatch_ExactNameAmongSeveralDifferingByCase_IsTheExactOne() =>
+        Assert.Equal((1, RealPath.MatchOutcome.One), RealPath.ChooseMatch(["a.png", "A.PNG", "b.png"], "A.PNG"));
+
+    [Fact]
+    public void ChooseMatch_OneEntryMatchingIgnoringCase_IsThatEntry() =>
+        Assert.Equal((0, RealPath.MatchOutcome.One), RealPath.ChooseMatch(["a.png"], "A.PNG"));
+
+    [Fact]
+    public void ChooseMatch_NoEntryMatching_IsNone() => Assert.Equal((-1, RealPath.MatchOutcome.None), RealPath.ChooseMatch(["a.png"], "b.png"));
+
+    [Fact]
+    public void ChooseMatch_MoreThanOneMatchingIgnoringCase_IsAmbiguous() =>
+        Assert.Equal((-1, RealPath.MatchOutcome.Ambiguous), RealPath.ChooseMatch(["a.png", "A.PNG"], "a.PNG"));
+
     private static bool TryLink(string link, string target)
     {
         try
@@ -192,6 +248,34 @@ public sealed class RealPathTests : IDisposable
         using Process process = Process.Start(start) ?? throw new InvalidOperationException("cmd.exe did not start.");
         await process.WaitForExitAsync(TestContext.Current.CancellationToken);
         return process.ExitCode == 0;
+    }
+
+    /// <summary>Makes <paramref name="folder"/> case-sensitive: null when fsutil did it, else fsutil's own reason.</summary>
+    private static async Task<string?> TryCaseSensitive(string folder)
+    {
+        var start = new ProcessStartInfo("fsutil.exe")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (string argument in (string[])["file", "setCaseSensitiveInfo", folder, "enable"])
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(start) ?? throw new InvalidOperationException("fsutil.exe did not start.");
+        Task<string> output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        string reason = string.Join(" ", await output, await error).Trim();
+        if (process.ExitCode == 0)
+        {
+            return null;
+        }
+
+        return reason.Length == 0 ? $"fsutil.exe exited with code {process.ExitCode}" : reason;
     }
 
     private static bool CanList(string folder)

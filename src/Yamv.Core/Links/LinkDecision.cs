@@ -10,6 +10,11 @@ public sealed record OpenExternal(Uri Uri) : LinkDecision;
 /// <summary>Opens <paramref name="Path"/> in YAMV, scrolled to <paramref name="Fragment"/> when the link names one.</summary>
 /// <param name="Path">The document's local path, which need not exist.</param>
 /// <param name="Fragment">The heading the link names, URL-decoded and without its <c>#</c>; null when it names none.</param>
+/// <remarks>
+/// <paramref name="Path"/> is the link's path as <c>Path.GetFullPath</c> left it, not the resolved real path the policy checked:
+/// links are not followed, case is as written, and an 8.3 name is expanded only if it existed when the decision was made. A
+/// consumer renders it in the app and never hands it to the shell.
+/// </remarks>
 public sealed record OpenDocument(string Path, string? Fragment) : LinkDecision;
 
 /// <summary>Opens <paramref name="Path"/> in the platform's default app for its type, without asking.</summary>

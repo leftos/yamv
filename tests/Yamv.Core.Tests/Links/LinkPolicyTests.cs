@@ -257,6 +257,8 @@ public sealed class LinkPolicyTests
     [InlineData("file:///%5C%5Cserver/share/a.png")]
     [InlineData("file:///%5C%5C%3F%5CC:%5Cx%5Ca.png")]
     [InlineData("file:///%5C%5C.%5Cpipe%5Cx")]
+    [InlineData("file:///%5C%3F%3F%5CC:%5CWindows%5Cnotepad.exe")]
+    [InlineData("file:///%5C%5C%3F%5CVolume%7B01234567-89ab-cdef-0123-456789abcdef%7D%5Ca.png")]
     public void Decide_NetworkShareOrDevicePath_IsIgnoredWithoutResolvingIt(string href)
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Network share and device paths exist only on Windows.");

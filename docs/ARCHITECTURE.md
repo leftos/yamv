@@ -68,7 +68,11 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
   The App wiring of `LinkPolicy` follows these rules. `LinkActivatedEventArgs` carries a source (click, navigation, new window), and a navigation-sourced `file:` link is treated as a drop: a dropped document type opens wherever it is, with no group-root check, since a drop is the user's own gesture. The wiring opens exactly the `Path` the decision carries (the resolved real path), never the raw href or a re-resolved one, because the file can be swapped between the decision and the open. A `.md` link outside the document's group root opens in-app in its own group, and a missing one opens as a missing document.
 
-  `RealPath.Resolve` returns a `ResolvedPath?` (`Path`, `Exists`, `IsDirectory`), null when the path cannot be resolved safely. It follows links one hop at a time (at most 40, `MaxLinkHops`), never touches a UNC or device path, and returns long, on-disk-cased names. Nothing in the window calls `LinkPolicy` yet.
+  `RealPath.Resolve` returns a `ResolvedPath?` (`Path`, `Exists`, `IsDirectory`), null when the path cannot be resolved safely. It follows links one hop at a time (at most 40, `MaxLinkHops`), never touches a UNC or device path (`\\server\share`, `\\?\`, `\\.\` and `\??\`), and returns long, on-disk-cased names.
+
+  A path segment whose name matches more than one entry in its folder ignoring case, and none exactly (a case-sensitive folder), makes the whole path unresolvable (null, so `LinkPolicy` ignores the link), since the OS would pick an entry the path was not checked as; an exact match wins (`RealPath.ChooseMatch`). `OpenDocument.Path` is the link's path as `Path.GetFullPath` left it, not the resolved real path the policy checked.
+
+  Nothing in the window calls `LinkPolicy` yet.
 
   Platform (`Platform/`): `RevealCommand` builds the Explorer or Finder process that reveals a path (a file selected, a folder opened, a missing path's nearest existing folder), BCL only so it is tested without a window. `OpenFileCommand.For(path, isMac)` builds the process that opens a fully qualified `.json` path with the system's association (the Windows shell open, or `/usr/bin/open` on macOS) and throws for any other path.
 
