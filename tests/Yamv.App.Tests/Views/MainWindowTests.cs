@@ -791,6 +791,193 @@ public sealed class MainWindowTests
             Assert.False(Directory.Exists(Path.GetDirectoryName(fixture.Repo)));
         });
 
+    [Fact]
+    public Task The_more_button_is_the_second_title_bar_tool() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            TitleBar bar = fixture.Window.WindowTitleBar;
+
+            int widthIndex = bar.TitleBarTools.Children.IndexOf(bar.ContentWidthButton);
+
+            Assert.True(widthIndex >= 0);
+            Assert.Same(bar.MoreButton, bar.TitleBarTools.Children[widthIndex + 1]);
+            Assert.Equal("More", ToolTip.GetTip(bar.MoreButton));
+            Assert.True(bar.MoreButton.IsEffectivelyEnabled);
+        });
+
+    [Fact]
+    public Task A_click_on_the_more_button_opens_the_menu_with_one_item_Theme_settings() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Button more = fixture.Window.WindowTitleBar.MoreButton;
+
+            fixture.ClickEvent(more);
+
+            Assert.True(fixture.Window.MorePopup.IsOpen);
+            Assert.Contains("open", more.Classes);
+            Button item = Assert.Single(fixture.Window.MoreMenu.GetVisualDescendants().OfType<Button>());
+            Assert.Same(fixture.Window.ThemeSettingsItem, item);
+            // The key hint is docked right, so it comes first in the visual tree.
+            Assert.Equal([OperatingSystem.IsMacOS() ? "⌘," : "Ctrl+,", "Theme settings…"], VisibleTexts(fixture.Window.MoreMenu));
+        });
+
+    [Fact]
+    public Task A_second_click_closes_the_menu() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Button more = fixture.Window.WindowTitleBar.MoreButton;
+            fixture.ClickEvent(more);
+            Assert.True(fixture.Window.MorePopup.IsOpen);
+
+            fixture.ClickEvent(more);
+
+            Assert.False(fixture.Window.MorePopup.IsOpen);
+            Assert.DoesNotContain("open", more.Classes);
+        });
+
+    [Fact]
+    public Task The_item_raises_ThemeSettingsRequested_once_and_closes_the_menu() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            List<object?> senders = [];
+            fixture.Window.ThemeSettingsRequested += (sender, _) => senders.Add(sender);
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.MoreButton);
+
+            fixture.ClickEvent(fixture.Window.ThemeSettingsItem);
+
+            Assert.Equal([fixture.Window], senders);
+            Assert.False(fixture.Window.MorePopup.IsOpen);
+            Assert.DoesNotContain("open", fixture.Window.WindowTitleBar.MoreButton.Classes);
+        });
+
+    [Fact]
+    public Task Enter_on_the_focused_more_button_opens_the_menu_and_Esc_closes_it_back_to_the_button() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Button more = fixture.Window.WindowTitleBar.MoreButton;
+            Assert.True(more.Focusable && more.IsTabStop);
+            more.Focus(NavigationMethod.Tab);
+            fixture.Settle();
+
+            fixture.Press(Key.Enter);
+
+            Assert.True(fixture.Window.MorePopup.IsOpen);
+            TopLevel menuTop = TopLevel.GetTopLevel(fixture.Window.MoreMenu) ?? throw new InvalidOperationException("The menu is not shown.");
+            Assert.Same(fixture.Window.ThemeSettingsItem, menuTop.FocusManager?.GetFocusedElement());
+
+            menuTop.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+            fixture.Settle();
+            Assert.Same(fixture.Window.ThemeSettingsItem, menuTop.FocusManager?.GetFocusedElement());
+
+            menuTop.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+            fixture.Settle();
+
+            Assert.False(fixture.Window.MorePopup.IsOpen);
+            Assert.Same(more, fixture.Window.FocusManager?.GetFocusedElement());
+        });
+
+    [Fact]
+    public Task Ctrl_comma_raises_ThemeSettingsRequested() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            int requests = 0;
+            fixture.Window.ThemeSettingsRequested += (_, _) => requests++;
+
+            fixture.Window.KeyPress(Key.OemComma, CommandModifier, PhysicalKey.Comma, ",");
+            fixture.Settle();
+            Assert.Equal(1, requests);
+
+            fixture.Click(fixture.Row(fixture.DocA));
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.AssertFocusOnSelectedRow();
+            fixture.Window.KeyPress(Key.OemComma, CommandModifier, PhysicalKey.Comma, ",");
+            fixture.Settle();
+
+            Assert.Equal(2, requests);
+        });
+
+    [Fact]
+    public Task Forwarded_command_comma_from_the_page_raises_ThemeSettingsRequested() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            int requests = 0;
+            fixture.Window.ThemeSettingsRequested += (_, _) => requests++;
+            bool mac = OperatingSystem.IsMacOS();
+
+            fixture.Surface.RaiseKey(new KeyForwardedEventArgs(",", ctrl: !mac, meta: mac, shift: false, alt: false));
+            fixture.Settle();
+
+            Assert.Equal(1, requests);
+        });
+
+    [Fact]
+    public Task Ctrl_comma_with_the_tree_focused_leaves_focus_where_the_request_put_it() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            Button more = fixture.Window.WindowTitleBar.MoreButton;
+            fixture.Window.ThemeSettingsRequested += (_, _) => more.Focus(NavigationMethod.Tab);
+            fixture.Click(fixture.Row(fixture.DocA));
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.AssertFocusOnSelectedRow();
+
+            fixture.Window.KeyPress(Key.OemComma, CommandModifier, PhysicalKey.Comma, ",");
+            fixture.Settle();
+
+            Assert.Same(more, fixture.Window.FocusManager?.GetFocusedElement());
+        });
+
+    [Fact]
+    public Task Opening_the_more_menu_closes_the_width_popover() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.ContentWidthButton);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+            Assert.True(fixture.Window.WidthPopup.IsOpen);
+
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.MoreButton);
+
+            Assert.True(fixture.Window.MorePopup.IsOpen);
+            Assert.False(fixture.Window.WidthPopup.IsOpen);
+            Assert.DoesNotContain("open", fixture.Window.WindowTitleBar.ContentWidthButton.Classes);
+        });
+
+    [Fact]
+    public Task Opening_the_width_popover_closes_the_more_menu() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.MoreButton);
+            Assert.True(fixture.Window.MorePopup.IsOpen);
+
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.ContentWidthButton);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.True(fixture.Window.WidthPopup.IsOpen);
+            Assert.False(fixture.Window.MorePopup.IsOpen);
+            Assert.DoesNotContain("open", fixture.Window.WindowTitleBar.MoreButton.Classes);
+        });
+
     private static List<string?> Headers(ContextMenu? menu) =>
         [.. Assert.IsType<ContextMenu>(menu).Items.OfType<MenuItem>().Select(item => item.Header as string)];
 

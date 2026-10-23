@@ -796,7 +796,7 @@
     "Home", "End", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete", "PageUp", "PageDown",
   ]);
 
-  // The keys the host may want as shortcuts: an F-key, or Ctrl/Cmd with a letter, a digit, a physical bracket or Tab.
+  // The keys the host may want as shortcuts: an F-key, or Ctrl/Cmd with a letter, a digit, a physical bracket, the comma or Tab.
   function isShortcut(key, command, bracket) {
     if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) {
       return true;
@@ -804,7 +804,7 @@
     if (bracket) {
       return true;
     }
-    return command && (/^[\p{L}\p{Nd}]$/u.test(key) || key === "Tab");
+    return command && (/^[\p{L}\p{Nd}]$/u.test(key) || key === "," || key === "Tab");
   }
 
   // Ctrl/Cmd alone on a physical bracket key names that bracket, whatever the layout prints on the key.

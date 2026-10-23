@@ -61,17 +61,23 @@
         HorizontalAlignment="Right"
         chrome:WindowDecorationProperties.ElementRole="User"
       >
-        <Button
-          x:Name="ContentWidthButton"
-          Classes="tool"
-          IsEnabled="{Binding CanEditContentWidth}"
-          AutomationProperties.Name="Content width"
-        >
+        <Button x:Name="ContentWidthButton" Classes="tool" IsEnabled="{Binding CanEditContentWidth}" AutomationProperties.Name="Content width">
           <Path
             Width="16"
             Height="16"
             Data="M1.8,8 H14.2 M4.6,5.2 L1.8,8 L4.6,10.8 M11.4,5.2 L14.2,8 L11.4,10.8"
             StrokeThickness="1.4"
+            StrokeLineCap="Round"
+            StrokeJoin="Round"
+          />
+        </Button>
+        <!-- Three dots, each a round cap on a stroke too short to see, so the glyph takes the tool's stroke like ⟷. -->
+        <Button x:Name="MoreButton" Classes="tool" ToolTip.Tip="More" AutomationProperties.Name="More">
+          <Path
+            Width="16"
+            Height="16"
+            Data="M3.39,8 H3.41 M7.99,8 H8.01 M12.59,8 H12.61"
+            StrokeThickness="2.6"
             StrokeLineCap="Round"
             StrokeJoin="Round"
           />

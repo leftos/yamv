@@ -137,6 +137,30 @@
     <Style Selector="Panel.row:pointerover Button.close, Panel.row.selected Button.close">
       <Setter Property="IsVisible" Value="True" />
     </Style>
+    <!-- An item of the ⋯ menu: 28 px high, radius 5, 13 px text and a muted key hint on the right; hover or keyboard focus fills it. -->
+    <Style Selector="Button.menuItem">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FocusAdorner" Value="{x:Null}" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Name="Back" Background="Transparent" CornerRadius="5" Padding="10,0">
+            <ContentPresenter
+              Content="{TemplateBinding Content}"
+              HorizontalContentAlignment="Stretch"
+              VerticalAlignment="Center"
+              Foreground="{TemplateBinding Foreground}"
+            />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.menuItem:pointerover /template/ Border#Back, Button.menuItem:focus-visible /template/ Border#Back">
+      <Setter Property="Background" Value="{DynamicResource YamvHoverBackground}" />
+    </Style>
   </Window.Styles>
 
   <DockPanel x:Name="Root">
@@ -169,6 +193,48 @@
           VerticalOffset="2"
         >
           <views:ContentWidthPopover x:Name="WidthPopover" />
+        </Popup>
+        <!--
+          The ⋯ menu: a native popup like the width popover, hung 6 px under the ⋯ button with its right edge on the button's,
+          measured in screen pixels on the hidden desktop with no horizontal offset (the width popover's card lines up with 12).
+          Its content keeps 12 px for the shadow at each side and 20 px below.
+        -->
+        <Popup
+          x:Name="MorePopup"
+          ShouldUseOverlayLayer="False"
+          IsLightDismissEnabled="True"
+          WindowManagerAddShadowHint="False"
+          Placement="BottomEdgeAlignedRight"
+          VerticalOffset="6"
+        >
+          <Panel Margin="12,0,12,20">
+            <Border
+              x:Name="MoreMenu"
+              Width="214"
+              Padding="4"
+              CornerRadius="8"
+              Background="{DynamicResource YamvPageBackground}"
+              BorderBrush="{DynamicResource YamvLine}"
+              BorderThickness="1"
+              TextElement.FontFamily="{DynamicResource YamvUiFont}"
+            >
+              <StackPanel>
+                <Button x:Name="ThemeSettingsItem" Classes="menuItem">
+                  <DockPanel>
+                    <TextBlock
+                      x:Name="ThemeSettingsHint"
+                      DockPanel.Dock="Right"
+                      Text="{x:Static views:MainWindow.ThemeSettingsKeyHint}"
+                      FontSize="12"
+                      Foreground="{DynamicResource YamvTextMuted}"
+                      VerticalAlignment="Center"
+                    />
+                    <TextBlock Text="Theme settings…" VerticalAlignment="Center" />
+                  </DockPanel>
+                </Button>
+              </StackPanel>
+            </Border>
+          </Panel>
         </Popup>
         <!--
           The toasts: a native popup over the web view as well, its foot on the foot of the document pane and centred on it. It
@@ -329,12 +395,7 @@
                     ToolTip.Tip="Can't read this file"
                   >
                     <Canvas Width="16" Height="16">
-                      <Path
-                        Data="M8 1.6 15 14H1z"
-                        Stroke="{DynamicResource YamvWarning}"
-                        StrokeThickness="1.4"
-                        StrokeJoin="Round"
-                      />
+                      <Path Data="M8 1.6 15 14H1z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
                       <Path Data="M8 6v4" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
                       <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
                     </Canvas>

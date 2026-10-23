@@ -194,6 +194,10 @@ try {
   }
   keys = await pressKey("Control+;");
   check("Ctrl+; is neither forwarded nor blocked", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
+  keys = await pressKey("Control+,");
+  check("Ctrl+, is forwarded and blocked", keys.forwarded.length === 1 && keys.forwarded[0].key === "," && keys.seen.at(-1).prevented, keys);
+  keys = await pressKey("Control+.");
+  check("Ctrl+. is neither forwarded nor blocked", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
   keys = await pressKey("Control+[");
   check("Ctrl+[ is forwarded", keys.forwarded.length === 1 && keys.forwarded[0].key === "[", keys);
   keys = await pressKey("Control+Tab");

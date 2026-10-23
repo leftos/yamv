@@ -22,6 +22,10 @@
 .PARAMETER TimeoutSeconds
     How long to wait for the window to appear. Default 15.
 
+.PARAMETER Title
+    Capture the process's visible top-level window whose title contains this text (ordinal, case-sensitive), instead of its
+    largest one; for example 'Theme settings' for the theme settings window over the main window. Default: none.
+
 .PARAMETER WithPopups
     Also paint the process's other visible top-level windows that overlap the main one (a popup such as the content-width
     popover is a window of its own) over the capture, each where it sits on the screen.
@@ -34,6 +38,7 @@ param(
     [Parameter(Mandatory)] [int] $ProcessId,
     [Parameter(Mandatory)] [string] $Out,
     [int] $TimeoutSeconds = 15,
+    [string] $Title = '',
     [switch] $WithPopups
 )
 
@@ -49,6 +54,8 @@ public struct RECT { public int Left; public int Top; public int Right; public i
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr hwnd);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hwnd, out uint processId);
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern int GetWindowText(System.IntPtr hwnd, System.Text.StringBuilder text, int maxCount);
 public delegate bool EnumWindowsProc(System.IntPtr hwnd, System.IntPtr lParam);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, System.IntPtr lParam);
 
@@ -70,6 +77,23 @@ public static System.IntPtr LargestWindow(uint processId)
         return true;
     }, System.IntPtr.Zero);
     return best;
+}
+
+// The process's first visible top-level window whose title contains the text, topmost first.
+public static System.IntPtr TitledWindow(uint processId, string title)
+{
+    System.IntPtr found = System.IntPtr.Zero;
+    EnumWindows((hwnd, _) =>
+    {
+        uint owner;
+        GetWindowThreadProcessId(hwnd, out owner);
+        if (owner != processId || !IsWindowVisible(hwnd)) { return true; }
+        var text = new System.Text.StringBuilder(512);
+        GetWindowText(hwnd, text, text.Capacity);
+        if (text.ToString().Contains(title, System.StringComparison.Ordinal)) { found = hwnd; return false; }
+        return true;
+    }, System.IntPtr.Zero);
+    return found;
 }
 
 // The process's other visible top-level windows, topmost first, so painting them in reverse keeps the z-order.
@@ -95,12 +119,18 @@ $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 $handle = [IntPtr]::Zero
 while ([DateTime]::UtcNow -lt $deadline) {
     [void](Get-Process -Id $ProcessId)
-    $handle = [YamvCapture.Native]::LargestWindow([uint32]$ProcessId)
+    $handle = if ($Title) {
+        [YamvCapture.Native]::TitledWindow([uint32]$ProcessId, $Title)
+    }
+    else {
+        [YamvCapture.Native]::LargestWindow([uint32]$ProcessId)
+    }
     if ($handle -ne [IntPtr]::Zero) { break }
     Start-Sleep -Milliseconds 200
 }
 if ($handle -eq [IntPtr]::Zero) {
-    throw "Process $ProcessId has no main window on this desktop after $TimeoutSeconds s."
+    $which = if ($Title) { "window titled '*$Title*'" } else { 'main window' }
+    throw "Process $ProcessId has no $which on this desktop after $TimeoutSeconds s."
 }
 
 $rect = New-Object YamvCapture.Native+RECT

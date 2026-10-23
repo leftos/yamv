@@ -66,6 +66,12 @@
     failure repeated three times and a plain failure, and paint their popup, a window of its own, over the capture. The
     run waits for the "Window: toasts shown" log line. Not with -WidthPopover.
 
+.PARAMETER ThemeSettingsEntry
+    With -App: menu opens the title bar's ⋯ menu once the window has shown its first document and paints the menu, a window
+    of its own, over the capture; the run waits for the "Window: more menu shown" log line. open asks for the theme settings
+    window as the menu's item does and captures that window instead of the main one; the run waits for the "Window: theme
+    settings shown" log line. Passed as YAMV_DEV_THEME_SETTINGS_ENTRY. Not with -WidthPopover or -Toasts.
+
 .PARAMETER ThemeSettings
     Run the theme settings window instead of the harness, on a fresh data folder under .tmp\yamv-data.
 
@@ -95,6 +101,10 @@
         -Session .tmp/session.json -Settings .tmp/settings.json -Out .tmp/main.png
 
 .EXAMPLE
+    pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -App `
+        -ThemeSettingsEntry menu -Out .tmp/more-menu.png
+
+.EXAMPLE
     pwsh -NoProfile -File tools/hidden-desktop.ps1 -- pwsh -NoProfile -File tools/dev/run-hidden.ps1 -ThemeSettings `
         -Themes .tmp/themes -Out .tmp/theme-settings.png
 
@@ -113,6 +123,7 @@ param(
     [switch] $WidthPopover,
     [ValidateSet('', 'clearall', 'folder')] [string] $WidthPopoverStep = '',
     [switch] $Toasts,
+    [ValidateSet('', 'menu', 'open')] [string] $ThemeSettingsEntry = '',
     [switch] $ThemeSettings,
     [string] $Themes = '',
     [string] $ImportFile = '',
@@ -128,12 +139,15 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $exe = Join-Path $root 'src\Yamv.App\bin\Release\net10.0\yamv.exe'
 $capture = Join-Path $PSScriptRoot 'capture-window.ps1'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-if (($Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover -or $Toasts) -and -not $App) {
-    throw ('-Session, -Settings, -Widths, -DeleteAfterShown, -WidthPopover and -Toasts need -App: ' +
+if (($Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover -or $Toasts -or $ThemeSettingsEntry) -and -not $App) {
+    throw ('-Session, -Settings, -Widths, -DeleteAfterShown, -WidthPopover, -Toasts and -ThemeSettingsEntry need -App: ' +
         'the harnesses read no session, settings.json or widths.json.')
 }
 if ($Toasts -and $WidthPopover) {
     throw '-Toasts and -WidthPopover each wait for their own log line; pass one.'
+}
+if ($ThemeSettingsEntry -and ($WidthPopover -or $Toasts)) {
+    throw '-ThemeSettingsEntry, -WidthPopover and -Toasts each wait for their own log line; pass one.'
 }
 if ($WidthPopoverStep -and -not $WidthPopover) {
     throw '-WidthPopoverStep needs -WidthPopover: it acts on the popover that switch opens.'
@@ -176,8 +190,11 @@ if ($App) {
     $env:YAMV_DEV_IMPORT_FILE = $null
     $env:YAMV_DEV_WIDTH_POPOVER = if ($WidthPopoverStep) { $WidthPopoverStep } elseif ($WidthPopover) { '1' } else { $null }
     $env:YAMV_DEV_TOASTS = if ($Toasts) { '1' } else { $null }
+    $env:YAMV_DEV_THEME_SETTINGS_ENTRY = if ($ThemeSettingsEntry) { $ThemeSettingsEntry } else { $null }
     $readyLine = if ($WidthPopover) { 'Window: (width popover shown|no width popover to show)' }
     elseif ($Toasts) { 'Window: toasts shown' }
+    elseif ($ThemeSettingsEntry -eq 'menu') { 'Window: more menu shown' }
+    elseif ($ThemeSettingsEntry -eq 'open') { 'Window: (theme settings shown|no theme settings window to show)' }
     else { 'Window: shown' }
 }
 elseif ($ThemeSettings) {
@@ -191,6 +208,7 @@ elseif ($ThemeSettings) {
     $env:YAMV_DEV_IMPORT_FILE = $importPath
     $env:YAMV_DEV_WIDTH_POPOVER = $null
     $env:YAMV_DEV_TOASTS = $null
+    $env:YAMV_DEV_THEME_SETTINGS_ENTRY = $null
     $readyLine = 'Window: shown'
 }
 else {
@@ -199,6 +217,7 @@ else {
     $env:YAMV_DEV_IMPORT_FILE = $null
     $env:YAMV_DEV_WIDTH_POPOVER = $null
     $env:YAMV_DEV_TOASTS = $null
+    $env:YAMV_DEV_THEME_SETTINGS_ENTRY = $null
     $readyLine = 'Harness: showing'
 }
 
@@ -269,7 +288,12 @@ try {
         Write-Output "Deleted $DeleteAfterShown; waiting for the missing-file re-check."
         Start-Sleep -Seconds 3
     }
-    & $capture -ProcessId $process.Id -Out $Out -WithPopups:($WidthPopover -or $Toasts)
+    if ($ThemeSettingsEntry -eq 'open') {
+        & $capture -ProcessId $process.Id -Out $Out -Title 'Theme settings'
+    }
+    else {
+        & $capture -ProcessId $process.Id -Out $Out -WithPopups:($WidthPopover -or $Toasts -or $ThemeSettingsEntry -eq 'menu')
+    }
     Write-Output "pid=$($process.Id) exited=$($process.HasExited)"
 }
 finally {

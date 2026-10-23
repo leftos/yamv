@@ -117,6 +117,24 @@ public sealed class ShortcutsTests
     public void Match_CtrlBracketOnMac_IsNothing(string key) =>
         Assert.Null(Shortcuts.Match(key, ctrl: true, meta: false, shift: false, alt: false, isMac: true));
 
+    [Fact]
+    public void Match_CtrlCommaOnWindows_OpensThemeSettings() =>
+        Assert.Equal(ShortcutCommand.ThemeSettings, Shortcuts.Match(",", ctrl: true, meta: false, shift: false, alt: false, isMac: false));
+
+    [Fact]
+    public void Match_CmdCommaOnMac_OpensThemeSettings() =>
+        Assert.Equal(ShortcutCommand.ThemeSettings, Shortcuts.Match(",", ctrl: false, meta: true, shift: false, alt: false, isMac: true));
+
+    [Fact]
+    public void Match_CtrlShiftComma_IsNothing() => Assert.Null(Shortcuts.Match(",", ctrl: true, meta: false, shift: true, alt: false, isMac: false));
+
+    [Fact]
+    public void Match_CtrlAltComma_IsNothing() => Assert.Null(Shortcuts.Match(",", ctrl: true, meta: false, shift: false, alt: true, isMac: false));
+
+    [Fact]
+    public void Match_MetaCommaOnWindows_IsNothing() =>
+        Assert.Null(Shortcuts.Match(",", ctrl: false, meta: true, shift: false, alt: false, isMac: false));
+
     [Theory]
     [InlineData("p")]
     [InlineData("1")]

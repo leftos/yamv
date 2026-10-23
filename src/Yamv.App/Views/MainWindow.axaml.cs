@@ -5,6 +5,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.Input;
@@ -34,6 +36,9 @@ public partial class MainWindow : Window
     private const double MinSidebarWidth = 200;
     private const double MaxSidebarWidth = 480;
     private const double MinDocumentWidth = 320;
+
+    // The ⋯ menu's shadow is not a theme token: the width popover's far and near shadows, in each theme.
+    private static readonly Color LightShadowColor = Color.Parse("#1F2328");
 
     private readonly DocumentWindowViewModel? _viewModel;
     private readonly IDocumentSurface? _surface;
@@ -100,6 +105,15 @@ public partial class MainWindow : Window
         WidthPopup.Closed += OnWidthPopupClosed;
         WidthPopover.DataContext = null;
         WidthPopover.AddHandler(KeyDownEvent, OnWidthPopoverKeyDown, RoutingStrategies.Tunnel);
+        WindowTitleBar.MoreButton.Click += OnMoreClick;
+        MorePopup.PlacementTarget = WindowTitleBar.MoreButton;
+        // A press on ⋯ reaches the button instead of light-dismissing the popup, so its click toggles the menu closed.
+        MorePopup.OverlayInputPassThroughElement = WindowTitleBar.MoreButton;
+        MorePopup.Closed += OnMorePopupClosed;
+        ThemeSettingsItem.Click += OnThemeSettingsItemClick;
+        MoreMenu.AddHandler(KeyDownEvent, OnMoreMenuKeyDown, RoutingStrategies.Tunnel);
+        MoreMenu.ActualThemeVariantChanged += OnMoreMenuThemeChanged;
+        UpdateMoreMenuShadow();
         UpdateSidebar();
         Sidebar.PropertyChanged += OnSidebarPropertyChanged;
         PositionChanged += OnPositionChanged;
@@ -109,6 +123,9 @@ public partial class MainWindow : Window
 
     /// <summary>The tree menus' reveal item: Reveal in Finder on macOS, Reveal in Explorer elsewhere.</summary>
     public static string RevealMenuHeader { get; } = OperatingSystem.IsMacOS() ? "Reveal in Finder" : "Reveal in Explorer";
+
+    /// <summary>The ⋯ menu's key hint for Theme settings…: ⌘, on macOS, Ctrl+, elsewhere.</summary>
+    public static string ThemeSettingsKeyHint { get; } = OperatingSystem.IsMacOS() ? "⌘," : "Ctrl+,";
 
     /// <summary>The pickers, reveal and clipboard the window's menus, buttons and Ctrl/Cmd+O use; tests replace it.</summary>
     internal IFileActions? FileActions { get; set; }
@@ -126,11 +143,24 @@ public partial class MainWindow : Window
     /// </summary>
     internal bool ToastsWhenShown { get; set; }
 
+    /// <summary>
+    /// What the window does with its ⋯ menu once it has shown its first document: nothing, open the menu (writing
+    /// <c>Window: more menu shown</c>), or ask for the theme settings window as the menu's item does (writing
+    /// <c>Window: theme settings shown</c> once that window is open). The hidden-desktop capture sets it.
+    /// </summary>
+    internal DevThemeSettingsEntry ThemeSettingsEntryWhenShown { get; set; }
+
     /// <summary>Raised when <see cref="SavedBounds"/> may have changed: the window moved, was resized, maximized or restored.</summary>
     public event EventHandler? SavedBoundsChanged;
 
     /// <summary>Raised when the shown sidebar's width changed, by a splitter drag or any other route.</summary>
     public event EventHandler? SidebarWidthChanged;
+
+    /// <summary>Raised, with this window as the sender, when the user asks for the theme settings window.</summary>
+    public event EventHandler? ThemeSettingsRequested;
+
+    /// <summary>Asks for the theme settings window, as the ⋯ menu's Theme settings… item and Ctrl/Cmd+, do.</summary>
+    internal void RequestThemeSettings() => ThemeSettingsRequested?.Invoke(this, EventArgs.Empty);
 
     /// <summary>
     /// The sidebar's width in device-independent pixels, 200 to 480; while the sidebar is hidden, the width it gets back
@@ -298,7 +328,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The key's name as the page forwards it, for the keys a shortcut uses; else null. <c>[</c> and <c>]</c> are the physical
-    /// keys in the US positions, whatever key the layout reports; letters and Tab are the key the layout reports.
+    /// keys in the US positions, whatever key the layout reports; letters, the comma and Tab are the key the layout reports.
     /// </summary>
     private static string? KeyName(KeyEventArgs e) =>
         e.PhysicalKey switch
@@ -309,6 +339,7 @@ public partial class MainWindow : Window
             {
                 >= Key.A and <= Key.Z => ((char)('a' + (e.Key - Key.A))).ToString(),
                 Key.Tab => "Tab",
+                Key.OemComma => ",",
                 _ => null,
             },
         };
@@ -324,7 +355,7 @@ public partial class MainWindow : Window
 
         bool treeHadFocus = Tree.IsKeyboardFocusWithin;
         RunCommand(command.Value);
-        if (treeHadFocus && command is not (ShortcutCommand.Reload or ShortcutCommand.OpenFiles))
+        if (treeHadFocus && command is not (ShortcutCommand.Reload or ShortcutCommand.OpenFiles or ShortcutCommand.ThemeSettings))
         {
             FocusSelectedRow();
         }
@@ -359,6 +390,9 @@ public partial class MainWindow : Window
                 break;
             case ShortcutCommand.WiderWidth:
                 _viewModel!.StepContentWidth(wider: true, DocumentColumn.Bounds.Width);
+                break;
+            case ShortcutCommand.ThemeSettings:
+                RequestThemeSettings();
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown shortcut command.");
@@ -405,6 +439,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        MorePopup.IsOpen = false;
         _widthPopover = popover;
         popover.PropertyChanged += OnWidthPopoverPropertyChanged;
         WidthPopover.DataContext = popover;
@@ -495,6 +530,91 @@ public partial class MainWindow : Window
             e.Handled = true;
         }
     }
+
+    /// <summary>⋯ toggles its menu.</summary>
+    private void OnMoreClick(object? sender, RoutedEventArgs e)
+    {
+        if (MorePopup.IsOpen)
+        {
+            MorePopup.IsOpen = false;
+            return;
+        }
+
+        OpenMoreMenu();
+    }
+
+    /// <summary>Opens the ⋯ menu with its first item focused, closing the width popover.</summary>
+    private void OpenMoreMenu()
+    {
+        if (WidthPopup.IsOpen)
+        {
+            CloseWidthPopover(refocusDocument: false);
+        }
+
+        MorePopup.IsOpen = true;
+        WindowTitleBar.MoreButton.Classes.Set("open", true);
+        ThemeSettingsItem.Focus(NavigationMethod.Directional);
+    }
+
+    /// <summary>A light dismiss (a click outside, or the window losing activation) closed the menu, or one of its closers did.</summary>
+    private void OnMorePopupClosed(object? sender, EventArgs e) => WindowTitleBar.MoreButton.Classes.Set("open", false);
+
+    private void OnThemeSettingsItemClick(object? sender, RoutedEventArgs e)
+    {
+        MorePopup.IsOpen = false;
+        RequestThemeSettings();
+    }
+
+    /// <summary>
+    /// Keys typed in the ⋯ menu, which is a window of its own: Esc closes it and puts focus back on ⋯; Up and Down move between
+    /// its items, which keeps the one item focused. Enter and Space reach the focused item.
+    /// </summary>
+    private void OnMoreMenuKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyModifiers != KeyModifiers.None)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            MorePopup.IsOpen = false;
+            WindowTitleBar.MoreButton.Focus(NavigationMethod.Directional);
+            e.Handled = true;
+        }
+        else if (e.Key is Key.Up or Key.Down)
+        {
+            ThemeSettingsItem.Focus(NavigationMethod.Directional);
+            e.Handled = true;
+        }
+    }
+
+    private void OnMoreMenuThemeChanged(object? sender, EventArgs e) => UpdateMoreMenuShadow();
+
+    /// <summary>Gives the ⋯ menu the width popover's far (0 10 22) and near (0 1 3) shadows for the theme.</summary>
+    private void UpdateMoreMenuShadow()
+    {
+        bool dark = MoreMenu.ActualThemeVariant == ThemeVariant.Dark;
+        Color color = dark ? Colors.Black : LightShadowColor;
+        MoreMenu.BoxShadow = new BoxShadows(
+            new BoxShadow
+            {
+                OffsetY = 10,
+                Blur = 22,
+                Color = WithOpacity(color, dark ? 0.70 : 0.26),
+            },
+            [
+                new BoxShadow
+                {
+                    OffsetY = 1,
+                    Blur = 3,
+                    Color = WithOpacity(color, dark ? 0.55 : 0.16),
+                },
+            ]
+        );
+    }
+
+    private static Color WithOpacity(Color color, double opacity) => Color.FromArgb((byte)Math.Round(opacity * 255), color.R, color.G, color.B);
 
     private void OnOpenFilesRequested(object? sender, EventArgs e) => RunLogged(OpenFilesAsync, "Open files");
 
@@ -810,6 +930,25 @@ public partial class MainWindow : Window
         _log.LogInfo($"Window: toast card {ToastClickThrough.DescribeHit(handle.Handle, popupTop.PointToScreen(onCard))}");
     }
 
+    /// <summary>
+    /// Opens the ⋯ menu, or asks for the theme settings window as its item does, for a hidden-desktop capture; once laid out it
+    /// writes the line the capture waits for, or for the settings window a line saying none opened.
+    /// </summary>
+    private async Task ShowDevThemeSettingsEntryAsync()
+    {
+        if (ThemeSettingsEntryWhenShown == DevThemeSettingsEntry.Menu)
+        {
+            OpenMoreMenu();
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+            _log!.LogInfo("Window: more menu shown");
+            return;
+        }
+
+        RequestThemeSettings();
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        _log!.LogInfo(OwnedWindows.Any(window => window.IsVisible) ? "Window: theme settings shown" : "Window: no theme settings window to show");
+    }
+
     /// <summary>Writes <c>Window: shown</c> once the first document has been shown, or at once for the empty state or missing pane.</summary>
     private async Task LogShownAsync()
     {
@@ -826,6 +965,11 @@ public partial class MainWindow : Window
             {
                 await ShowDevToastsAsync();
             }
+
+            if (ThemeSettingsEntryWhenShown != DevThemeSettingsEntry.None)
+            {
+                await ShowDevThemeSettingsEntryAsync();
+            }
         }
         // The log line is a dev aid; a failure is logged rather than lost in a discarded task.
         catch (Exception exception)
@@ -838,6 +982,7 @@ public partial class MainWindow : Window
     {
         _opened = false;
         CloseWidthPopover(refocusDocument: false);
+        MorePopup.IsOpen = false;
         ToastPopup.IsOpen = false;
         ToastPopup.Opened -= OnToastPopupOpened;
         ToastPopup.Closed -= OnToastPopupClosed;
@@ -848,6 +993,10 @@ public partial class MainWindow : Window
 
         WindowTitleBar.ContentWidthButton.Click -= OnContentWidthClick;
         WidthPopup.Closed -= OnWidthPopupClosed;
+        WindowTitleBar.MoreButton.Click -= OnMoreClick;
+        MorePopup.Closed -= OnMorePopupClosed;
+        ThemeSettingsItem.Click -= OnThemeSettingsItemClick;
+        MoreMenu.ActualThemeVariantChanged -= OnMoreMenuThemeChanged;
         _viewModel!.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.CloseRequested -= OnCloseRequested;
         _surface!.KeyForwarded -= OnKeyForwarded;
@@ -872,4 +1021,17 @@ internal enum DevWidthPopover
 
     /// <summary>Open the popover and select the document's own folder segment.</summary>
     SelectDocumentFolder,
+}
+
+/// <summary>What a document window does with its ⋯ menu once shown, for a hidden-desktop capture.</summary>
+internal enum DevThemeSettingsEntry
+{
+    /// <summary>Nothing: the menu opens only from ⋯.</summary>
+    None,
+
+    /// <summary>Open the ⋯ menu.</summary>
+    Menu,
+
+    /// <summary>Ask for the theme settings window, as the menu's item does.</summary>
+    Open,
 }

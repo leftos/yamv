@@ -46,6 +46,13 @@ public partial class App : Application
     /// </summary>
     public const string WidthPopoverVariable = "YAMV_DEV_WIDTH_POPOVER";
 
+    /// <summary>
+    /// The environment variable that has the main or viewer window, once it has shown its first document, open its ⋯ menu
+    /// (<c>menu</c>) or ask for the theme settings window as the menu's item does (<c>open</c>), so a hidden-desktop capture
+    /// shows it.
+    /// </summary>
+    public const string ThemeSettingsEntryVariable = "YAMV_DEV_THEME_SETTINGS_ENTRY";
+
     private MainWindowComposition? _mainWindow;
     private ThemeBridge? _bridge;
     private ThemeBridge? _harnessBridge;
@@ -280,6 +287,8 @@ public partial class App : Application
             };
         }
 
+        _mainWindow.Window.ThemeSettingsRequested += OnThemeSettingsRequested;
+        ApplyDevThemeSettingsEntry(_mainWindow.Window);
         if (ViewerFiles.Count == 0 && Activation is { } gate)
         {
             ConnectGate(gate, _mainWindow.Window);
@@ -324,6 +333,50 @@ public partial class App : Application
             window.Closed -= OnClosed;
             RunStopAnsweringOnce();
         };
+    }
+
+    /// <summary>
+    /// Tells <paramref name="window"/> what to do with its ⋯ menu once shown, from <see cref="ThemeSettingsEntryVariable"/>, read
+    /// only when <c>YAMV_DATA_DIR</c> points at a dev data folder.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The variable is set to a value other than <c>menu</c> or <c>open</c>.</exception>
+    private static void ApplyDevThemeSettingsEntry(MainWindow window)
+    {
+        if (
+            string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
+            || Environment.GetEnvironmentVariable(ThemeSettingsEntryVariable) is not { Length: > 0 } entry
+        )
+        {
+            return;
+        }
+
+        window.ThemeSettingsEntryWhenShown = entry switch
+        {
+            "menu" => DevThemeSettingsEntry.Menu,
+            "open" => DevThemeSettingsEntry.Open,
+            _ => throw new InvalidOperationException($"{ThemeSettingsEntryVariable} is '{entry}'; use menu or open."),
+        };
+    }
+
+    /// <summary>
+    /// Shows the theme settings window owned by the document window that asked for it. A failure to open it is logged and, in
+    /// the start's own window, shown as a toast, since nothing else would catch it on the UI thread.
+    /// </summary>
+    private void OnThemeSettingsRequested(object? sender, EventArgs e)
+    {
+        try
+        {
+            ShowThemeSettings((Window)sender!);
+        }
+        // A user-started action that fails must not end the app; it is logged and shown instead.
+        catch (Exception exception)
+        {
+            Log.LogError("Theme settings: could not open the window.", exception);
+            if (_mainWindow is { } composition && ReferenceEquals(composition.Window, sender))
+            {
+                composition.ViewModel.Toasts.Show(ToastKind.Warning, "Couldn't open the theme settings");
+            }
+        }
     }
 
     /// <summary>Brings the main window forward on each activate the gate raises, and marks the gate ready on its first show.</summary>
@@ -377,6 +430,7 @@ public partial class App : Application
         _releaseMainWindowHooks = null;
         releaseHooks?.Invoke();
 
+        _mainWindow?.Window.ThemeSettingsRequested -= OnThemeSettingsRequested;
         _mainWindow?.Dispose();
         _mainWindow = null;
         _mainWindowClosed = null;

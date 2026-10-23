@@ -645,6 +645,99 @@ public sealed class AppStartupTests
         });
 
     [Fact]
+    public Task The_main_windows_theme_settings_request_opens_the_host_window() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            MainWindow main = Assert.IsType<MainWindow>(start.App.CreateStartWindow());
+            main.Show();
+            try
+            {
+                main.RequestThemeSettings();
+
+                ThemeSettingsWindow settings = Assert.IsType<ThemeSettingsWindow>(start.App.ThemeSettingsHost?.Window);
+                Assert.True(settings.IsVisible);
+                Assert.Same(main, settings.Owner);
+            }
+            finally
+            {
+                start.App.ReleaseMainWindow();
+                main.Close();
+            }
+        });
+
+    [Fact]
+    public Task A_request_that_cannot_open_the_window_is_logged_and_shown_as_a_toast() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            // The window is never shown, so the settings window cannot take it as its owner and its Show throws.
+            MainWindow main = Assert.IsType<MainWindow>(start.App.CreateStartWindow());
+            ToastCenter toasts = Assert.IsType<ToastCenter>(Assert.IsType<DocumentWindowViewModel>(main.DataContext).Toasts);
+
+            main.RequestThemeSettings();
+
+            Assert.Single(start.Log.Entries, entry => entry.Level == "error" && entry.Message == "Theme settings: could not open the window.");
+            ToastItem toast = Assert.Single(toasts.Items);
+            Assert.Equal((ToastKind.Warning, "Couldn't open the theme settings"), (toast.Kind, toast.Text));
+        });
+
+    [Fact]
+    public Task A_start_without_a_data_folder_ignores_the_theme_settings_entry_variable() =>
+        Headless.Run(() =>
+        {
+            string? dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
+            string? harnessBefore = Environment.GetEnvironmentVariable(App.HarnessVariable);
+            string? entryBefore = Environment.GetEnvironmentVariable(App.ThemeSettingsEntryVariable);
+            // A viewer start reads no session and saves none, so the missing data folder never falls back to the owner's own.
+            Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, null);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, null);
+            Environment.SetEnvironmentVariable(App.ThemeSettingsEntryVariable, "bogus");
+            App.ViewerFiles = [Path.Combine(Path.GetTempPath(), "yamv-gone-" + Guid.NewGuid().ToString("N") + ".md")];
+            App app = Assert.IsType<App>(Application.Current);
+            App.ProcessLog = new RecordingAppLog();
+            app.ResetLog();
+            try
+            {
+                MainWindow main = Assert.IsType<MainWindow>(app.CreateStartWindow());
+
+                Assert.Equal(DevThemeSettingsEntry.None, main.ThemeSettingsEntryWhenShown);
+            }
+            finally
+            {
+                app.ReleaseMainWindow();
+                app.ResetLog();
+                App.ViewerFiles = [];
+                App.ProcessLog = null;
+                Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataBefore);
+                Environment.SetEnvironmentVariable(App.HarnessVariable, harnessBefore);
+                Environment.SetEnvironmentVariable(App.ThemeSettingsEntryVariable, entryBefore);
+            }
+        });
+
+    [Fact]
+    public Task A_released_start_no_longer_answers_the_request() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            MainWindow main = Assert.IsType<MainWindow>(start.App.CreateStartWindow());
+            main.Show();
+            try
+            {
+                start.App.ReleaseMainWindow();
+
+                main.RequestThemeSettings();
+
+                Assert.Empty(main.OwnedWindows);
+                Assert.Null(start.App.ThemeSettingsHost);
+            }
+            finally
+            {
+                main.Close();
+            }
+        });
+
+    [Fact]
     public Task A_shutdown_request_without_unsaved_edits_goes_ahead() =>
         Headless.Run(() =>
         {
