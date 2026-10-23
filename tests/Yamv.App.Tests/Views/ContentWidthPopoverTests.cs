@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using Avalonia;
 using Avalonia.Controls;
@@ -392,6 +393,62 @@ public sealed class ContentWidthPopoverTests
         });
 
     [Fact]
+    public Task Clear_all_by_keyboard_keeps_the_focus_ring_on_Cancel_and_back_on_the_link() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.FromPx(700)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenPopoverAsync(fixture.DocA);
+            ContentWidthPopover view = fixture.Popover;
+
+            for (int press = 0; press < 8 && !view.ClearAllLink.IsFocused; press++)
+            {
+                fixture.PressInPopover(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab);
+                fixture.ReleaseInPopover(Key.Tab, PhysicalKey.Tab);
+            }
+
+            Assert.True(view.ClearAllLink.IsFocused, $"Tab left focus on {FocusedName(view)}.");
+            Assert.Contains(":focus-visible", view.ClearAllLink.Classes);
+
+            fixture.PressInPopover(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter);
+            await fixture.SettleAsync();
+
+            Assert.True(view.ClearAllNo.IsFocused, $"Focus is on {FocusedName(view)}; the question is asking.");
+            Assert.Contains(":focus-visible", view.ClearAllNo.Classes);
+
+            fixture.PressInPopover(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape);
+            await fixture.SettleAsync();
+
+            Assert.True(fixture.Window.WidthPopup.IsOpen);
+            Assert.True(view.ClearAllLink.IsFocused, $"Focus is on {FocusedName(view)}; the question ended.");
+            Assert.Contains(":focus-visible", view.ClearAllLink.Classes);
+        });
+
+    [Fact]
+    public Task Clear_all_by_pointer_moves_focus_without_a_ring() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.FromPx(700)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenPopoverAsync(fixture.DocA);
+            ContentWidthPopover view = fixture.Popover;
+
+            fixture.ClickLink(view.ClearAllLink);
+            await fixture.SettleAsync();
+
+            Assert.True(view.ClearAllNo.IsFocused, $"Focus is on {FocusedName(view)}; the question is asking.");
+            Assert.DoesNotContain(":focus-visible", view.ClearAllNo.Classes);
+
+            fixture.ClickLink(view.ClearAllNo);
+            await fixture.SettleAsync();
+
+            Assert.True(view.ClearAllLink.IsFocused, $"Focus is on {FocusedName(view)}; the question ended.");
+            Assert.DoesNotContain(":focus-visible", view.ClearAllLink.Classes);
+        });
+
+    [Fact]
     public Task Clear_all_on_a_narrow_pane_focuses_the_selected_segment_and_Esc_then_closes_the_popover() =>
         Headless.RunAsync(async () =>
         {
@@ -622,6 +679,43 @@ public sealed class ContentWidthPopoverTests
             Assert.Equal(saved, File.ReadAllBytes(fixture.WidthsFile));
         });
 
+    [Fact]
+    public Task Dragging_the_knob_previews_the_width_and_saves_it_once_on_release() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(fixture.Docs, ContentWidth.FromPx(760)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenPopoverAsync(fixture.DocA);
+            byte[] saved = File.ReadAllBytes(fixture.WidthsFile);
+            int sent = fixture.Surface.ContentWidths.Count;
+            Rect thumb = InSlider(fixture.Popover, SliderPart(fixture.Popover, "Thumb"));
+            double? preview = null;
+
+            await fixture.DragInPopoverAsync(
+                thumb.Center,
+                new Point(thumb.Center.X + 120, thumb.Center.Y),
+                steps: 4,
+                async () =>
+                {
+                    await fixture.SettleAsync();
+                    Assert.True(fixture.Surface.ContentWidths.Count > sent, "The drag sent no width to the page.");
+                    preview = fixture.Surface.ContentWidths[^1];
+                    Assert.True(
+                        preview > 760,
+                        $"The drag previewed {preview?.ToString(CultureInfo.InvariantCulture) ?? "Full"}, not a wider px width."
+                    );
+                    // Nothing is saved until the release, so the file still holds the width the drag started from.
+                    Assert.Equal(saved, File.ReadAllBytes(fixture.WidthsFile));
+                }
+            );
+
+            await fixture.SettleAsync();
+
+            Assert.Equal(preview, fixture.Widths.Get(fixture.Docs)?.Px);
+            Assert.NotEqual(saved, File.ReadAllBytes(fixture.WidthsFile));
+        });
+
     /// <summary>
     /// Asserts the slider's accent fill runs from the track's start at 8 px, as the mock's <c>.fill</c> does inside
     /// <c>.track</c>, to the knob's left edge, and is painted with <paramref name="accent"/>: the filled span is
@@ -647,6 +741,10 @@ public sealed class ContentWidthPopoverTests
         Assert.True(Math.Abs(fillBounds.Left - 8) <= 1, $"The fill starts at {fillBounds.Left} px, not where the track does at 8 px: {state}");
         Assert.Same(accent, fill.Background);
     }
+
+    /// <summary>What holds focus in the popover's top level, for an assertion message.</summary>
+    private static string FocusedName(ContentWidthPopover view) =>
+        TopLevel.GetTopLevel(view)?.FocusManager?.GetFocusedElement()?.ToString() ?? "nothing";
 
     /// <summary><paramref name="control"/>'s bounds in the slider's coordinates.</summary>
     private static Rect InSlider(ContentWidthPopover view, Control control) =>
@@ -678,7 +776,10 @@ public sealed class ContentWidthPopoverTests
         Assert.Equal((color, opacity, 0d, offsetY, blur), (shadow.Color, shadow.Opacity, shadow.OffsetX, shadow.OffsetY, shadow.BlurRadius));
     }
 
-    /// <summary>A shown main window over a temp repo with <c>docs/a.md</c>, <c>docs/b.md</c> and <c>docs/plans/v1.md</c>, and a missing <c>docs/gone.md</c>.</summary>
+    /// <summary>
+    /// A shown main window over a temp repo with <c>docs/a.md</c>, <c>docs/b.md</c> and <c>docs/plans/v1.md</c>, and a missing
+    /// <c>docs/gone.md</c>.
+    /// </summary>
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "yamv-popover-" + Guid.NewGuid().ToString("N"));
@@ -711,10 +812,11 @@ public sealed class ContentWidthPopoverTests
             );
             Window = new MainWindow(ViewModel, Document, Surface, Log);
             Window.Closed += (_, _) => _closed = true;
-            // The theme bridge that supplies the Yamv* brushes does not run here. Hovered links and segments and the open ⟷
-            // paint these; without them their background is null and a pointer press goes through them.
+            // The theme bridge that supplies the Yamv* brushes does not run here. Hovered links and segments, the open ⟷ and
+            // the slider's knob paint these; without them their background is null and a pointer press goes through them.
             Window.Resources["YamvHoverBackground"] = Brushes.LightGray;
             Window.Resources["YamvSelectionBackground"] = Brushes.LightBlue;
+            Window.Resources["YamvPageBackground"] = Brushes.White;
         }
 
         public static RawInputModifiers CommandModifier => OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
@@ -789,6 +891,35 @@ public sealed class ContentWidthPopoverTests
         public void ClickSliderAt(Point point) => ClickAt(Popover.WidthSlider, point);
 
         /// <summary>
+        /// Presses the left button at <paramref name="from"/>, moves in <paramref name="steps"/> equal moves to <paramref name="to"/>,
+        /// runs <paramref name="beforeRelease"/> when given, then releases; both points are in the slider's coordinates.
+        /// </summary>
+        public async Task DragInPopoverAsync(Point from, Point to, int steps, Func<Task>? beforeRelease = null)
+        {
+            TopLevel top = PopoverTop();
+            Point start = InTop(top, Popover.WidthSlider, from);
+            Point end = InTop(top, Popover.WidthSlider, to);
+            top.MouseMove(start);
+            Settle();
+            top.MouseDown(start, MouseButton.Left);
+            Settle();
+            for (int step = 1; step <= steps; step++)
+            {
+                double share = (double)step / steps;
+                top.MouseMove(new Point(start.X + ((end.X - start.X) * share), start.Y + ((end.Y - start.Y) * share)));
+                Settle();
+            }
+
+            if (beforeRelease is not null)
+            {
+                await beforeRelease();
+            }
+
+            top.MouseUp(end, MouseButton.Left);
+            Settle();
+        }
+
+        /// <summary>
         /// Clicks an enabled link with the pointer, 4 px in from its left edge: headless text is about twice as wide as real text,
         /// so a link's middle can lie past the card's edge.
         /// </summary>
@@ -859,7 +990,10 @@ public sealed class ContentWidthPopoverTests
             deactivated();
         }
 
-        /// <summary>Presses and releases the left button at <paramref name="point"/> in <paramref name="control"/>, in whichever top level shows it.</summary>
+        /// <summary>
+        /// Presses and releases the left button at <paramref name="point"/> in <paramref name="control"/>, in whichever top level
+        /// shows it.
+        /// </summary>
         private void ClickAt(Control control, Point point)
         {
             TopLevel top = TopLevel.GetTopLevel(control) ?? throw new InvalidOperationException("The control is not shown.");
@@ -873,6 +1007,10 @@ public sealed class ContentWidthPopoverTests
         }
 
         private TopLevel PopoverTop() => TopLevel.GetTopLevel(Popover) ?? throw new InvalidOperationException("The popover is not shown.");
+
+        /// <summary><paramref name="point"/> in <paramref name="control"/>, moved into <paramref name="top"/>'s coordinates.</summary>
+        private static Point InTop(TopLevel top, Control control, Point point) =>
+            control.TranslatePoint(point, top) ?? throw new InvalidOperationException("The control is not in its top level.");
 
         private List<Button> SegmentButtons() => [.. Popover.Segments.GetVisualDescendants().OfType<Button>()];
     }

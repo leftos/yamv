@@ -34,6 +34,9 @@ public partial class ContentWidthPopover : UserControl
     private const double HatchRise = 4.2;
     private const double HatchPitch = 5.49;
 
+    // Focus is already null when the Clear all question's panel hides the link, so the last focus's kind is kept here instead.
+    private bool _keyboardFocus;
+
     /// <summary>The hatch of the slider's cap while the stored width is wider than the window; enough stripes for a 100 px cap.</summary>
     public static Geometry PinnedHatch { get; } = HatchGeometry();
 
@@ -50,6 +53,7 @@ public partial class ContentWidthPopover : UserControl
         );
         WidthSlider.AddHandler(PointerCaptureLostEvent, OnSliderPointerEnded, RoutingStrategies.Direct, handledEventsToo: true);
         WidthSlider.AddHandler(Thumb.DragCompletedEvent, OnSliderPointerEnded, RoutingStrategies.Bubble, handledEventsToo: true);
+        AddHandler(GotFocusEvent, OnPopoverGotFocus, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
         ActualThemeVariantChanged += OnActualThemeVariantChanged;
         ClearAllConfirm.PropertyChanged += OnClearAllConfirmPropertyChanged;
         ClearAllLink.PropertyChanged += OnClearAllLinkPropertyChanged;
@@ -60,33 +64,40 @@ public partial class ContentWidthPopover : UserControl
     /// <summary>
     /// The Clear all question replaced the link that had focus, or went away with the button that had it: focus moves to Cancel,
     /// or back to the link, or to the selected segment's button when the link is disabled (the slider when no segment is
-    /// selected), so keys such as Esc still reach the popover.
+    /// selected), so keys such as Esc still reach the popover. The focus ring follows the move when the focus it replaces was
+    /// keyboard-given; a pointer's focus stays ringless.
     /// </summary>
     private void OnClearAllConfirmPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == IsVisibleProperty && TopLevel.GetTopLevel(this) is not null)
         {
-            Dispatcher.UIThread.Post(FocusClearAllLine);
+            Dispatcher.UIThread.Post(() => FocusClearAllLine(_keyboardFocus));
         }
     }
 
-    private void FocusClearAllLine()
+    /// <summary>Remembers how the focus inside the popover was given: a keyboard navigation draws the ring that a move keeps.</summary>
+    private void OnPopoverGotFocus(object? sender, FocusChangedEventArgs e) =>
+        _keyboardFocus = e.NavigationMethod is NavigationMethod.Tab or NavigationMethod.Directional;
+
+    /// <summary>Moves focus into the Clear all line, keeping the ring when <paramref name="keyboard"/> says the focus it replaces had one.</summary>
+    private void FocusClearAllLine(bool keyboard)
     {
+        NavigationMethod method = keyboard ? NavigationMethod.Tab : NavigationMethod.Pointer;
         if (ClearAllConfirm.IsEffectivelyVisible)
         {
-            ClearAllNo.Focus();
+            ClearAllNo.Focus(method);
         }
         else if (ClearAllLink.IsEffectivelyEnabled && ClearAllLink.IsEffectivelyVisible)
         {
-            ClearAllLink.Focus();
+            ClearAllLink.Focus(method);
         }
         else if (SelectedSegmentButton() is { } segment)
         {
-            segment.Focus();
+            segment.Focus(method);
         }
         else
         {
-            WidthSlider.Focus();
+            WidthSlider.Focus(method);
         }
     }
 
@@ -113,7 +124,7 @@ public partial class ContentWidthPopover : UserControl
         IInputElement? focused = top.FocusManager?.GetFocusedElement();
         if (focused is null || ReferenceEquals(focused, ClearAllLink))
         {
-            FocusClearAllLine();
+            FocusClearAllLine(_keyboardFocus);
         }
     }
 
