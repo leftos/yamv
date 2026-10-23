@@ -1195,6 +1195,45 @@ public sealed class ThemeSettingsWindowTests
         });
 
     [Fact]
+    public Task ForceClose_closes_a_window_with_unsaved_edits_without_asking() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+            bool closed = false;
+            fixture.Window.Closed += (_, _) => closed = true;
+
+            fixture.Window.ForceClose();
+            fixture.Settle();
+
+            Assert.True(closed);
+            Assert.False(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+            Assert.DoesNotContain("#3fb950", File.ReadAllText(fixture.PathOf("mine")), StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task ForceClose_while_the_close_confirm_is_open_cancels_it_and_closes() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+            bool closed = false;
+            fixture.Window.Closed += (_, _) => closed = true;
+            Task<bool> check = fixture.Window.ConfirmCloseAsync();
+            fixture.Settle();
+            Assert.True(fixture.Find<Control>("Confirm").IsEffectivelyVisible);
+
+            fixture.Window.ForceClose();
+            fixture.Settle();
+
+            Assert.True(closed);
+            Assert.True(check.IsCompletedSuccessfully);
+            Assert.False(check.Result);
+        });
+
+    [Fact]
     public Task The_disk_bar_shows_Reload_and_Keep_mine_and_turns_to_the_warning_when_the_file_no_longer_loads() =>
         Headless.Run(() =>
         {

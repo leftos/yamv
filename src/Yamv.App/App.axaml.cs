@@ -52,6 +52,10 @@ public partial class App : Application
     private SettingsWriter? _settingsWriter;
     private SettingsWatcher? _settingsWatcher;
     private IDisposable? _themesSync;
+    private ThemeSettingsHost? _themeSettingsHost;
+
+    /// <summary>The shutdown check a held shutdown waits on, or null; a request while it runs starts no second one.</summary>
+    private Task? _shutdownCheck;
     private IAppLog? _log;
     private ActivationGate? _connectedGate;
 
@@ -102,6 +106,11 @@ public partial class App : Application
     /// <summary>What <see cref="CreateThemesSync"/> made for the current start; null for a harness start and after it is released.</summary>
     internal IDisposable? ThemesSync => _themesSync;
 
+    /// <summary>
+    /// The one theme settings window's host, for a main or viewer start; null for a harness start and after it is released.
+    /// </summary>
+    internal ThemeSettingsHost? ThemeSettingsHost => _themeSettingsHost;
+
     /// <summary>The one theme bridge the app applies through; null before the first window is built and after it is released.</summary>
     internal ThemeBridge? Bridge => _bridge;
 
@@ -127,10 +136,105 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = CreateStartWindow();
+            desktop.ShutdownRequested += (_, e) => OnShutdownRequested(e, () => desktop.TryShutdown());
             desktop.Exit += (_, _) => ReleaseMainWindow();
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// Shows the theme settings window owned by <paramref name="owner"/>, or activates the open one, which keeps its first owner.
+    /// </summary>
+    /// <param name="owner">The window that asked.</param>
+    /// <exception cref="InvalidOperationException">The start is a harness start or is released, so it has no host.</exception>
+    internal void ShowThemeSettings(Window owner) =>
+        (
+            _themeSettingsHost ?? throw new InvalidOperationException("This start has no theme settings host: it is a harness start or is released.")
+        ).Show(owner);
+
+    /// <summary>
+    /// Holds a shutdown while the theme settings window's close check runs: an open Import notice or confirm is cancelled, and
+    /// unsaved edits ask Save, Discard or Cancel. Cancel, or a failed save, keeps the app running; otherwise the shutdown is asked
+    /// again once the check has passed, and the window then closes without asking. A request another handler cancelled is left
+    /// alone, a cancel is never cleared, and a request while the check runs is held without a second check.
+    /// </summary>
+    /// <param name="e">The shutdown request.</param>
+    /// <param name="tryShutdown">Asks for the shutdown again: the lifetime's <c>TryShutdown</c>.</param>
+    internal void OnShutdownRequested(ShutdownRequestedEventArgs e, Action tryShutdown)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        ArgumentNullException.ThrowIfNull(tryShutdown);
+        if (e.Cancel)
+        {
+            return;
+        }
+
+        if (_shutdownCheck is not null)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        if (_themeSettingsHost is not { } host)
+        {
+            return;
+        }
+
+        Task<bool> check = host.ConfirmShutdownAsync();
+        if (check.IsCompletedSuccessfully)
+        {
+            if (!check.Result)
+            {
+                e.Cancel = true;
+            }
+
+            return;
+        }
+
+        e.Cancel = true;
+        Task pending = ShutdownAfterCheckAsync(check, tryShutdown);
+        if (!pending.IsCompleted)
+        {
+            _shutdownCheck = pending;
+        }
+    }
+
+    /// <summary>
+    /// Waits for the pending shutdown check, forgets it, then asks for the shutdown again when the check passed. A check that
+    /// throws keeps the app running and is logged, so unsaved edits are never dropped on an error.
+    /// </summary>
+    private async Task ShutdownAfterCheckAsync(Task<bool> check, Action tryShutdown)
+    {
+        bool passed = false;
+        try
+        {
+            passed = await check;
+        }
+        // A failed check must not end the app with unsaved edits, nor go unseen; the app keeps running.
+        catch (Exception exception)
+        {
+            Log.LogError("Theme settings: the shutdown check failed; the app keeps running.", exception);
+        }
+        finally
+        {
+            _shutdownCheck = null;
+        }
+
+        if (!passed)
+        {
+            return;
+        }
+
+        try
+        {
+            tryShutdown();
+        }
+        // Nothing awaits this task, so a failure here would be lost; it is logged and the app keeps running.
+        catch (Exception exception)
+        {
+            Log.LogError("Theme settings: asking for the shutdown again failed; the app keeps running.", exception);
+        }
     }
 
     /// <summary>
@@ -150,6 +254,7 @@ public partial class App : Application
         ThemeBridge bridge = MainWindowFactory.CreateBridge(this, log);
         _bridge = bridge;
         _themesSync = CreateThemesSync(bridge, log);
+        _themeSettingsHost = ThemeSettingsHost.Create(bridge, log);
         var settings = new SettingsStore(AppPaths.SettingsFile, log);
         AppSettings saved = settings.Load();
         bridge.Apply(saved.ThemeId, saved.Appearance);
@@ -258,11 +363,14 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Disposes what the start window owns, then the themes folder watcher, then the settings file watcher, then the settings
-    /// writer, waiting up to 2 s for the theme picks still being saved, then the bridge the app owns, once the app exits.
+    /// Disposes the theme settings host, closing its window without the unsaved-edits confirm, then what the start window owns,
+    /// then the themes folder watcher, then the settings file watcher, then the settings writer, waiting up to 2 s for the theme
+    /// picks still being saved, then the bridge the app owns, once the app exits. A second call does nothing more.
     /// </summary>
     internal void ReleaseMainWindow()
     {
+        _themeSettingsHost?.Dispose();
+        _themeSettingsHost = null;
         _connectedGate?.Activate -= OnActivateRequested;
         _connectedGate = null;
         Action? releaseHooks = _releaseMainWindowHooks;
@@ -377,32 +485,32 @@ public partial class App : Application
         var bridge = new ThemeBridge(catalog, this, log);
         _harnessBridge = bridge;
         bridge.Apply(ThemeCatalog.DefaultThemeId, "system");
-        ThemeSettingsWindow? window = null;
         var fileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
         string? importFile = Environment.GetEnvironmentVariable(ImportFileVariable) is { } given && !string.IsNullOrWhiteSpace(given) ? given : null;
         string? pendingImport = null;
-        var seams = new ThemeSettingsSeams
-        {
-            Apply = bridge.Apply,
-            Trash = new HarnessTrash(),
-            OpenAsText = path => log.LogInfo($"Harness: edit as text {path}"),
-            ConfirmUnsaved = name => window!.ConfirmUnsavedAsync(name),
-            ConfirmDelete = name => window!.ConfirmDeleteAsync(name),
-            PickImport = () =>
+        (ThemeSettingsWindow window, ThemeSettingsViewModel viewModel) = ThemeSettingsHost.BuildWindow(
+            new ThemeSettingsWindowParts
             {
-                if (pendingImport is not { } path)
+                Catalog = catalog,
+                Apply = bridge.Apply,
+                ThemeId = ThemeCatalog.DefaultThemeId,
+                Appearance = "system",
+                Log = log,
+                Trash = _ => new HarnessTrash(),
+                OpenAsText = path => log.LogInfo($"Harness: edit as text {path}"),
+                PickImport = owner =>
                 {
-                    return fileActions.PickThemeAsync(window!);
-                }
+                    if (pendingImport is not { } path)
+                    {
+                        return fileActions.PickThemeAsync(owner);
+                    }
 
-                pendingImport = null;
-                return Task.FromResult<string?>(path);
-            },
-            PickExport = suggested => fileActions.PickThemeDestinationAsync(window!, suggested),
-            ConfirmImport = inspection => window!.ConfirmImportAsync(inspection),
-        };
-        var viewModel = new ThemeSettingsViewModel(catalog, seams, ThemeCatalog.DefaultThemeId, "system", log);
-        window = new ThemeSettingsWindow(viewModel, log);
+                    pendingImport = null;
+                    return Task.FromResult<string?>(path);
+                },
+                FileActions = fileActions,
+            }
+        );
         window.Opened += (_, _) =>
         {
             log.LogInfo("Window: shown");

@@ -114,13 +114,14 @@ public sealed class PlatformTrashTests : IDisposable
         int calls = 0;
         var trash = new PlatformTrash(
             new TrashSeams(
-                _ =>
+                (_, _) =>
                 {
                     calls++;
                     return new TrashResult(0, false);
                 },
                 _ => driveType
-            )
+            ),
+            () => 0
         );
 
         IOException failure = Assert.Throws<IOException>(() =>
@@ -139,18 +140,43 @@ public sealed class PlatformTrashTests : IDisposable
         List<string> calls = [];
         var trash = new PlatformTrash(
             new TrashSeams(
-                given =>
+                (given, _) =>
                 {
                     calls.Add(given);
                     return new TrashResult(0, false);
                 },
                 _ => PlatformTrash.FixedDrive
-            )
+            ),
+            () => 0
         );
 
         trash.MoveToTrash(path);
 
         Assert.Equal([path], calls);
+    }
+
+    [Fact]
+    public void The_delete_call_gets_the_owner_handle()
+    {
+        string path = WriteTheme("a");
+        nint owner = 0;
+        List<nint> owners = [];
+        var trash = new PlatformTrash(
+            new TrashSeams(
+                (_, handle) =>
+                {
+                    owners.Add(handle);
+                    return new TrashResult(0, false);
+                },
+                _ => PlatformTrash.FixedDrive
+            ),
+            () => owner
+        );
+        owner = 0x1234;
+
+        trash.MoveToTrash(path);
+
+        Assert.Equal([(nint)0x1234], owners);
     }
 
     [Fact]
@@ -178,7 +204,7 @@ public sealed class PlatformTrashTests : IDisposable
 
         if (OperatingSystem.IsWindows())
         {
-            new PlatformTrash().MoveToTrash(path);
+            new PlatformTrash(() => 0).MoveToTrash(path);
 
             Assert.False(File.Exists(path));
             Assert.True(RemoveFromRecycleBin(path), $"The Recycle Bin holds no item for {path}.");

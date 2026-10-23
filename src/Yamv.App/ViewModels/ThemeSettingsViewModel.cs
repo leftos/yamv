@@ -89,16 +89,28 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
     private readonly IReadOnlyList<TokenRowViewModel> _tokenRows;
     private readonly bool _ready;
 
+    /// <summary>The name of each theme id a valid version was last listed under, for a theme in use that no longer loads.</summary>
+    private readonly Dictionary<string, string> _lastValidNames = new(ThemeIds.Comparer);
+
+    /// <summary>Whether <see cref="SyncInUse"/> is setting <see cref="SelectedAppearance"/>, which then applies nothing.</summary>
+    private bool _syncing;
+
     /// <summary>The selected theme's row kept with its last valid version while its file no longer loads, or null.</summary>
     private ThemeRowViewModel? _brokenRow;
 
-    /// <summary>The row kept for the theme in use while its file is gone from the themes folder, or null.</summary>
-    private ThemeRowViewModel? _missingRow;
+    /// <summary>
+    /// The rows kept while their files are gone from the themes folder, at most one per theme: the theme in use's, and a selected
+    /// row's of a theme no longer in use.
+    /// </summary>
+    private readonly List<ThemeRowViewModel> _missingRows = [];
 
     /// <summary>The selected theme as its changed file holds it while the bar is up over unsaved edits, or null.</summary>
     private ThemeDefinition? _diskTheme;
 
-    /// <summary>Lists the themes and selects the theme in use, without applying it again.</summary>
+    /// <summary>
+    /// Lists the themes and selects the theme in use, without applying it again. A theme in use that is invalid or missing
+    /// stays in use, so an Appearance change applies its id and the app keeps its last good version; Studio is selected.
+    /// </summary>
     /// <param name="catalog">The themes to list and edit.</param>
     /// <param name="seams">The app's side: applying a theme, the trash, the text editor and the confirms.</param>
     /// <param name="themeId">The id of the theme in use.</param>
@@ -118,10 +130,8 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         TokenGroups = [.. _tokenRows.GroupBy(row => row.Token.Group).Select(group => new TokenGroupViewModel(group.Key, [.. group]))];
         SelectedAppearance = Appearances.FirstOrDefault(choice => choice.Value == appearance) ?? Appearances[0];
         Reload(null);
-        ThemeRowViewModel? start = FindValid(themeId);
-        InUseId = start is null ? ThemeCatalog.DefaultThemeId : themeId;
-        start ??= DefaultRow();
-        Show(start, apply: false);
+        InUseId = themeId;
+        Show(FindValid(themeId) ?? DefaultRow(), apply: false);
         _ready = true;
     }
 
@@ -310,7 +320,11 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         : IsInvalid ? $"{Selected.Name} · didn't load"
         : $"{Selected.Name} · {(ShownAppearance == Appearance.Dark ? "dark" : "light")}";
 
-    private string InUseName => FindValid(InUseId)?.Name ?? InUseId;
+    /// <summary>
+    /// The theme in use by name: its valid row's, else the last name a valid version of it was listed under while the window was
+    /// open, else its id in quotes.
+    /// </summary>
+    private string InUseName => FindValid(InUseId)?.Name ?? (_lastValidNames.TryGetValue(InUseId, out string? name) ? name : $"'{InUseId}'");
 
     private IEnumerable<ThemeRowViewModel> Rows => BuiltInRows.Concat(UserRows);
 
@@ -371,6 +385,32 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
 
         List(entries, previous?.Key);
         FollowSelected(previousError);
+        NotifyDerived();
+    }
+
+    /// <summary>
+    /// Takes the app's theme and Appearance as the app now has them after a change the window did not make, such as an edit of
+    /// the settings file, without applying either. The selection stays; a missing row held for a theme no longer in use goes,
+    /// unless it is selected.
+    /// </summary>
+    /// <param name="themeId">The id of the theme the app was asked for.</param>
+    /// <param name="appearance">The appearance the app was asked for: <c>system</c>, <c>light</c> or <c>dark</c>; anything else is <c>system</c>.</param>
+    public void SyncInUse(string themeId, string appearance)
+    {
+        ArgumentNullException.ThrowIfNull(themeId);
+        ArgumentNullException.ThrowIfNull(appearance);
+        InUseId = themeId;
+        _syncing = true;
+        try
+        {
+            SelectedAppearance = Appearances.FirstOrDefault(choice => choice.Value == appearance) ?? Appearances[0];
+        }
+        finally
+        {
+            _syncing = false;
+        }
+
+        DropStaleMissing();
         NotifyDerived();
     }
 
@@ -698,19 +738,32 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Opens the selected user theme's file in the user's editor.</summary>
+    /// <summary>
+    /// Opens the selected user theme's file in the user's editor; a file the system cannot open sets <see cref="ErrorLine"/>
+    /// and is logged.
+    /// </summary>
     [RelayCommand(CanExecute = nameof(CanEditAsText))]
     private void EditAsText()
     {
-        if (CanEditAsText)
+        if (!CanEditAsText)
+        {
+            return;
+        }
+
+        ErrorLine = null;
+        try
         {
             _seams.OpenAsText(Selected!.FilePath!);
+        }
+        catch (Exception exception) when (exception is IOException or PlatformNotSupportedException or ArgumentException)
+        {
+            Fail("open", Selected!.Name, exception);
         }
     }
 
     partial void OnSelectedAppearanceChanged(AppearanceChoice value)
     {
-        if (_ready && value is not null && FindValid(InUseId) is not ({ IsMissing: true } or { DiskError: not null }))
+        if (_ready && !_syncing && value is not null && FindValid(InUseId) is not ({ IsMissing: true } or { DiskError: not null }))
         {
             _seams.Apply(InUseId, value.Value);
         }
@@ -930,28 +983,37 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         ChangedOnDisk = false;
     }
 
-    /// <summary>Keeps a row for the theme in use, a user theme, when <paramref name="entries"/> no longer hold its file.</summary>
+    /// <summary>
+    /// Keeps a row for the theme in use, a user theme, when <paramref name="entries"/> no longer hold its file and no row is held
+    /// for it yet.
+    /// </summary>
     private void HoldMissingInUse(IReadOnlyList<ThemeEntry> entries)
     {
         if (
-            _missingRow is null
-            && FindValid(InUseId) is { IsBuiltIn: false } inUse
+            FindValid(InUseId) is { IsBuiltIn: false } inUse
+            && !_missingRows.Exists(missing => SameKey(missing.Entry.Source, missing.Id, inUse.Key))
             && !entries.Any(entry => SameKey(entry.Source, entry.Id, inUse.Key))
         )
         {
-            _missingRow = new ThemeRowViewModel(inUse.Entry) { IsMissing = true };
+            _missingRows.Add(new ThemeRowViewModel(inUse.Entry) { IsMissing = true });
         }
     }
 
-    /// <summary>Takes the missing row out of the list once another theme is in use.</summary>
+    /// <summary>Takes each missing row whose theme is no longer in use out of the list, unless it is selected.</summary>
     private void DropStaleMissing()
     {
-        if (_missingRow is { } missing && !ThemeIds.Comparer.Equals(missing.Id, InUseId))
+        List<ThemeRowViewModel> stale = _missingRows.FindAll(missing => !KeepsMissing(missing));
+        if (stale.Count == 0)
         {
-            _missingRow = null;
-            UserRows = [.. UserRows.Where(row => !ReferenceEquals(row, missing))];
+            return;
         }
+
+        _missingRows.RemoveAll(stale.Contains);
+        UserRows = [.. UserRows.Where(row => !stale.Contains(row))];
     }
+
+    /// <summary>Whether the missing row <paramref name="missing"/> stays held: its theme is in use or it is selected.</summary>
+    private bool KeepsMissing(ThemeRowViewModel missing) => ThemeIds.Comparer.Equals(missing.Id, InUseId) || ReferenceEquals(missing, Selected);
 
     /// <summary>
     /// Puts the broken row in place of its file's invalid row while the file does not load, with the file's errors; ends the hold
@@ -976,21 +1038,14 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         _brokenRow = null;
     }
 
-    /// <summary>Adds the missing row to the list while its theme is in use and no file of its id is back.</summary>
+    /// <summary>
+    /// Adds each missing row to the list while its theme is in use or the row is selected, keeping its unsaved edits, and no file
+    /// of its id is back; forgets the others.
+    /// </summary>
     private void HoldMissing(List<ThemeRowViewModel> user)
     {
-        if (_missingRow is not { } missing)
-        {
-            return;
-        }
-
-        if (ThemeIds.Comparer.Equals(missing.Id, InUseId) && !user.Exists(row => SameKey(row.Entry.Source, row.Id, missing.Key)))
-        {
-            user.Add(missing);
-            return;
-        }
-
-        _missingRow = null;
+        _missingRows.RemoveAll(missing => !KeepsMissing(missing) || user.Exists(row => SameKey(row.Entry.Source, row.Id, missing.Key)));
+        user.AddRange(_missingRows);
     }
 
     private static bool IsLoaded(ThemeEntry entry) => entry.Result.Theme is not null;
@@ -1023,6 +1078,11 @@ public sealed partial class ThemeSettingsViewModel : ViewModelBase
         HoldBroken(user);
         HoldMissing(user);
         UserRows = [.. user.OrderBy(row => row.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(row => row.Id, StringComparer.Ordinal)];
+        foreach (ThemeRowViewModel row in Rows.Where(row => row.IsValid))
+        {
+            _lastValidNames[row.Id] = row.Name;
+        }
+
         Select(key is { } wanted ? Find(wanted) : null);
     }
 

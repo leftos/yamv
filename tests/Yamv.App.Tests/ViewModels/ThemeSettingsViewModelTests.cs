@@ -299,15 +299,142 @@ public sealed class ThemeSettingsViewModelTests
     }
 
     [Fact]
-    public void Starting_from_an_id_with_no_valid_row_selects_Studio()
+    public void Starting_from_an_id_with_no_valid_row_selects_Studio_and_keeps_the_id_in_use()
     {
         using var fixture = new Fixture();
 
         ThemeSettingsViewModel viewModel = fixture.Create(themeId: "nord");
 
         Assert.Equal("studio", viewModel.Selected?.Id);
-        Assert.Equal("studio", viewModel.InUseId);
+        Assert.Equal("nord", viewModel.InUseId);
         Assert.Empty(fixture.Applied);
+    }
+
+    [Fact]
+    public void Flipping_Appearance_while_the_theme_in_use_is_invalid_keeps_its_last_good_version()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create(themeId: "nord");
+
+        viewModel.SelectedAppearance = ThemeSettingsViewModel.Appearances.Single(choice => choice.Value == "dark");
+
+        Assert.Equal([("nord", "dark")], fixture.Applied);
+    }
+
+    [Fact]
+    public void SyncInUse_updates_the_in_use_theme_and_appearance_without_applying()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+
+        viewModel.SyncInUse("alpha", "dark");
+
+        Assert.Equal("alpha", viewModel.InUseId);
+        Assert.Equal("dark", viewModel.SelectedAppearance.Value);
+        Assert.Equal("mine", viewModel.Selected?.Id);
+        Assert.Empty(fixture.Applied);
+
+        viewModel.SelectedAppearance = ThemeSettingsViewModel.Appearances.Single(choice => choice.Value == "light");
+
+        Assert.Equal([("alpha", "light")], fixture.Applied);
+    }
+
+    [Fact]
+    public void A_settings_file_change_of_theme_keeps_the_selected_missing_theme_listed_and_selected()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.Delete(fixture.PathOf("mine"));
+        viewModel.OnThemesChangedOnDisk();
+        ThemeRowViewModel missing = Row(viewModel, "mine");
+        Assert.True(missing.IsMissing);
+        Assert.Same(missing, viewModel.Selected);
+
+        viewModel.SyncInUse("alpha", "light");
+
+        Assert.Contains(missing, viewModel.UserRows);
+        Assert.Same(missing, viewModel.Selected);
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.Contains(missing, viewModel.UserRows);
+        Assert.Same(missing, viewModel.Selected);
+        Assert.True(viewModel.IsDirty);
+    }
+
+    [Fact]
+    public void Deleting_the_theme_in_use_while_a_selected_missing_theme_is_held_lists_both_missing_rows()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        viewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+        File.Delete(fixture.PathOf("mine"));
+        viewModel.OnThemesChangedOnDisk();
+        ThemeRowViewModel missing = Row(viewModel, "mine");
+        viewModel.SyncInUse("alpha", "light");
+
+        File.Delete(fixture.PathOf("alpha"));
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.Contains(missing, viewModel.UserRows);
+        Assert.True(missing.IsMissing);
+        Assert.True(Row(viewModel, "alpha").IsMissing);
+        Assert.Same(missing, viewModel.Selected);
+        Assert.True(viewModel.IsDirty);
+        Assert.Equal(new ColorValue("#3fb950"), viewModel.WorkingTheme?.Light?.Tokens["accent"]);
+    }
+
+    [Fact]
+    public async Task The_invalid_note_names_the_theme_in_use_that_went_bad_while_the_window_was_open_by_its_last_name()
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        await viewModel.SelectAsync(Row(viewModel, "nord"));
+        File.WriteAllText(fixture.PathOf("mine"), """{ "name": "Mine", """);
+
+        viewModel.OnThemesChangedOnDisk();
+
+        Assert.EndsWith("Until then the app stays on Mine.", viewModel.InvalidNote, StringComparison.Ordinal);
+
+        viewModel.SyncInUse("alpha", "light");
+        viewModel.SyncInUse("mine", "light");
+
+        Assert.EndsWith("Until then the app stays on Mine.", viewModel.InvalidNote, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_invalid_note_names_a_theme_in_use_invalid_at_open_by_its_id_in_quotes()
+    {
+        using var fixture = new Fixture();
+
+        ThemeSettingsViewModel viewModel = fixture.Create(themeId: "nord");
+
+        Assert.EndsWith("Until then the app stays on 'nord'.", viewModel.InvalidNote, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Edit_as_text_shows_the_failure_when_the_seam_throws_IOException() =>
+        AssertEditAsTextFailureShown(new IOException("The shell refused to open it."));
+
+    [Fact]
+    public void Edit_as_text_shows_the_failure_when_the_seam_throws_PlatformNotSupportedException() =>
+        AssertEditAsTextFailureShown(new PlatformNotSupportedException("No default app on this platform."));
+
+    [Fact]
+    public void Edit_as_text_shows_the_failure_when_the_seam_throws_ArgumentException() =>
+        AssertEditAsTextFailureShown(new ArgumentException("Not a theme file."));
+
+    private static void AssertEditAsTextFailureShown(Exception failure)
+    {
+        using var fixture = new Fixture();
+        ThemeSettingsViewModel viewModel = fixture.Create();
+        fixture.EditAsText = _ => throw failure;
+
+        viewModel.EditAsTextCommand.Execute(null);
+
+        Assert.Equal($"Couldn't open: {failure.Message}", viewModel.ErrorLine);
+        Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error");
     }
 
     [Fact]
@@ -1482,6 +1609,9 @@ public sealed class ThemeSettingsViewModelTests
 
         public List<string> Trashed { get; } = [];
 
+        /// <summary>What Edit as text does with the file's path.</summary>
+        public Action<string> EditAsText { get; set; } = _ => { };
+
         public List<string> UnsavedAsked { get; } = [];
 
         public List<string> DeleteAsked { get; } = [];
@@ -1528,7 +1658,7 @@ public sealed class ThemeSettingsViewModelTests
                 {
                     Apply = (id, shown) => Applied.Add((id, shown)),
                     Trash = new RecordingTrash(Trashed),
-                    OpenAsText = _ => { },
+                    OpenAsText = path => EditAsText(path),
                     ConfirmUnsaved = name =>
                     {
                         UnsavedAsked.Add(name);

@@ -2,6 +2,9 @@ using System.Reflection;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using Microsoft.Extensions.Time.Testing;
@@ -9,6 +12,7 @@ using Yamv.App.Services;
 using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.App.Views;
+using Yamv.App.Views.ThemeSettings;
 using Yamv.Core;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Documents;
@@ -573,6 +577,225 @@ public sealed class AppStartupTests
         });
 
     [Fact]
+    public Task Main_start_creates_the_theme_settings_host_and_release_disposes_it_before_the_themes_sync() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            Func<ThemeBridge, IAppLog, IDisposable> before = App.CreateThemesSync;
+            ThemeSettingsHost? host = null;
+            List<bool?> hostDisposedAtSyncDispose = [];
+            App.CreateThemesSync = (bridge, log) => new DisposeProbe(before(bridge, log), () => hostDisposedAtSyncDispose.Add(host?.IsDisposed));
+            try
+            {
+                start.App.CreateStartWindow();
+                host = start.App.ThemeSettingsHost;
+                Assert.NotNull(host);
+                Assert.False(host.IsDisposed);
+
+                start.App.ReleaseMainWindow();
+
+                Assert.Equal([true], hostDisposedAtSyncDispose);
+                Assert.Null(start.App.ThemeSettingsHost);
+            }
+            finally
+            {
+                App.CreateThemesSync = before;
+            }
+        });
+
+    [Fact]
+    public Task Releasing_twice_with_a_settings_window_open_is_safe() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty: false);
+            Assert.True(start.Settings.IsVisible);
+
+            start.App.ReleaseMainWindow();
+            start.App.ReleaseMainWindow();
+
+            Assert.False(start.Settings.IsVisible);
+            Assert.Null(start.App.ThemeSettingsHost);
+        });
+
+    [Fact]
+    public Task Release_closes_a_window_with_unsaved_edits_without_waiting() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty: true);
+            Assert.True(start.ViewModel.IsDirty);
+            bool closed = false;
+            start.Settings.Closed += (_, _) => closed = true;
+
+            start.App.ReleaseMainWindow();
+
+            Assert.True(closed);
+            Assert.False(start.Settings.IsVisible);
+        });
+
+    [Fact]
+    public Task Viewer_start_creates_a_theme_settings_host_too() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            App.ViewerFiles = [Path.Combine(Path.GetTempPath(), "yamv-gone-" + Guid.NewGuid().ToString("N") + ".md")];
+
+            start.App.CreateStartWindow();
+
+            Assert.NotNull(start.App.ThemeSettingsHost);
+        });
+
+    [Fact]
+    public Task A_shutdown_request_without_unsaved_edits_goes_ahead() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty: false);
+            var request = new ShutdownRequestedEventArgs();
+
+            start.App.OnShutdownRequested(request, start.TryShutdown);
+
+            Assert.False(request.Cancel);
+            Assert.Equal(0, start.ShutdownsTried);
+        });
+
+    [Fact]
+    public Task A_shutdown_request_with_unsaved_edits_and_Cancel_stays_cancelled() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty: true);
+            var request = new ShutdownRequestedEventArgs();
+
+            start.App.OnShutdownRequested(request, start.TryShutdown);
+            Assert.True(request.Cancel);
+            Assert.True(start.ConfirmOpen);
+            start.Click("CancelButton");
+
+            Assert.Equal(0, start.ShutdownsTried);
+            Assert.True(start.Settings.IsVisible);
+            Assert.True(start.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task A_shutdown_request_with_unsaved_edits_and_Discard_asks_for_the_shutdown_once_more() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty: true);
+            var request = new ShutdownRequestedEventArgs();
+
+            start.App.OnShutdownRequested(request, start.TryShutdown);
+            Assert.True(request.Cancel);
+            Assert.Equal(0, start.ShutdownsTried);
+            start.Click("SecondaryButton");
+
+            Assert.Equal(1, start.ShutdownsTried);
+            Assert.False(start.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task A_failure_asking_for_the_shutdown_again_is_logged_and_the_app_keeps_running() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty: true);
+            var request = new ShutdownRequestedEventArgs();
+
+            start.App.OnShutdownRequested(request, () => throw new InvalidOperationException("The lifetime refused."));
+            start.Click("SecondaryButton");
+
+            Assert.Contains(
+                start.Log.Entries,
+                entry => entry.Level == "error" && entry.Exception is InvalidOperationException { Message: "The lifetime refused." }
+            );
+            Assert.True(start.Settings.IsVisible);
+        });
+
+    [Fact]
+    public Task A_shutdown_check_that_throws_is_logged_and_the_app_keeps_running() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty: true);
+            bool thrown = false;
+            start.ViewModel.PropertyChanged += (_, e) =>
+            {
+                if (!thrown && e.PropertyName == nameof(ThemeSettingsViewModel.IsDirty) && !start.ViewModel.IsDirty)
+                {
+                    thrown = true;
+                    throw new InvalidOperationException("The revert failed.");
+                }
+            };
+            var request = new ShutdownRequestedEventArgs();
+
+            start.App.OnShutdownRequested(request, start.TryShutdown);
+            start.Click("SecondaryButton");
+
+            Assert.Contains(
+                start.Log.Entries,
+                entry =>
+                    entry.Level == "error"
+                    && entry.Message == "Theme settings: the shutdown check failed; the app keeps running."
+                    && entry.Exception is InvalidOperationException { Message: "The revert failed." }
+            );
+            Assert.Equal(0, start.ShutdownsTried);
+            Assert.True(request.Cancel);
+            Assert.True(start.Settings.IsVisible);
+        });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task A_shutdown_request_another_handler_cancelled_stays_cancelled_and_asks_nothing(bool dirty) =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty);
+            var request = new ShutdownRequestedEventArgs { Cancel = true };
+
+            start.App.OnShutdownRequested(request, start.TryShutdown);
+
+            Assert.True(request.Cancel);
+            Assert.False(start.ConfirmOpen);
+            Assert.Equal(0, start.ShutdownsTried);
+        });
+
+    [Fact]
+    public Task Repeated_shutdown_requests_while_the_check_runs_start_no_second_check_and_Save_shuts_down_once() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsWindowStart(dirty: true);
+            var first = new ShutdownRequestedEventArgs();
+            var second = new ShutdownRequestedEventArgs();
+
+            start.App.OnShutdownRequested(first, start.TryShutdown);
+            start.App.OnShutdownRequested(second, start.TryShutdown);
+            Assert.True(first.Cancel);
+            Assert.True(second.Cancel);
+            start.Click("PrimaryButton");
+
+            Assert.Equal(1, start.ShutdownsTried);
+            Assert.False(start.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task Harness_starts_create_no_host() =>
+        Headless.Run(() =>
+        {
+            using var start = new SettingsStart();
+            string? settingsBefore = Environment.GetEnvironmentVariable(App.ThemeSettingsHarnessVariable);
+            Environment.SetEnvironmentVariable(App.HarnessVariable, "1");
+            try
+            {
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, "1");
+                Assert.IsType<ThemeSettingsWindow>(start.App.CreateStartWindow());
+                Assert.Null(start.App.ThemeSettingsHost);
+
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, null);
+                Assert.IsType<HarnessWindow>(start.App.CreateStartWindow());
+                Assert.Null(start.App.ThemeSettingsHost);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, settingsBefore);
+            }
+        });
+
+    [Fact]
     public Task Settings_file_edited_while_running_is_applied_to_the_bridge() =>
         Headless.Run(() =>
         {
@@ -629,6 +852,7 @@ public sealed class AppStartupTests
 
             start.App.OnSettingsFileChanged(start.App.SettingsWatcher, new AppSettings("ink", "dark"));
             Dispatcher.UIThread.RunJobs();
+            // Loose on purpose: the real watcher may apply the Mint edit in the same RunJobs, so the theme is ink or mint.
             Assert.NotEqual("paper", start.App.Bridge!.RequestedThemeId);
             Assert.True(start.App.SettingsWriter!.WhenIdle().Wait(HangGuard, TestContext.Current.CancellationToken), "The writer never went idle.");
 
@@ -781,6 +1005,102 @@ public sealed class AppStartupTests
                 disposals.Add(IsBridgeDisposed(bridge));
                 inner.Dispose();
             }
+        }
+    }
+
+    /// <summary>
+    /// A main start with the user theme Mine in use and the theme settings window open over the shown main window, with unsaved
+    /// edits when asked; it counts the shutdowns the app asks for again. Disposing it releases the start, then closes the main
+    /// window, so a failed assert leaves no window in the shared headless session.
+    /// </summary>
+    private sealed class SettingsWindowStart : IDisposable
+    {
+        private readonly SettingsStart _start = new();
+
+        public SettingsWindowStart(bool dirty)
+        {
+            try
+            {
+                _start.WriteSettings("""{ "themeId": "mine", "appearance": "light" }""");
+                Directory.CreateDirectory(AppPaths.ThemesDirectory);
+                File.WriteAllText(
+                    Path.Combine(AppPaths.ThemesDirectory, "mine" + ThemeCatalog.FileSuffix),
+                    """{ "name": "Mine", "light": { "tokens": { "accent": "#112233" } } }"""
+                );
+                Main = App.CreateStartWindow();
+                Main.Show();
+                App.ShowThemeSettings(Main);
+                Settings = App.ThemeSettingsHost!.Window!;
+                ViewModel = Assert.IsType<ThemeSettingsViewModel>(Settings.DataContext);
+                Assert.Equal("mine", ViewModel.Selected?.Id);
+                if (dirty)
+                {
+                    ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+                }
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public App App => _start.App;
+
+        /// <summary>The process log the start writes to.</summary>
+        public RecordingAppLog Log => _start.Log;
+
+        public Window? Main { get; }
+
+        public ThemeSettingsWindow Settings { get; } = null!;
+
+        public ThemeSettingsViewModel ViewModel { get; } = null!;
+
+        public int ShutdownsTried { get; private set; }
+
+        /// <summary>Whether the settings window's confirm is open.</summary>
+        public bool ConfirmOpen => Settings.GetLogicalDescendants().OfType<ConfirmDialog>().Single(dialog => dialog.Name == "Confirm").IsOpen;
+
+        public void TryShutdown() => ShutdownsTried++;
+
+        /// <summary>Clicks the settings window's button named <paramref name="name"/> and runs the work it posted.</summary>
+        public void Click(string name)
+        {
+            Settings
+                .GetLogicalDescendants()
+                .OfType<Button>()
+                .Single(button => button.Name == name)
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                App.ReleaseMainWindow();
+            }
+            finally
+            {
+                try
+                {
+                    Main?.Close();
+                }
+                finally
+                {
+                    _start.Dispose();
+                }
+            }
+        }
+    }
+
+    /// <summary>Disposes <paramref name="inner"/> after running <paramref name="onDispose"/>.</summary>
+    private sealed class DisposeProbe(IDisposable inner, Action onDispose) : IDisposable
+    {
+        public void Dispose()
+        {
+            onDispose();
+            inner.Dispose();
         }
     }
 

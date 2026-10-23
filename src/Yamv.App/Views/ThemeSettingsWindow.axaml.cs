@@ -27,6 +27,7 @@ public partial class ThemeSettingsWindow : Window
     private readonly ThemeSettingsViewModel? _viewModel;
     private readonly IAppLog? _log;
     private bool _closeAllowed;
+    private bool _closeOwnerAfterCheck;
     private Task<bool>? _closeCheck;
     private int _openModals;
 
@@ -79,8 +80,8 @@ public partial class ThemeSettingsWindow : Window
 
     /// <summary>
     /// Whatever the close's reason, cancels an open Import notice or confirm (its action is dropped); then, while the theme has
-    /// unsaved edits, holds the close and asks the unsaved confirm, closing again after Save or Discard. A close while that confirm
-    /// is open is held too.
+    /// unsaved edits, holds the close and asks the unsaved confirm, closing again after Save or Discard: the owner, when the close
+    /// came from the owner's, so the owner's close goes ahead. A close while that confirm is open is held too.
     /// </summary>
     protected override void OnClosing(WindowClosingEventArgs e)
     {
@@ -105,6 +106,7 @@ public partial class ThemeSettingsWindow : Window
         }
 
         e.Cancel = true;
+        _closeOwnerAfterCheck = e.CloseReason == WindowCloseReason.OwnerWindowClosing;
         RunInBackground(CloseAfterCheckAsync, "the close confirm");
     }
 
@@ -127,6 +129,17 @@ public partial class ThemeSettingsWindow : Window
         }
 
         return check;
+    }
+
+    /// <summary>
+    /// Closes the window without the unsaved confirm, after completing an open Import notice or confirm as Cancel: the app's
+    /// release calls it, once the shutdown check has run or when the process exits anyway, so unsaved edits never hold a release.
+    /// </summary>
+    internal void ForceClose()
+    {
+        CancelDialogs();
+        _closeAllowed = true;
+        Close();
     }
 
     /// <summary>Completes a confirm or an Import notice still open when the window closes as Cancel, so what awaits it carries on.</summary>
@@ -233,9 +246,24 @@ public partial class ThemeSettingsWindow : Window
         }
     }
 
+    /// <summary>
+    /// Closes again once the close check passes: the owner when its close was the one held, so it goes ahead and closes this
+    /// window with it, else this window.
+    /// </summary>
     private async Task CloseAfterCheckAsync()
     {
-        if (await ConfirmCloseAsync())
+        bool closeOwner = _closeOwnerAfterCheck;
+        _closeOwnerAfterCheck = false;
+        if (!await ConfirmCloseAsync())
+        {
+            return;
+        }
+
+        if (closeOwner && Owner is Window owner)
+        {
+            owner.Close();
+        }
+        else
         {
             Close();
         }

@@ -10,9 +10,9 @@ namespace Yamv.App.Platform;
 internal readonly record struct TrashResult(int Code, bool Aborted);
 
 /// <summary>What a test drives in place of the real platform: the shell delete, and the drive type it runs on.</summary>
-/// <param name="Delete">A full path in, what the shell reported out.</param>
+/// <param name="Delete">A full path and the owner window's handle in, what the shell reported out.</param>
 /// <param name="DriveType">A drive root in, its <c>GetDriveTypeW</c> value out.</param>
-internal sealed record TrashSeams(Func<string, TrashResult> Delete, Func<string, uint> DriveType);
+internal sealed record TrashSeams(Func<string, nint, TrashResult> Delete, Func<string, uint> DriveType);
 
 /// <summary>
 /// Moves a file to the platform's trash, where the user can put it back: the Recycle Bin on Windows through
@@ -37,18 +37,35 @@ internal sealed partial class PlatformTrash : IFileTrash
     private const ushort WantNukeWarning = 0x4000;
 
     private readonly TrashSeams? _seams;
+    private readonly Func<nint> _owner;
 
     /// <summary>The platform's own trash, chosen when a file is moved.</summary>
-    public PlatformTrash() => _seams = null;
+    /// <param name="owner">
+    /// The handle of the window that owns the shell's prompts, read at each move, since a window has one only once shown; zero
+    /// for none. macOS shows no prompt and ignores it.
+    /// </param>
+    public PlatformTrash(Func<nint> owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        _seams = null;
+        _owner = owner;
+    }
 
-    /// <summary>A trash a test drives: <paramref name="delete"/> stands in for the shell call of a fixed drive.</summary>
+    /// <summary>A trash a test drives: <paramref name="delete"/> stands in for the shell call of a fixed drive, with no owner.</summary>
     /// <param name="delete">A full path in, what the shell reported out.</param>
     internal PlatformTrash(Func<string, TrashResult> delete)
-        : this(new TrashSeams(delete, _ => FixedDrive)) { }
+        : this(new TrashSeams((path, _) => delete(path), _ => FixedDrive), () => 0) { }
 
-    /// <summary>A trash a test drives, whose drive type is its own as well.</summary>
+    /// <summary>A trash a test drives, whose drive type and owner window are its own as well.</summary>
     /// <param name="seams">The delete call, and the drive type it runs on.</param>
-    internal PlatformTrash(TrashSeams seams) => _seams = seams;
+    /// <param name="owner">The owner window's handle, read at each move.</param>
+    internal PlatformTrash(TrashSeams seams, Func<nint> owner)
+    {
+        ArgumentNullException.ThrowIfNull(seams);
+        ArgumentNullException.ThrowIfNull(owner);
+        _seams = seams;
+        _owner = owner;
+    }
 
     /// <summary>Moves the file at <paramref name="path"/> to the Recycle Bin or Trash.</summary>
     /// <param name="path">The file to move, relative or full.</param>
@@ -67,14 +84,14 @@ internal sealed partial class PlatformTrash : IFileTrash
         if (_seams is not null)
         {
             RequireRecycleBin(fullPath, _seams.DriveType);
-            TrashResult result = _seams.Delete(fullPath);
+            TrashResult result = _seams.Delete(fullPath, _owner());
             ThrowOnFailure(result.Code, result.Aborted, fullPath);
             return;
         }
 
         if (OperatingSystem.IsWindows())
         {
-            DeleteOnWindows(fullPath);
+            DeleteOnWindows(fullPath, _owner());
             return;
         }
 
@@ -119,7 +136,7 @@ internal sealed partial class PlatformTrash : IFileTrash
     }
 
     [SupportedOSPlatform("windows")]
-    private static void DeleteOnWindows(string fullPath)
+    private static void DeleteOnWindows(string fullPath, nint owner)
     {
         if (!Environment.Is64BitProcess)
         {
@@ -136,6 +153,7 @@ internal sealed partial class PlatformTrash : IFileTrash
             Marshal.Copy(from, 0, pFrom, from.Length);
             var operation = new ShFileOpStruct
             {
+                Hwnd = owner,
                 WFunc = FileOperationDelete,
                 PFrom = pFrom,
                 FFlags = DeleteFlags,
