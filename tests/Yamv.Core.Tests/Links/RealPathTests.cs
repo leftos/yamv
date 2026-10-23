@@ -1,8 +1,11 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 using Yamv.Core.Links;
 
 namespace Yamv.Core.Tests.Links;
@@ -126,6 +129,91 @@ public sealed class RealPathTests : IDisposable
     }
 
     [Fact]
+    public void Resolve_LinkToAGlobalRootPath_IsUnresolvable()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "GLOBALROOT device paths exist only on Windows.");
+        string link = Path.Combine(tempRoot, "mup");
+        Assert.SkipUnless(TryLink(link, @"\\?\GLOBALROOT\Device\Mup\192.0.2.1\share"), "This machine does not let the test make a directory link.");
+        List<string> touched = [];
+
+        Assert.Null(RealPath.Resolve(Path.Combine(link, "a.png"), touched.Add));
+
+        Assert.DoesNotContain(
+            touched,
+            path => path.Contains("GLOBALROOT", StringComparison.OrdinalIgnoreCase) || path.Contains("192.0.2.1", StringComparison.Ordinal)
+        );
+    }
+
+    [Fact]
+    public void Resolve_RelativeLink_ResolvesAgainstItsFolder()
+    {
+        string sub = Path.Combine(tempRoot, "sub");
+        Directory.CreateDirectory(sub);
+        Directory.CreateDirectory(Path.Combine(tempRoot, "target"));
+        string link = Path.Combine(sub, "link");
+        Assert.SkipUnless(TryLink(link, Path.Combine("..", "target")), "This machine does not let the test make a directory link.");
+
+        Assert.Equal(Path.Combine(realRoot, "target", "a.png"), RealPath.Resolve(Path.Combine(link, "a.png"))?.Path);
+    }
+
+    [Fact]
+    public void Resolve_RootRelativeLink_ResolvesOnTheLinksDrive()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows stores a link target rooted at the link's own drive.");
+        string target = Path.Combine(tempRoot, "target-dir");
+        Directory.CreateDirectory(target);
+        string rootRelative = target[(Path.GetPathRoot(target)!.Length - 1)..];
+        string link = Path.Combine(tempRoot, "root-relative");
+        Assert.SkipUnless(TryLink(link, rootRelative), "This machine does not let the test make a directory link.");
+
+        Assert.Equal(Path.Combine(realRoot, "target-dir", "a.png"), RealPath.Resolve(Path.Combine(link, "a.png"))?.Path);
+    }
+
+    [Theory]
+    [InlineData("absolute")]
+    [InlineData("relative")]
+    [InlineData("junction")]
+    public async Task Resolve_EachLinkShape_EqualsTheOsFinalPath(string shape)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "GetFinalPathNameByHandleW exists only on Windows.");
+        string target = Path.Combine(tempRoot, "shape-target");
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "a.png"), "png", TestContext.Current.CancellationToken);
+        string link = Path.Combine(tempRoot, "shape-link");
+        bool made = shape switch
+        {
+            "absolute" => TryLink(link, target),
+            "relative" => TryLink(link, "shape-target"),
+            _ => await TryJunction(link, target),
+        };
+        Assert.SkipUnless(made, $"This machine does not let the test make a {shape} link.");
+        try
+        {
+            string path = Path.Combine(link, "a.png");
+
+            Assert.Equal(FinalPath(path), RealPath.Resolve(path)?.Path, ignoreCase: true);
+        }
+        finally
+        {
+            // The recursive delete in Dispose is denied access to a junction; removing the link on its own takes only the link.
+            Directory.Delete(link);
+        }
+    }
+
+    [Theory]
+    [InlineData(@"a\b.md")]
+    [InlineData(@"\rooted-no-drive.md")]
+    [InlineData("a/b.md")]
+    public void Resolve_RelativePath_IsUnresolvableWithoutTouching(string path)
+    {
+        List<string> touched = [];
+
+        Assert.Null(RealPath.Resolve(path, touched.Add));
+
+        Assert.Empty(touched);
+    }
+
+    [Fact]
     public async Task Resolve_JunctionToAnInsideFolder_ResolvesThroughIt()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Junctions exist only on Windows.");
@@ -161,6 +249,89 @@ public sealed class RealPathTests : IDisposable
             new ResolvedPath(Path.Combine(realRoot, "evil.png.exe"), Exists: true, IsDirectory: false),
             RealPath.Resolve(Path.Combine(tempRoot, shortName))
         );
+    }
+
+    [Fact]
+    public void FullPath_LeavesAShortNameUnexpanded()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "8.3 short names exist only on Windows.");
+        string longPath = Path.Combine(tempRoot, "long-name-file.png");
+        File.WriteAllText(longPath, "png");
+        string shortName = Path.GetFileName(ShortPath(longPath));
+        Assert.SkipWhen(shortName == "long-name-file.png", "This volume has 8.3 short names turned off.");
+        string shortPath = Path.Combine(tempRoot, shortName);
+
+        Assert.Equal(shortPath, LinkIo.FullPath(shortPath, static _ => { }));
+    }
+
+    [Theory]
+    [MemberData(nameof(ReparseReplies))]
+    public void ReparseTarget_CraftedReply_GivesTheCheckedTarget(string shape, byte[] data, bool isLink, string? target)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Reparse buffers and drive-letter targets exist only on Windows.");
+
+        (bool IsLink, string? Target) actual = RealPath.ReparseTarget(@"C:\repo\sub\link", data);
+
+        Assert.True(actual == (isLink, target), $"{shape}: expected ({isLink}, {target}), got {actual}");
+    }
+
+    [Fact]
+    public void RelativeTarget_RootRelative_IsRootedAtTheLinksDrive()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows roots a link target at the link's own drive.");
+        char current = char.ToUpperInvariant(Environment.CurrentDirectory[0]);
+        char drive = "QRSTUVWXYZ".First(letter => letter != current);
+
+        Assert.Equal($@"{drive}:\t", RealPath.RelativeTarget($@"{drive}:\a\link", @"\t"));
+    }
+
+    public static TheoryData<string, byte[], bool, string?> ReparseReplies() =>
+        new()
+        {
+            { "reply shorter than a tag", [0x0C, 0x00], true, null },
+            { "header shorter than 8 bytes", Symlink(@"\??\C:\x", 0)[..6], true, null },
+            { "odd name length", WithUInt16(Symlink(@"\??\C:\x", 0), 10, 3), true, null },
+            { "name offset past the end", WithUInt16(Symlink(@"\??\C:\x", 0), 8, 200), true, null },
+            { "name length past the end", WithUInt16(Symlink(@"\??\C:\x", 0), 10, 400), true, null },
+            { "symlink to a drive path", Symlink(@"\??\C:\x", 0), true, @"C:\x" },
+            { "symlink to a share", Symlink(@"\??\UNC\h\s", 0), true, null },
+            { "symlink to a volume", Symlink(@"\??\Volume{01234567-89ab-cdef-0123-456789abcdef}\", 0), true, null },
+            { "symlink to GLOBALROOT", Symlink(@"\??\GLOBALROOT\Device\Mup\h\s", 0), true, null },
+            { "junction to a drive path", ReparseBuffer(0xA000_0003, @"\??\D:\y", flags: null), true, @"D:\y" },
+            { "junction to a share", ReparseBuffer(0xA000_0003, @"\??\UNC\h\s", flags: null), true, null },
+            { "relative-flag target rooted with a drive", Symlink(@"C:\x", 1), true, null },
+            { "relative-flag target", Symlink(@"..\t", 1), true, @"C:\repo\sub\..\t" },
+            { "another reparse tag", ReparseBuffer(0x8000_0017, @"\??\C:\x", flags: null), false, null },
+        };
+
+    private static byte[] Symlink(string substituteName, uint flags) => ReparseBuffer(0xA000_000C, substituteName, flags);
+
+    /// <summary>A <c>REPARSE_DATA_BUFFER</c>: a symbolic link's layout when <paramref name="flags"/> is given, else a junction's.</summary>
+    private static byte[] ReparseBuffer(uint tag, string substituteName, uint? flags)
+    {
+        byte[] name = Encoding.Unicode.GetBytes(substituteName);
+        int pathBuffer = flags is null ? 16 : 20;
+        byte[] data = new byte[pathBuffer + name.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(data, tag);
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(4), (ushort)(data.Length - 8));
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(8), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(10), (ushort)name.Length);
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(12), (ushort)name.Length);
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(14), 0);
+        if (flags is uint value)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(16), value);
+        }
+
+        name.CopyTo(data, pathBuffer);
+        return data;
+    }
+
+    private static byte[] WithUInt16(byte[] data, int offset, ushort value)
+    {
+        byte[] copy = [.. data];
+        BinaryPrimitives.WriteUInt16LittleEndian(copy.AsSpan(offset), value);
+        return copy;
     }
 
     [Fact]
@@ -334,6 +505,25 @@ public sealed class RealPathTests : IDisposable
 
         return new string(buffer, 0, (int)length);
     }
+
+    /// <summary>The path Windows opens for <paramref name="path"/>, every link followed, without its <c>\\?\</c> prefix.</summary>
+    private static string FinalPath(string path)
+    {
+        using SafeFileHandle handle = File.OpenHandle(path);
+        char[] buffer = new char[short.MaxValue];
+        uint length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Length, 0);
+        if (length == 0 || length >= buffer.Length)
+        {
+            throw new InvalidOperationException($"GetFinalPathNameByHandleW failed for '{path}' (error {Marshal.GetLastPInvokeError()}).");
+        }
+
+        string final = new(buffer, 0, (int)length);
+        return final.StartsWith(@"\\?\", StringComparison.Ordinal) ? final[4..] : final;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, [Out] char[] filePath, uint length, uint flags);
 
     [DllImport("kernel32.dll", EntryPoint = "GetShortPathNameW", CharSet = CharSet.Unicode, SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

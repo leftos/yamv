@@ -54,8 +54,42 @@ public sealed class LinkPolicyTests
 
         OpenDocument decision = Assert.IsType<OpenDocument>(LinkPolicy.Decide(FileUri(path), Context));
 
-        Assert.Equal(path, decision.Path);
-        Assert.Null(decision.Fragment);
+        Assert.Equal(new OpenDocument(path, path, Fragment: null), decision);
+    }
+
+    [Fact]
+    public void Decide_DocumentThroughALink_OpensTheRealPath()
+    {
+        string link = Path.Combine(Root, "notes.md");
+        string real = Path.Combine(Root, "real", "other.md");
+
+        OpenDocument decision = Assert.IsType<OpenDocument>(LinkPolicy.Decide(FileUri(link), Mapping(link, ExistingFile(real))));
+
+        Assert.Equal(new OpenDocument(real, link, Fragment: null), decision);
+    }
+
+    [Fact]
+    public void Decide_DocumentNameLinkingToAnotherType_IsNotOpenedAsADocument()
+    {
+        string link = Path.Combine(Root, "README.md");
+        string real = Path.Combine(Root, "tool.exe");
+
+        Confirm decision = Assert.IsType<Confirm>(LinkPolicy.Decide(FileUri(link), Mapping(link, ExistingFile(real))));
+
+        Assert.Equal(real, decision.Path);
+    }
+
+    [Fact]
+    public void Decide_DocumentNameLinkingToAFolder_IsNotOpenedAsADocument()
+    {
+        string link = Path.Combine(Root, "notes.md");
+        string real = Path.Combine(Root, "folder.md");
+
+        Confirm decision = Assert.IsType<Confirm>(
+            LinkPolicy.Decide(FileUri(link), Mapping(link, new ResolvedPath(real, Exists: true, IsDirectory: true)))
+        );
+
+        Assert.Equal(real, decision.Path);
     }
 
     [Fact]
@@ -65,7 +99,7 @@ public sealed class LinkPolicyTests
 
         OpenDocument decision = Assert.IsType<OpenDocument>(LinkPolicy.Decide(FileUri(path), Context));
 
-        Assert.Equal(path, decision.Path);
+        Assert.Equal(new OpenDocument(path, path, Fragment: null), decision);
     }
 
     [Fact]
@@ -76,7 +110,7 @@ public sealed class LinkPolicyTests
 
         OpenDocument decision = Assert.IsType<OpenDocument>(LinkPolicy.Decide(FileUri(path), context));
 
-        Assert.Equal(path, decision.Path);
+        Assert.Equal(new OpenDocument(path, path, Fragment: null), decision);
     }
 
     [Fact]
@@ -86,8 +120,8 @@ public sealed class LinkPolicyTests
 
         OpenDocument decision = Assert.IsType<OpenDocument>(LinkPolicy.Decide(link, Context));
 
-        Assert.Equal(Path.Combine(Root, "notes.md"), decision.Path);
-        Assert.Equal("Heading Two", decision.Fragment);
+        string path = Path.Combine(Root, "notes.md");
+        Assert.Equal(new OpenDocument(path, path, "Heading Two"), decision);
     }
 
     [Fact]
@@ -239,7 +273,8 @@ public sealed class LinkPolicyTests
 
         OpenDocument decision = Assert.IsType<OpenDocument>(LinkPolicy.Decide(link, Context));
 
-        Assert.Equal(Path.Combine(Root, "notes.md"), decision.Path);
+        string path = Path.Combine(Root, "notes.md");
+        Assert.Equal(new OpenDocument(path, path, Fragment: null), decision);
     }
 
     [Fact]
@@ -276,6 +311,26 @@ public sealed class LinkPolicyTests
         Assert.IsType<Ignore>(LinkPolicy.Decide(link, context));
 
         Assert.Equal(0, resolverCalls);
+    }
+
+    [Theory]
+    [InlineData("file://server/share/a.png")]
+    [InlineData(@"\\server\share\a.png")]
+    [InlineData("file:///%5C%5Cserver/share/a.png")]
+    [InlineData("file:///%5C%5Chost/share/a~1.md")]
+    [InlineData("file:///%5C%5C%3F%5CC:%5Cx%5Ca.png")]
+    [InlineData("file:///%5C%5C.%5Cpipe%5Cx")]
+    [InlineData("file:///%5C%3F%3F%5CC:%5CWindows%5Cnotepad.exe")]
+    [InlineData("file:///%5C%5C%3F%5CVolume%7B01234567-89ab-cdef-0123-456789abcdef%7D%5Ca.png")]
+    public void Decide_NetworkShareOrDevicePath_IsIgnoredWithoutNormalisingIt(string href)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Network share and device paths exist only on Windows.");
+        Assert.True(Uri.TryCreate(href, UriKind.Absolute, out Uri? link), $"'{href}' is not an absolute URI.");
+        List<string> normalised = [];
+
+        Assert.IsType<Ignore>(LinkPolicy.Decide(link, Context, normalised.Add));
+
+        Assert.DoesNotContain(normalised, RealPath.IsUncOrDevice);
     }
 
     [Fact]

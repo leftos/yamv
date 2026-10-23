@@ -1,6 +1,9 @@
+using System.Buffers.Binary;
 using System.IO.Enumeration;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace Yamv.Core.Links;
 
@@ -22,6 +25,34 @@ public static partial class RealPath
     /// <summary>How many links one path may pass through before it counts as a loop and is unresolvable.</summary>
     public const int MaxLinkHops = 40;
 
+    private const uint FileShareAll = 0x1 | 0x2 | 0x4;
+
+    private const uint OpenExisting = 3;
+
+    /// <summary><c>FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS</c>: opens the link itself, folder or file.</summary>
+    private const uint OpenReparsePointFlags = 0x0020_0000 | 0x0200_0000;
+
+    private const uint FsctlGetReparsePoint = 0x0009_00A8;
+
+    private const int MaximumReparseDataBufferSize = 16 * 1024;
+
+    private const uint SymbolicLinkTag = 0xA000_000C;
+
+    private const uint MountPointTag = 0xA000_0003;
+
+    private const uint SymlinkFlagRelative = 1;
+
+    /// <summary>Byte offsets in <c>REPARSE_DATA_BUFFER</c>: the name fields follow the 8-byte header.</summary>
+    private const int SubstituteNameOffset = 8;
+
+    private const int SubstituteNameLength = 10;
+
+    private const int SymbolicLinkFlags = 16;
+
+    private const int SymbolicLinkPathBuffer = 20;
+
+    private const int MountPointPathBuffer = 16;
+
     private static readonly EnumerationOptions ListAll = new()
     {
         AttributesToSkip = 0,
@@ -33,12 +64,14 @@ public static partial class RealPath
     /// <summary>The real path of <paramref name="path"/>, or null when it cannot be resolved safely.</summary>
     /// <param name="path">A file or folder path, which need not exist.</param>
     /// <returns>
-    /// Null when a link points at a network share or a device, when the links form a loop or a chain longer than
+    /// Null when the path, or a link's target, is a network share or a device path or is not fully qualified (on Windows, rooted
+    /// at a drive letter), when the links form a loop or a chain longer than
     /// <see cref="MaxLinkHops"/>, when a folder on the way cannot be read, or when a segment's name matches more than one entry in
     /// its folder ignoring case, none of them exactly.
     /// </returns>
     /// <remarks>
-    /// <c>..</c> segments are collapsed by <see cref="Path.GetFullPath(string)"/> before the walk. Links are followed one hop at a
+    /// <c>..</c> segments are collapsed by <see cref="LinkIo.FullPath(string, Action{string})"/> before the walk, which on Windows
+    /// leaves 8.3 short names as written; the walk expands each one inside its own folder. Links are followed one hop at a
     /// time, and each hop's target is checked before anything touches it. The walk stops at the first segment that does not
     /// exist: nothing past it can be a link, so the rest of the path is kept as it was written.
     /// </remarks>
@@ -49,9 +82,14 @@ public static partial class RealPath
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(touching);
+        if (!IsSafeToNormalise(path))
+        {
+            return null;
+        }
+
         try
         {
-            return Walk(Path.GetFullPath(path), touching);
+            return Walk(LinkIo.FullPath(path, touching), touching);
         }
         catch (IOException)
         {
@@ -78,6 +116,17 @@ public static partial class RealPath
     internal static bool IsUncOrDevice(string path) =>
         OperatingSystem.IsWindows()
         && ((path.Length >= 2 && IsSeparator(path[0]) && IsSeparator(path[1])) || path.StartsWith(@"\??\", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Whether <paramref name="path"/> is fully qualified and, on Windows, rooted at a drive letter (<c>X:\</c>): the only paths
+    /// that may be normalised, since normalising any other one reads the process's current folder.
+    /// </summary>
+    internal static bool IsLocalFullyQualified(string path) =>
+        Path.IsPathFullyQualified(path)
+        && (!OperatingSystem.IsWindows() || (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && IsSeparator(path[2])));
+
+    /// <summary>Whether <paramref name="path"/> may be handed to <see cref="LinkIo.FullPath(string, Action{string})"/>.</summary>
+    private static bool IsSafeToNormalise(string path) => !IsUncOrDevice(path) && IsLocalFullyQualified(path);
 
     private static bool IsSeparator(char character) => character is '\\' or '/';
 
@@ -137,10 +186,13 @@ public static partial class RealPath
             }
 
             string candidate = Path.Combine(current, entry.Value.Name);
-            string? target = entry.Value.IsReparsePoint ? LinkTarget(candidate, entry.Value.IsDirectory, touching) : null;
-            if (target is not null)
+            if (entry.Value.IsReparsePoint)
             {
-                return (null, Path.GetFullPath(Path.Combine([target, .. segments[(index + 1)..]])));
+                (bool isLink, string? restart) = FollowLink(candidate, segments[(index + 1)..], touching);
+                if (isLink)
+                {
+                    return (null, restart);
+                }
             }
 
             current = candidate;
@@ -221,12 +273,138 @@ public static partial class RealPath
         };
     }
 
-    /// <summary>The full path of the immediate target of the link at <paramref name="path"/>; null when it is no link.</summary>
-    private static string? LinkTarget(string path, bool isDirectory, Action<string> touching)
+    /// <summary>
+    /// Whether the entry at <paramref name="link"/> is a link and, when it is, the path through its target with
+    /// <paramref name="rest"/> appended, normalised; a null restart leaves the whole path unresolvable.
+    /// </summary>
+    private static (bool IsLink, string? Restart) FollowLink(string link, string[] rest, Action<string> touching)
     {
-        touching(path);
-        FileSystemInfo info = isDirectory ? new DirectoryInfo(path) : new FileInfo(path);
-        return info.ResolveLinkTarget(returnFinalTarget: false)?.FullName;
+        (bool isLink, string? target) = LinkTarget(link, touching);
+        if (!isLink || target is null)
+        {
+            return (isLink, null);
+        }
+
+        string combined = Path.Combine([target, .. rest]);
+        return (true, IsSafeToNormalise(combined) ? LinkIo.FullPath(combined, touching) : null);
+    }
+
+    /// <summary>
+    /// Whether the entry at <paramref name="link"/> is a link and, when it is, its immediate target as a path, read together with
+    /// whether it was stored relative to the link; a null target leaves the whole path unresolvable.
+    /// </summary>
+    private static (bool IsLink, string? Target) LinkTarget(string link, Action<string> touching) =>
+        OperatingSystem.IsWindows() ? WindowsLinkTarget(link, touching) : UnixLinkTarget(link, touching);
+
+    /// <summary>The raw <c>readlink</c> target of <paramref name="link"/>, joined to the link's folder when it is relative.</summary>
+    private static (bool IsLink, string? Target) UnixLinkTarget(string link, Action<string> touching)
+    {
+        string? target = LinkIo.File(link, touching).LinkTarget;
+        if (target is null)
+        {
+            return (false, null);
+        }
+
+        string joined = Path.Combine(Path.GetDirectoryName(link) ?? string.Empty, target);
+        return (true, Path.IsPathFullyQualified(joined) ? joined : null);
+    }
+
+    /// <summary>
+    /// Reads the reparse point of <paramref name="link"/> itself, never opening its target: a symbolic link or a junction gives its
+    /// substitute name as a path, any other tag is no link, and a failed read leaves the path unresolvable.
+    /// </summary>
+    /// <remarks>
+    /// <c>FSCTL_GET_REPARSE_POINT</c> fills a <c>REPARSE_DATA_BUFFER</c> of at most <c>MAXIMUM_REPARSE_DATA_BUFFER_SIZE</c> bytes
+    /// (https://learn.microsoft.com/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_reparse_data_buffer).
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    private static (bool IsLink, string? Target) WindowsLinkTarget(string link, Action<string> touching)
+    {
+        touching(link);
+        byte[] buffer = new byte[MaximumReparseDataBufferSize];
+        using SafeFileHandle handle = CreateFile(@"\\?\" + link, 0, FileShareAll, 0, OpenExisting, OpenReparsePointFlags, 0);
+        if (handle.IsInvalid || !DeviceIoControl(handle, FsctlGetReparsePoint, 0, 0, buffer, (uint)buffer.Length, out uint returned, 0))
+        {
+            return (true, null);
+        }
+
+        return ReparseTarget(link, buffer.AsSpan(0, (int)Math.Min(returned, (uint)buffer.Length)));
+    }
+
+    /// <summary>
+    /// Whether the <c>REPARSE_DATA_BUFFER</c> in <paramref name="data"/>, read from <paramref name="link"/>, is a link and, when
+    /// it is, its target as a path: a symbolic link or a junction gives its checked substitute name, any other tag is no link.
+    /// </summary>
+    internal static (bool IsLink, string? Target) ReparseTarget(string link, ReadOnlySpan<byte> data)
+    {
+        if (data.Length < sizeof(uint))
+        {
+            return (true, null);
+        }
+
+        return BinaryPrimitives.ReadUInt32LittleEndian(data) switch
+        {
+            SymbolicLinkTag => (true, SymbolicLinkTarget(link, data)),
+            MountPointTag => (true, AbsoluteTarget(SubstituteName(data, MountPointPathBuffer))),
+            _ => (false, null),
+        };
+    }
+
+    /// <summary>A symbolic link's target: joined to the link as the OS joins it when stored relative, else absolute.</summary>
+    private static string? SymbolicLinkTarget(string link, ReadOnlySpan<byte> data)
+    {
+        string? name = SubstituteName(data, SymbolicLinkPathBuffer);
+        if (name is null)
+        {
+            return null;
+        }
+
+        bool relative = (BinaryPrimitives.ReadUInt32LittleEndian(data[SymbolicLinkFlags..]) & SymlinkFlagRelative) != 0;
+        return relative ? RelativeTarget(link, name) : AbsoluteTarget(name);
+    }
+
+    /// <summary>
+    /// The substitute name of a reparse buffer whose path buffer starts at byte <paramref name="pathBuffer"/>; null when it is
+    /// empty or does not fit the bytes read.
+    /// </summary>
+    private static string? SubstituteName(ReadOnlySpan<byte> data, int pathBuffer)
+    {
+        if (data.Length < pathBuffer)
+        {
+            return null;
+        }
+
+        int start = pathBuffer + BinaryPrimitives.ReadUInt16LittleEndian(data[SubstituteNameOffset..]);
+        int length = BinaryPrimitives.ReadUInt16LittleEndian(data[SubstituteNameLength..]);
+        return length == 0 || length % 2 != 0 || start + length > data.Length ? null : Encoding.Unicode.GetString(data.Slice(start, length));
+    }
+
+    /// <summary>An absolute target, <c>\??\X:\…</c>, as <c>X:\…</c>; null for every other form (UNC, volume, GLOBALROOT, …).</summary>
+    private static string? AbsoluteTarget(string? name)
+    {
+        const string NtPrefix = @"\??\";
+        if (name is null || !name.StartsWith(NtPrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string path = name[NtPrefix.Length..];
+        return IsLocalFullyQualified(path) ? path : null;
+    }
+
+    /// <summary>
+    /// A relative target joined to <paramref name="link"/>: one starting with a single <c>\</c> is rooted at the link's drive
+    /// root, any other rooted one (<c>C:\x</c>, <c>\\host</c>) is null since the OS would not open it, and the rest are combined
+    /// with the link's folder; the caller checks the result before normalising it.
+    /// </summary>
+    internal static string? RelativeTarget(string link, string name)
+    {
+        if (name.StartsWith('\\') && !name.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return Path.GetPathRoot(link) + name[1..];
+        }
+
+        return Path.IsPathRooted(name) ? null : Path.Combine(Path.GetDirectoryName(link) ?? string.Empty, name);
     }
 
     /// <summary>The long name of the last segment of <paramref name="path"/>, or null when Windows finds none.</summary>
@@ -243,8 +421,32 @@ public static partial class RealPath
         return length == 0 || length >= buffer.Length ? null : Path.GetFileName(new string(buffer, 0, (int)length));
     }
 
-    [LibraryImport("kernel32.dll", EntryPoint = "GetLongPathNameW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GetLongPathNameW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial uint GetLongPathName(string shortPath, [Out] char[] longPath, uint bufferLength);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial SafeFileHandle CreateFile(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        nint securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        nint templateFile
+    );
+
+    [LibraryImport("kernel32.dll", EntryPoint = "DeviceIoControl")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool DeviceIoControl(
+        SafeFileHandle device,
+        uint controlCode,
+        nint inBuffer,
+        uint inBufferSize,
+        [Out] byte[] outBuffer,
+        uint outBufferSize,
+        out uint bytesReturned,
+        nint overlapped
+    );
 
     /// <summary>What a folder's listing holds for a name.</summary>
     internal enum MatchOutcome

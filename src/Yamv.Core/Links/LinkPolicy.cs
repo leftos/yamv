@@ -53,9 +53,13 @@ public static class LinkPolicy
     /// <summary>Decides what <paramref name="uri"/> opens, from where it points and the document that linked it.</summary>
     /// <param name="uri">The link target as made absolute against the document; null when it could not be resolved.</param>
     /// <param name="context">The document's group root and the real-path resolver.</param>
-    public static LinkDecision Decide(Uri? uri, LinkContext context)
+    public static LinkDecision Decide(Uri? uri, LinkContext context) => Decide(uri, context, static _ => { });
+
+    /// <summary>As <see cref="Decide(Uri?, LinkContext)"/>, calling <paramref name="normalising"/> with each path before it is normalised.</summary>
+    internal static LinkDecision Decide(Uri? uri, LinkContext context, Action<string> normalising)
     {
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(normalising);
 
         if (uri is null || !uri.IsAbsoluteUri)
         {
@@ -74,13 +78,18 @@ public static class LinkPolicy
             return new Ignore($"a file: link may not name a host, and '{uri.Host}' names one");
         }
 
-        return DecideLocal(uri, context);
+        return DecideLocal(uri, context, normalising);
     }
 
     /// <summary>Decides a <c>file:</c> link without a host: every check reads the normalised path, never the raw one.</summary>
-    private static LinkDecision DecideLocal(Uri uri, LinkContext context)
+    private static LinkDecision DecideLocal(Uri uri, LinkContext context, Action<string> normalising)
     {
-        string? path = Normalise(uri.LocalPath);
+        if (RawPathRefusal(uri.LocalPath) is { } refusal)
+        {
+            return refusal;
+        }
+
+        string? path = Normalise(uri.LocalPath, normalising);
         if (path is null)
         {
             return new Ignore("the link's path is not one the platform accepts");
@@ -102,8 +111,12 @@ public static class LinkPolicy
             return new Ignore($"'{path}' does not resolve to a local path");
         }
 
-        return DocumentFileTypes.IsDocument(path) ? new OpenDocument(path, Fragment(uri)) : DecideOtherFile(path, real, context);
+        return OpensAsDocument(path, real) ? new OpenDocument(real.Path, path, Fragment(uri)) : DecideOtherFile(path, real, context);
     }
+
+    /// <summary>Whether both the link's name and its real path's name are documents, and the real path is no folder.</summary>
+    private static bool OpensAsDocument(string path, ResolvedPath real) =>
+        !real.IsDirectory && DocumentFileTypes.IsDocument(path) && DocumentFileTypes.IsDocument(real.Path);
 
     /// <summary>Decides a link to a local file that is not a document, from its normalised path and its real path.</summary>
     private static LinkDecision DecideOtherFile(string path, ResolvedPath real, LinkContext context)
@@ -123,12 +136,26 @@ public static class LinkPolicy
         return viewable ? new OpenWithDefaultApp(real.Path) : new Confirm(real.Path);
     }
 
+    /// <summary>
+    /// Why <paramref name="localPath"/> may not even be normalised, since normalising it could touch a share or read the current
+    /// folder; null when it may.
+    /// </summary>
+    private static Ignore? RawPathRefusal(string localPath)
+    {
+        if (RealPath.IsUncOrDevice(localPath))
+        {
+            return new Ignore($"'{localPath}' names a network share or a device");
+        }
+
+        return RealPath.IsLocalFullyQualified(localPath) ? null : new Ignore("the link's path is not one the platform accepts");
+    }
+
     /// <summary>The full form of <paramref name="localPath"/>, or null when the platform rejects it (a NUL, for one).</summary>
-    private static string? Normalise(string localPath)
+    private static string? Normalise(string localPath, Action<string> normalising)
     {
         try
         {
-            return Path.GetFullPath(localPath);
+            return LinkIo.FullPath(localPath, normalising);
         }
         catch (ArgumentException)
         {
