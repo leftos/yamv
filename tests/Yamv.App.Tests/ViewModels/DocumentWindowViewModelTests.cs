@@ -1,5 +1,6 @@
 using Avalonia.Threading;
 using Microsoft.Extensions.Time.Testing;
+using Yamv.App.Services;
 using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.Core.Documents;
@@ -1652,6 +1653,45 @@ public sealed class DocumentWindowViewModelTests
 
             Assert.Empty(fixture.Surface.ContentWidths);
             Assert.True(fixture.Log.Entries.Count(entry => entry.Level == "error") > errorsBefore);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "warning" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+            Assert.Equal((ToastKind.Warning, "Couldn't save the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+        });
+
+    [Fact]
+    public Task A_step_that_throws_is_logged_as_an_error_and_toasted() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.StepContentWidth(wider: true, double.NaN);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            LogEntry error = Assert.Single(fixture.Log.Entries, entry => entry.Level == "error");
+            Assert.Equal($"Cannot step the content width of {RepoDocA}.", error.Message);
+            Assert.IsType<ArgumentOutOfRangeException>(error.Exception);
+            Assert.Equal((ToastKind.Warning, "Couldn't save the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+        });
+
+    [Fact]
+    public Task A_step_whose_write_fails_after_the_window_closed_is_logged_once_and_throws_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture(ownToasts: true);
+            File.WriteAllText(fixture.WidthsFolder, "a file where the widths folder should be");
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+            fixture.ViewModel.Dispose();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Single(fixture.Log.Entries, entry => entry.Message.StartsWith("Cannot save the stepped content width", StringComparison.Ordinal));
+            Assert.DoesNotContain(
+                fixture.Log.Entries,
+                entry => entry.Message.StartsWith("Cannot step", StringComparison.Ordinal) || entry.Message == "Cannot change the content width."
+            );
         });
 
     [Fact]
@@ -1807,15 +1847,27 @@ public sealed class DocumentWindowViewModelTests
     {
         private int _existsCalls;
 
-        public Fixture(bool persist = true)
+        /// <param name="persist">Whether the window's state persists, as a main window's does.</param>
+        /// <param name="ownToasts">
+        /// True to give the view model no toasts, so it makes and disposes its own <see cref="ToastCenter"/>; else it shows
+        /// them on <see cref="Toasts"/>.
+        /// </param>
+        public Fixture(bool persist = true, bool ownToasts = false)
         {
             WidthsFolder = Path.Combine(Path.GetTempPath(), "yamv-vm-widths-" + Guid.NewGuid().ToString("N"));
             WidthsFile = Path.Combine(WidthsFolder, "widths.json");
             Widths = new WidthStore(WidthsFile, Log);
             Reader = path => Files.TryGetValue(path, out string? text) ? text : throw new FileNotFoundException("No such fake file.", path);
             State = new DocumentWindowState(persist, FindRepo, Exists, Plain);
-            ViewModel = new DocumentWindowViewModel(State, Surface, new DocumentWindowServices(Widths, path => Reader(path), Time, Log, Changes));
+            ViewModel = new DocumentWindowViewModel(
+                State,
+                Surface,
+                new DocumentWindowServices(Widths, path => Reader(path), Time, Log, Changes, ownToasts ? null : Toasts)
+            );
         }
+
+        /// <summary>The toasts the view model shows.</summary>
+        public RecordingToasts Toasts { get; } = new();
 
         /// <summary>What the view model follows its documents' changes through.</summary>
         public FakeDocumentChanges Changes { get; } = new();

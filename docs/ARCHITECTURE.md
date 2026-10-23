@@ -41,6 +41,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Change the content-width popover's window, the ⟷ title-bar button or how the popover closes | `src/Yamv.App/Views/TitleBar.axaml` + `.axaml.cs` → `Views/ContentWidthPopover.axaml` + `.axaml.cs` → `Views/MainWindow.axaml.cs` (`WidthPopup`, its dismissals, `OnClosed`) → `ViewModels/ContentWidthViewModel.cs` (`Close`, `AskClearAllCommand`, `IsStale`) → `ViewModels/DocumentWindowViewModel.cs` (`CanEditContentWidth`, `CreateContentWidthPopoverAsync`, `RetireStalePopover`) → `tests/Yamv.App.Tests/Views/ContentWidthPopoverTests.cs` → `tools/dev/run-hidden.ps1` + `capture-window.ps1` | [content-width.md](design/content-width.md), `design/mocks/width-popover/index.html`, [look.md](design/look.md) |
 | Change an app-wide setting (theme, Appearance) or where it is saved | `src/Yamv.Core/Settings/SettingsStore.cs` (pattern: `src/Yamv.Core/Widths/WidthStore.cs`) → `SettingsWriter.cs` → `SettingsWatcher.cs` → `src/Yamv.App/Services/ThemeBridge.cs` (`RequestChanged`) → `src/Yamv.App/App.axaml.cs` (`CreateStartWindow`, `ApplySettingsFile`) → `Services/MainWindowFactory.cs` → `tests/Yamv.Core.Tests/Settings/` + `tests/Yamv.App.Tests/Services/ThemeBridgeTests.cs` + `AppStartupTests.cs` | |
 | Add a JSON file format | `src/Yamv.Core/Session/SessionJsonContext.cs` → `SessionStore.cs` (its `Normalize`) → `tests/Yamv.Core.Tests/Session/SessionStoreTests.cs`; `src/Yamv.Core/Widths/WidthsFile.cs` is the multi-writer example | |
+| Show a failure of a user-started action (a toast) | `src/Yamv.App/Services/IToasts.cs` → `ViewModels/ToastCenter.cs` → `ToastItem.cs` → `Views/ToastHost.axaml` + `.axaml.cs` → `Views/MainWindow.axaml` (`ToastPopup`) + `.axaml.cs` → `Platform/ToastClickThrough.cs` → `ViewModels/DocumentWindowViewModel.cs` (`Toasts`) → `Services/FileActions.cs` → `Services/MainWindowFactory.cs` → `tests/Yamv.App.Tests/Fakes/RecordingToasts.cs` + `ViewModels/ToastCenterTests.cs` + `Views/ToastHostTests.cs` | [look.md](design/look.md) |
 | Change the app log or how a log line is written | `src/Yamv.Core/Diagnostics/FileAppLog.cs` → `IAppLog.cs` (no test file covers `FileAppLog` yet; `tests/Yamv.Core.Tests/` has none under `Diagnostics/`) | |
 
 ## Layers
@@ -142,6 +143,15 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
     `Views/ThemeSettings/ThemePreview` is the right pane's mini window, drawn from `ThemeSettingsViewModel.PreviewTheme` (the working copy resolved for the half the open tab shows, null for an invalid theme) in its own resource dictionary filled by `ThemeBrushes`, so it follows unsaved edits while `ThemeBridge`, the page and the app keep the saved theme; a theme's own css is not previewed.
 
     Nothing in the main app opens the window yet; the dev harness does, when `YAMV_DEV_HARNESS=1` and `YAMV_DEV_THEME_SETTINGS=1` (`App.CreateStartWindow`), and it refuses to start without `YAMV_DATA_DIR`.
+  - Toasts: `Services/IToasts` (`Show(ToastKind, text)`; text between backticks shows as inline code) is how a window reports that an operation the user started failed or was refused, next to the log line.
+
+    `ViewModels/ToastCenter` is the real one, one per window (`DocumentWindowServices.Toasts`, else the view model makes its own on the window's clock; the view model disposes it, and a `Show` after that does nothing): at most three `ToastItem` cards, oldest first, a new one beyond that replacing the oldest.
+
+    A card fades 5 s after it was shown, counted in 50 ms ticks only while `IsActive` is true (`MainWindow` sets it from the window being active and not minimized); a text shown again while its card is up raises the card's `Count` and restarts its fade.
+
+    `Views/ToastHost` draws the cards (icon by `ToastKind`, the text with `ToastText`, the count, a × that calls `Dismiss`, and `ToastTimerLine`), and is the content of `MainWindow`'s `ToastPopup`, a native popup like the width popover's so it sits over the web view; the popup is open while the shown window has a toast and is not minimized.
+
+    `AvaloniaFileActions` (a failed reveal), `DocumentWindowViewModel` and `ContentWidthViewModel` (a width that could not be saved, the popover's only once it is stale) show through it; `AvaloniaFileActions` built without toasts only logs. `YAMV_DEV_TOASTS=1` (read only when `YAMV_DATA_DIR` is set) shows three sample toasts once the window has shown.
   - The find bar lives inside the page, because Avalonia cannot draw over a native web view (airspace). For the same reason an empty, missing or can't-read state hides the web view rather than covering it.
 
 ## Integration Footguns
@@ -172,6 +182,9 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 - On Windows, `File.Move(overwrite)` is refused while any other handle has the target open, so every multi-writer file in the data folder (`widths.json`) retries its replace.
 - Fluent's window decoration parts are hidden by name in `App.axaml`: `PART_TitleTextPanel` by `Opacity` (its visibility is template-bound) and `PART_FullScreenButton` by `IsVisible` plus `Width=0` (`IsVisible` alone kept its layout slot). An Avalonia upgrade re-checks them with a `run-hidden.ps1 -App` capture.
 - A native view cannot be overlaid, so the window toggles `DocumentView`'s visibility for the empty, missing and can't-read states instead of drawing over it.
+- The toast popup is a window of its own, and Avalonia's popup window answers `WM_NCHITTEST` for its whole rectangle, so outside its cards it would swallow clicks and the wheel meant for the document. `Platform/ToastClickThrough` subclasses that HWND (Windows only, attached by `MainWindow.OnToastPopupOpened`) and answers `HTTRANSPARENT` for a point on no card (`ToastHost.HasCardAt`), `HTCLIENT` on one.
+
+  Avalonia makes a new popup window on each open, so the subclass is detached when the popup closes (`OnToastPopupClosed`) and attached again on the next open.
 - `ThemeCatalog.LoadAll` can list two entries with one id (an invalid user file beside the built-in it shadows): look a theme up by id preferring the valid entry.
 
 ## Test locations
@@ -187,6 +200,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
   `Controls/DocumentViewScrollMessageTests.cs` covers how `DocumentView` turns a page `scroll` message into a `ScrollPosition`; `ViewModels/DocumentWindowViewModelTests.cs` covers the anchors kept and restored per document, and `tests/Yamv.Core.Tests/Session/SessionSnapshotTests.cs` and `SessionStoreTests.cs` the `scrollAnchors` map.
 
+  `ViewModels/ToastCenterTests.cs` covers the cards, their count, cap and fades on a fake clock, and `Views/ToastHostTests.cs` how `ToastHost` draws them; `Fakes/RecordingToasts` is the `IToasts` that records what a view model or `FileActionsTests` shows.
+
   `Platform/PlatformTrashTests.cs` covers `PlatformTrash`; its one `Category=Desktop` test touches the real Recycle Bin or Trash and is excluded by default.
 
   `tests/Yamv.Core.Tests/Documents/DocumentFileTypesTests.cs` covers the shared document-type list, and `tests/Yamv.Core.Tests/Links/` the link policy and `RealPath`.
@@ -199,7 +214,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
   `tests/Yamv.Core.Tests/Platform/RevealCommandTests.cs` covers the reveal command, `OpenFileCommandTests.cs` beside it the open command, and `tests/Yamv.Core.Tests/Theming/ColorMathTests.cs` the colour picker's conversions.
 - `tools/dev/page-check/`: a headless Chromium check of the document page (`npm install`, then `npm run check`), against a stubbed host.
-- `tools/dev/run-hidden.ps1` with `tools/dev/capture-window.ps1`, both run under `tools/hidden-desktop.ps1`: screenshots of the real app off the owner's desktop, each run on a fresh data folder (`-App` for the main window, `-Session` to seed its documents and layout, `-Settings` to seed its `settings.json` (a starting theme goes there), `-ThemeSettings` for the theme settings window, `-Themes` to seed its themes folder, `-Widths` to seed `widths.json`, `-WidthPopover` with `-WidthPopoverStep clearall|folder` to open the content-width popover, and `capture-window.ps1 -WithPopups` to paint popups over the capture, though its PrintWindow draws a popup's transparent margin black). `docs/design/fixtures/sample.md` is the sample document.
+- `tools/dev/run-hidden.ps1` with `tools/dev/capture-window.ps1`, both run under `tools/hidden-desktop.ps1`: screenshots of the real app off the owner's desktop, each run on a fresh data folder (`-App` for the main window, `-Session` to seed its documents and layout, `-Settings` to seed its `settings.json` (a starting theme goes there), `-ThemeSettings` for the theme settings window, `-Themes` to seed its themes folder, `-Widths` to seed `widths.json`, `-WidthPopover` with `-WidthPopoverStep clearall|folder` to open the content-width popover, `-Toasts` to show three sample toasts, and `capture-window.ps1 -WithPopups` to paint popups over the capture, though its PrintWindow draws a popup's transparent margin black). `docs/design/fixtures/sample.md` is the sample document.
 
 ## Deep docs
 

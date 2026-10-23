@@ -61,6 +61,11 @@
     document's own folder segment, so the line "Inherited from" shows when the width comes from a folder above it. Default:
     none (the popover as it opens).
 
+.PARAMETER Toasts
+    With -App: show three sample toasts once the window has shown (YAMV_DEV_TOASTS=1): a refusal with inline code, a
+    failure repeated three times and a plain failure, and paint their popup, a window of its own, over the capture. The
+    run waits for the "Window: toasts shown" log line. Not with -WidthPopover.
+
 .PARAMETER ThemeSettings
     Run the theme settings window instead of the harness, on a fresh data folder under .tmp\yamv-data.
 
@@ -107,6 +112,7 @@ param(
     [string] $DeleteAfterShown = '',
     [switch] $WidthPopover,
     [ValidateSet('', 'clearall', 'folder')] [string] $WidthPopoverStep = '',
+    [switch] $Toasts,
     [switch] $ThemeSettings,
     [string] $Themes = '',
     [string] $ImportFile = '',
@@ -122,8 +128,12 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $exe = Join-Path $root 'src\Yamv.App\bin\Release\net10.0\yamv.exe'
 $capture = Join-Path $PSScriptRoot 'capture-window.ps1'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-if (($Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover) -and -not $App) {
-    throw '-Session, -Settings, -Widths, -DeleteAfterShown and -WidthPopover need -App: the harnesses read no session, settings.json or widths.json.'
+if (($Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover -or $Toasts) -and -not $App) {
+    throw ('-Session, -Settings, -Widths, -DeleteAfterShown, -WidthPopover and -Toasts need -App: ' +
+        'the harnesses read no session, settings.json or widths.json.')
+}
+if ($Toasts -and $WidthPopover) {
+    throw '-Toasts and -WidthPopover each wait for their own log line; pass one.'
 }
 if ($WidthPopoverStep -and -not $WidthPopover) {
     throw '-WidthPopoverStep needs -WidthPopover: it acts on the popover that switch opens.'
@@ -165,7 +175,10 @@ if ($App) {
     $env:YAMV_DEV_THEME_SETTINGS = $null
     $env:YAMV_DEV_IMPORT_FILE = $null
     $env:YAMV_DEV_WIDTH_POPOVER = if ($WidthPopoverStep) { $WidthPopoverStep } elseif ($WidthPopover) { '1' } else { $null }
-    $readyLine = if ($WidthPopover) { 'Window: (width popover shown|no width popover to show)' } else { 'Window: shown' }
+    $env:YAMV_DEV_TOASTS = if ($Toasts) { '1' } else { $null }
+    $readyLine = if ($WidthPopover) { 'Window: (width popover shown|no width popover to show)' }
+    elseif ($Toasts) { 'Window: toasts shown' }
+    else { 'Window: shown' }
 }
 elseif ($ThemeSettings) {
     if ($Themes) {
@@ -177,6 +190,7 @@ elseif ($ThemeSettings) {
     $env:YAMV_DEV_THEME_SETTINGS = '1'
     $env:YAMV_DEV_IMPORT_FILE = $importPath
     $env:YAMV_DEV_WIDTH_POPOVER = $null
+    $env:YAMV_DEV_TOASTS = $null
     $readyLine = 'Window: shown'
 }
 else {
@@ -184,6 +198,7 @@ else {
     $env:YAMV_DEV_THEME_SETTINGS = $null
     $env:YAMV_DEV_IMPORT_FILE = $null
     $env:YAMV_DEV_WIDTH_POPOVER = $null
+    $env:YAMV_DEV_TOASTS = $null
     $readyLine = 'Harness: showing'
 }
 
@@ -254,7 +269,7 @@ try {
         Write-Output "Deleted $DeleteAfterShown; waiting for the missing-file re-check."
         Start-Sleep -Seconds 3
     }
-    & $capture -ProcessId $process.Id -Out $Out -WithPopups:$WidthPopover
+    & $capture -ProcessId $process.Id -Out $Out -WithPopups:($WidthPopover -or $Toasts)
     Write-Output "pid=$($process.Id) exited=$($process.HasExited)"
 }
 finally {

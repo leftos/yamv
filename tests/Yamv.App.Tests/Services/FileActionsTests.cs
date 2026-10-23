@@ -10,18 +10,40 @@ public sealed class FileActionsTests
 {
     private readonly RecordingAppLog _log = new();
     private readonly List<ProcessStartInfo> _started = [];
+    private readonly RecordingToasts _toasts = new();
 
     [Fact]
-    public void Reveal_of_a_path_with_no_existing_folder_logs_a_warning_and_starts_nothing()
+    public void Reveal_of_a_path_with_no_existing_folder_logs_a_warning_toasts_and_starts_nothing()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Only a Windows path can have no existing root.");
-        string path = Path.Combine(MissingDriveRoot(), "nowhere", "a.md");
+        string folder = Path.Combine(MissingDriveRoot(), "nowhere");
+        string path = Path.Combine(folder, "a.md");
 
         Actions().Reveal(path, RevealKind.File);
 
         Assert.Empty(_started);
         LogEntry entry = Assert.Single(_log.Entries);
         Assert.Equal(("warning", $"Reveal: no folder of {path} exists."), (entry.Level, entry.Message));
+        Assert.Equal((ToastKind.Warning, $"`{folder}` no longer exists"), Assert.Single(_toasts.Shown));
+    }
+
+    [Theory]
+    [InlineData(false, "Explorer")]
+    [InlineData(true, "Finder")]
+    public void Reveal_whose_file_manager_cannot_start_logs_a_warning_and_toasts(bool mac, string fileManager)
+    {
+        string path = Path.Combine(Path.GetTempPath(), "a.md");
+        var seams = new FileActionSeams(mac ? FilePlatform.MacOS : FilePlatform.Windows, (_, _) => new ProcessOutcome(false, 0, string.Empty));
+        var actions = new AvaloniaFileActions(_log, _toasts, _ => throw new Win32Exception(2), seams);
+
+        actions.Reveal(path, RevealKind.File);
+
+        LogEntry entry = Assert.Single(_log.Entries);
+        Assert.Equal("warning", entry.Level);
+        Assert.StartsWith("Reveal: could not start ", entry.Message, StringComparison.Ordinal);
+        Assert.EndsWith($" for {path}.", entry.Message, StringComparison.Ordinal);
+        Assert.IsType<Win32Exception>(entry.Exception);
+        Assert.Equal((ToastKind.Warning, $"Couldn't open {fileManager} for `a.md`"), Assert.Single(_toasts.Shown));
     }
 
     [Fact]
@@ -39,6 +61,7 @@ public sealed class FileActionsTests
             Assert.False(start.UseShellExecute);
             Assert.Contains(parent, start.Arguments + string.Join(" ", start.ArgumentList), StringComparison.Ordinal);
             Assert.Empty(_log.Entries);
+            Assert.Empty(_toasts.Shown);
         }
         finally
         {
@@ -119,7 +142,7 @@ public sealed class FileActionsTests
     {
         string path = ThemePath();
         var seams = new FileActionSeams(FilePlatform.Other, (_, _) => new ProcessOutcome(false, 0, string.Empty));
-        var actions = new AvaloniaFileActions(_log, _started.Add, seams);
+        var actions = new AvaloniaFileActions(_log, _toasts, _started.Add, seams);
 
         Assert.Throws<PlatformNotSupportedException>(() =>
         {
@@ -160,7 +183,7 @@ public sealed class FileActionsTests
     {
         string path = ThemePath();
         var log = new RecordingAppLog();
-        var actions = new AvaloniaFileActions(log, _ => throw new Win32Exception(1155), WindowsSeams);
+        var actions = new AvaloniaFileActions(log, _toasts, _ => throw new Win32Exception(1155), WindowsSeams);
 
         IOException failure = Assert.Throws<IOException>(() =>
         {
@@ -177,12 +200,12 @@ public sealed class FileActionsTests
 
     private static string ThemePath() => Path.Combine(Path.GetTempPath(), "yamv themes", "a b.yamv-theme.json");
 
-    private AvaloniaFileActions Actions() => new(_log, _started.Add, FileActionSeams.Default);
+    private AvaloniaFileActions Actions() => new(_log, _toasts, _started.Add, FileActionSeams.Default);
 
-    private AvaloniaFileActions WindowsActions() => new(_log, _started.Add, WindowsSeams);
+    private AvaloniaFileActions WindowsActions() => new(_log, _toasts, _started.Add, WindowsSeams);
 
     private static AvaloniaFileActions MacActions(RecordingAppLog log, Func<ProcessStartInfo, TimeSpan, ProcessOutcome> run) =>
-        new(log, _ => { }, new FileActionSeams(FilePlatform.MacOS, run));
+        new(log, null, _ => { }, new FileActionSeams(FilePlatform.MacOS, run));
 
     /// <summary>The root of a drive letter no volume is mounted on, Z: first.</summary>
     private static string MissingDriveRoot()

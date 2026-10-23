@@ -23,13 +23,21 @@ public static class ThemeFileTypes
 /// <summary>
 /// The platform's file actions: the window's storage provider for the pickers, Explorer or Finder for reveal, the app the
 /// system associates with a file for opening it, and the window's clipboard. Failures it can meet (no local path, no
-/// clipboard, an app that will not start) are logged as warnings.
+/// clipboard, an app that will not start) are logged as warnings; a reveal that fails is shown in a toast as well.
 /// </summary>
 /// <param name="log">Where warnings go.</param>
+/// <param name="toasts">Where a failed reveal is shown; null for a window with no toasts, whose failures are only logged.</param>
 /// <param name="startProcess">Starts a process and lets it run on its own; <see cref="StartProcess"/> outside tests.</param>
 /// <param name="seams">The platform and the way a process is waited for; <see cref="FileActionSeams.Default"/> outside tests.</param>
-internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> startProcess, FileActionSeams seams) : IFileActions
+internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<ProcessStartInfo> startProcess, FileActionSeams seams) : IFileActions
 {
+    /// <summary>The file actions of a window with no toasts, such as the theme settings window: failures are only logged.</summary>
+    /// <param name="log">Where warnings go.</param>
+    /// <param name="startProcess">Starts a process and lets it run on its own; <see cref="StartProcess"/> outside tests.</param>
+    /// <param name="seams">The platform and the way a process is waited for; <see cref="FileActionSeams.Default"/> outside tests.</param>
+    public AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> startProcess, FileActionSeams seams)
+        : this(log, null, startProcess, seams) { }
+
     /// <summary>The longest <c>open</c> is waited for; it hands the file off and returns well before this.</summary>
     private static readonly TimeSpan MacOpenTimeout = TimeSpan.FromSeconds(2);
 
@@ -123,6 +131,8 @@ internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> 
         if (RevealCommand.For(path, kind, seams.Platform == FilePlatform.MacOS) is not { } command)
         {
             log.LogWarning($"Reveal: no folder of {path} exists.");
+            string folder = kind == RevealKind.File ? Path.GetDirectoryName(path) ?? path : path;
+            toasts?.Show(ToastKind.Warning, $"`{folder}` no longer exists");
             return;
         }
 
@@ -145,6 +155,9 @@ internal sealed class AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> 
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
             log.LogWarning($"Reveal: could not start {command.Program} for {path}.", exception);
+            string fileManager = seams.Platform == FilePlatform.MacOS ? "Finder" : "Explorer";
+            string name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } fileName ? fileName : path;
+            toasts?.Show(ToastKind.Warning, $"Couldn't open {fileManager} for `{name}`");
         }
     }
 

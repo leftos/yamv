@@ -16,6 +16,17 @@ namespace Yamv.App.Services;
 /// <summary>Builds a window from the user's data folder: its log, saved session, themes and document view.</summary>
 public static class MainWindowFactory
 {
+    /// <summary>
+    /// Set to 1 in a run with its own data folder, it makes the main window show three sample toasts once it has shown, for a
+    /// hidden-desktop capture.
+    /// </summary>
+    internal const string ToastsVariable = "YAMV_DEV_TOASTS";
+
+    /// <summary>True when <see cref="ToastsVariable"/> is 1 and the run has its own data folder, so the owner's app never shows them.</summary>
+    private static bool DevToastsAsked() =>
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
+        && Environment.GetEnvironmentVariable(ToastsVariable) == "1";
+
     /// <summary>Creates the one theme bridge the app applies through: the catalog over the data folder's themes.</summary>
     /// <param name="application">The application whose resources and theme variant the bridge writes.</param>
     /// <param name="log">The process's log.</param>
@@ -74,10 +85,17 @@ public static class MainWindowFactory
         {
             var finder = new GitRootFinder(log);
             var state = new DocumentWindowState(persist: true, finder.FindWorkTreeRoot, File.Exists, GroupingOptions.ForCurrentPlatform);
-            var services = new DocumentWindowServices(widths, File.ReadAllText, TimeProvider.System, log, changes);
+            var services = new DocumentWindowServices(
+                widths,
+                File.ReadAllText,
+                TimeProvider.System,
+                log,
+                changes,
+                new ToastCenter(TimeProvider.System)
+            );
             viewModel = new DocumentWindowViewModel(state, view, services);
             viewModel.Restore(session);
-            var window = new MainWindow(viewModel, view, view, log);
+            var window = new MainWindow(viewModel, view, view, log) { ToastsWhenShown = DevToastsAsked() };
             RestoreLayout(window, session);
             var saver = new MainWindowSession(window, viewModel, store, TimeProvider.System, log);
             return new MainWindowComposition(window, viewModel, bridge, view, saver);
@@ -150,7 +168,14 @@ public static class MainWindowFactory
         {
             var finder = new GitRootFinder(log);
             var state = new DocumentWindowState(persist: false, finder.FindWorkTreeRoot, File.Exists, GroupingOptions.ForCurrentPlatform);
-            var services = new DocumentWindowServices(widths, File.ReadAllText, TimeProvider.System, log, changes);
+            var services = new DocumentWindowServices(
+                widths,
+                File.ReadAllText,
+                TimeProvider.System,
+                log,
+                changes,
+                new ToastCenter(TimeProvider.System)
+            );
             viewModel = new DocumentWindowViewModel(state, surface, services);
             viewModel.Open(ExistingFirst(files));
             var window = new MainWindow(viewModel, documentView, surface, log);

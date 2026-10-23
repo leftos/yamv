@@ -31,6 +31,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private static readonly TimeSpan DeleteGrace = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan InUseLimit = TimeSpan.FromSeconds(10);
 
+    /// <summary>The toast of a content-width change that could not be saved, from a step or a closed popover.</summary>
+    internal const string WidthNotSavedToast = "Couldn't save the width; see the log";
+
     private readonly DocumentWindowState _state;
     private readonly IDocumentSurface _surface;
     private readonly WidthStore _widths;
@@ -97,6 +100,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _surface.ScrollChanged += OnScrollChanged;
         _changes = services.Changes;
         _changes?.Changed += OnDocumentsChangedReported;
+        Toasts = services.Toasts ?? new ToastCenter(timeProvider);
 
         Sync();
         WatchDocuments();
@@ -112,6 +116,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>Raised when the last document of a window that does not persist was closed, so the window closes too.</summary>
     public event EventHandler? CloseRequested;
+
+    /// <summary>Where the window shows that an operation the user started failed; the window draws a <see cref="ToastCenter"/>.</summary>
+    public IToasts Toasts { get; }
 
     /// <summary>
     /// The tree's top-level rows. They are rebuilt when the tree's shape changes; otherwise the same rows are kept and their
@@ -374,6 +381,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
 
         _missingTimer.Dispose();
+        (Toasts as IDisposable)?.Dispose();
         EndGrace();
         _state.Changed -= OnStateChanged;
         _surface.ScrollChanged -= OnScrollChanged;
@@ -1046,6 +1054,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             if (!written)
             {
                 _log.LogWarning($"Cannot save the stepped content width of {path}; the page keeps its width.");
+                Toasts.Show(ToastKind.Warning, WidthNotSavedToast);
                 return;
             }
 
@@ -1066,6 +1075,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         catch (Exception exception)
         {
             _log.LogError($"Cannot step the content width of {path}.", exception);
+            Toasts.Show(ToastKind.Warning, WidthNotSavedToast);
         }
     }
 
@@ -1270,12 +1280,17 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 /// What reports the open documents' changes on disk; the view model owns it and disposes it. Null for a window that does not
 /// follow its documents.
 /// </param>
+/// <param name="Toasts">
+/// Where the window shows that an operation the user started failed; the view model owns it and disposes it. Null gives the
+/// window a <see cref="ToastCenter"/> of its own on <paramref name="Time"/>.
+/// </param>
 public sealed record DocumentWindowServices(
     WidthStore Widths,
     Func<string, string> ReadText,
     TimeProvider Time,
     IAppLog Log,
-    IDocumentChanges? Changes = null
+    IDocumentChanges? Changes = null,
+    IToasts? Toasts = null
 );
 
 /// <summary>What kind of session change <see cref="DocumentWindowViewModel.SessionDirty"/> reports.</summary>

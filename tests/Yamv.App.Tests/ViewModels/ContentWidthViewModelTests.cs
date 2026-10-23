@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Time.Testing;
+using Yamv.App.Services;
 using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.Core.Documents;
@@ -404,7 +405,7 @@ public sealed class ContentWidthViewModelTests
         });
 
     [Fact]
-    public Task A_save_that_fails_after_close_is_logged_and_the_page_gets_the_stored_width() =>
+    public Task A_save_that_fails_after_close_is_logged_toasted_and_the_page_gets_the_stored_width() =>
         Headless.RunAsync(async () =>
         {
             await using var fixture = new Fixture();
@@ -432,6 +433,36 @@ public sealed class ContentWidthViewModelTests
             Assert.Equal(new double?[] { null, 560 }, fixture.Surface.ContentWidths);
             Assert.Contains(fixture.Log.Entries, entry => entry.Level == "warning" && entry.Message.Contains(DocA, StringComparison.Ordinal));
             Assert.Null(popover.FootMessage);
+            Assert.Equal((ToastKind.Warning, "Couldn't save the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+        });
+
+    [Fact]
+    public Task A_save_that_fails_as_the_window_closes_is_logged_once_and_throws_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture(ownToasts: true);
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(560)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            TaskCompletionSource hold = fixture.HoldQueue();
+
+            try
+            {
+                popover.SliderPosition = 1;
+                popover.EndDrag();
+                fixture.ViewModel.Dispose();
+                using (new FileStream(fixture.WidthsFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    hold.SetResult();
+                    await fixture.ViewModel.WhenRendersSettled();
+                }
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+
+            Assert.Single(fixture.Log.Entries, entry => entry.Level == "warning" && entry.Message.Contains(DocA, StringComparison.Ordinal));
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Message == "Cannot change the content width.");
         });
 
     [Fact]
@@ -1117,7 +1148,12 @@ public sealed class ContentWidthViewModelTests
     /// </summary>
     private sealed class Fixture : IAsyncDisposable
     {
-        public Fixture(bool persist = true)
+        /// <param name="persist">Whether the window's state persists, as a main window's does.</param>
+        /// <param name="ownToasts">
+        /// True to give the view model no toasts, so it makes and disposes its own <see cref="ToastCenter"/>; else it shows
+        /// them on <see cref="Toasts"/>.
+        /// </param>
+        public Fixture(bool persist = true, bool ownToasts = false)
         {
             WidthsFolder = Path.Combine(Path.GetTempPath(), "yamv-popover-widths-" + Guid.NewGuid().ToString("N"));
             WidthsFile = Path.Combine(WidthsFolder, "widths.json");
@@ -1125,8 +1161,15 @@ public sealed class ContentWidthViewModelTests
             Reader = path => Files.TryGetValue(path, out string? text) ? text : throw new FileNotFoundException("No such fake file.", path);
             State = new DocumentWindowState(persist, FindRepo, path => !Absent.Contains(path), Plain);
             Timers = new TrackingTimeProvider(Time);
-            ViewModel = new DocumentWindowViewModel(State, Surface, new DocumentWindowServices(Widths, path => Reader(path), Timers, Log));
+            ViewModel = new DocumentWindowViewModel(
+                State,
+                Surface,
+                new DocumentWindowServices(Widths, path => Reader(path), Timers, Log, Toasts: ownToasts ? null : Toasts)
+            );
         }
+
+        /// <summary>The toasts the window shows.</summary>
+        public RecordingToasts Toasts { get; } = new();
 
         /// <summary>The window's clock: <see cref="Time"/>, recording every timer it creates.</summary>
         public TrackingTimeProvider Timers { get; }

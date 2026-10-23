@@ -10,6 +10,7 @@ A quiet markdown viewer for Windows and macOS.
 - The **⟷** button in the title bar opens the content-width popover: a slider for the text column's width, **Saved for** (the folders, deepest first, then All documents) to pick what the width is saved for, **Reset to inherited** and **Clear all overrides here**, which asks first. Esc, **⟷** again, a click outside or the window losing focus closes it.
 - Right-click a document, folder or group in the tree for Reveal in Explorer (Finder on macOS), Copy path, and for documents and groups, Close and Close group.
 - A missing document's **Locate…** picks the file that replaces it, in the same place in the tree.
+- An operation you started that fails (a reveal that cannot open Explorer or Finder, a content width that cannot be saved) shows a toast at the bottom of the document pane, as well as a line in the log. A toast fades after 5 s while the window is active, has a × to close it, shows a count when the same text repeats, and at most three are up at once.
 - A document whose file exists but cannot be read (in use by another program, or access denied) shows a can't-read pane with the reason, **Retry** (Ctrl+R, Cmd+R on macOS) and **Remove from list**; YAMV retries when the file changes, and its tree row stays normal with a warning mark.
 
 ## Command line

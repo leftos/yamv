@@ -1,11 +1,15 @@
+using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.Input;
 using Yamv.App.Controls;
+using Yamv.App.Platform;
 using Yamv.App.Services;
 using Yamv.App.ViewModels;
 using Yamv.Core.Diagnostics;
@@ -42,6 +46,8 @@ public partial class MainWindow : Window
     private double _reportedSidebarWidth;
     private ContentWidthViewModel? _widthPopover;
     private bool _creatingWidthPopover;
+    private readonly ToastCenter? _toasts;
+    private ToastClickThrough? _toastClickThrough;
 
     /// <summary>Creates an empty window; the XAML loader needs it. A real window is made with the other constructor.</summary>
     public MainWindow()
@@ -66,7 +72,18 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _surface = surface;
         _log = log;
-        FileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
+        FileActions = new AvaloniaFileActions(log, viewModel.Toasts, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
+        _toasts = viewModel.Toasts as ToastCenter;
+        ToastPopup.PlacementTarget = DocumentColumn;
+        ToastPopup.Opened += OnToastPopupOpened;
+        ToastPopup.Closed += OnToastPopupClosed;
+        ToastHost.DataContext = _toasts;
+        if (_toasts is not null)
+        {
+            ((INotifyCollectionChanged)_toasts.Items).CollectionChanged += OnToastsChanged;
+            UpdateToastsActive();
+        }
+
         DocumentHost.Content = documentView;
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
@@ -102,6 +119,12 @@ public partial class MainWindow : Window
     /// capture sets it to check the popover against its mock.
     /// </summary>
     internal DevWidthPopover WidthPopoverWhenShown { get; set; }
+
+    /// <summary>
+    /// Whether the window shows three sample toasts once it has shown its first document, writing <c>Window: toasts shown</c>.
+    /// The hidden-desktop capture sets it to check the toasts against their mock.
+    /// </summary>
+    internal bool ToastsWhenShown { get; set; }
 
     /// <summary>Raised when <see cref="SavedBounds"/> may have changed: the window moved, was resized, maximized or restored.</summary>
     public event EventHandler? SavedBoundsChanged;
@@ -164,7 +187,55 @@ public partial class MainWindow : Window
         {
             PostBoundsUpdate();
         }
+
+        if (change.Property == IsActiveProperty || change.Property == WindowStateProperty)
+        {
+            UpdateToastsActive();
+        }
+
+        if (change.Property == WindowStateProperty)
+        {
+            UpdateToastPopup();
+        }
     }
+
+    /// <summary>The toasts' fades run only while the window is active and not minimized.</summary>
+    private void UpdateToastsActive() => _toasts?.IsActive = IsActive && WindowState != WindowState.Minimized;
+
+    private void OnToastsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateToastPopup();
+
+    /// <summary>On Windows, the toast popup's new window lets every click and wheel turn on no card through to the page.</summary>
+    private void OnToastPopupOpened(object? sender, EventArgs e)
+    {
+        if (
+            OperatingSystem.IsWindows()
+            && TopLevel.GetTopLevel(ToastHost) is { } popupTop
+            && popupTop.TryGetPlatformHandle() is { HandleDescriptor: "HWND" } handle
+        )
+        {
+            _toastClickThrough = ToastClickThrough.Attach(
+                handle.Handle,
+                screen => popupTop.TranslatePoint(popupTop.PointToClient(screen), ToastHost) is { } point && ToastHost.HasCardAt(point),
+                _log!
+            );
+        }
+    }
+
+    private void OnToastPopupClosed(object? sender, EventArgs e)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            _toastClickThrough?.Dispose();
+        }
+
+        _toastClickThrough = null;
+    }
+
+    /// <summary>
+    /// Opens the toast popup while the shown window has a toast and is not minimized, and closes it otherwise; a minimized
+    /// window's toasts stay, held, until it is restored.
+    /// </summary>
+    private void UpdateToastPopup() => ToastPopup.IsOpen = _opened && WindowState != WindowState.Minimized && _toasts is { Items.Count: > 0 };
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -647,6 +718,7 @@ public partial class MainWindow : Window
     {
         _opened = true;
         UpdateBounds();
+        UpdateToastPopup();
         _ = LogShownAsync();
     }
 
@@ -682,10 +754,60 @@ public partial class MainWindow : Window
         await _viewModel!.WhenRendersSettled();
         var popupTop = TopLevel.GetTopLevel(WidthPopover);
         _log!.LogInfo(
-            $"Window: width popover top level {popupTop?.GetType().Name}, transparency asked {string.Join(", ", popupTop?.TransparencyLevelHint ?? [])}, "
+            $"Window: width popover top level {popupTop?.GetType().Name}, "
+                + $"transparency asked {string.Join(", ", popupTop?.TransparencyLevelHint ?? [])}, "
                 + $"given {popupTop?.ActualTransparencyLevel}"
         );
         _log.LogInfo("Window: width popover shown");
+    }
+
+    /// <summary>
+    /// Shows the capture's three toasts, oldest first: a refusal with inline code, a failure shown three times, and a plain
+    /// failure. Once they are laid out it logs whether the window is active, as the fades run only then, and on Windows how
+    /// the toast window answers a hit test in its margin and on a card, before the line the capture waits for.
+    /// </summary>
+    private async Task ShowDevToastsAsync()
+    {
+        IToasts toasts = _viewModel!.Toasts;
+        toasts.Show(ToastKind.Refusal, "`notes/diagram.png` doesn't exist");
+        for (int repeat = 0; repeat < 3; repeat++)
+        {
+            toasts.Show(ToastKind.Warning, DocumentWindowViewModel.WidthNotSavedToast);
+        }
+
+        toasts.Show(ToastKind.Warning, "Couldn't copy the path");
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        if (OperatingSystem.IsWindows())
+        {
+            LogDevToastHits();
+        }
+
+        _log!.LogInfo($"Window: toast popup open {ToastPopup.IsOpen}, window active {IsActive}");
+        _log.LogInfo("Window: toasts shown");
+    }
+
+    /// <summary>
+    /// Logs what the toast window answers, and which window Windows finds, at a point in the toast window's left margin and at
+    /// the middle of the first card.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private void LogDevToastHits()
+    {
+        Border? card = ToastHost.GetVisualDescendants().OfType<Border>().FirstOrDefault(border => border.Classes.Contains("card"));
+        if (
+            TopLevel.GetTopLevel(ToastHost) is not { } popupTop
+            || popupTop.TryGetPlatformHandle() is not { HandleDescriptor: "HWND" } handle
+            || card is null
+            || ToastHost.TranslatePoint(new Point(4, ToastHost.Bounds.Height / 2), popupTop) is not { } margin
+            || card.TranslatePoint(new Point(card.Bounds.Width / 2, card.Bounds.Height / 2), popupTop) is not { } onCard
+        )
+        {
+            _log!.LogInfo("Window: no toast window to hit test");
+            return;
+        }
+
+        _log!.LogInfo($"Window: toast margin {ToastClickThrough.DescribeHit(handle.Handle, popupTop.PointToScreen(margin))}");
+        _log.LogInfo($"Window: toast card {ToastClickThrough.DescribeHit(handle.Handle, popupTop.PointToScreen(onCard))}");
     }
 
     /// <summary>Writes <c>Window: shown</c> once the first document has been shown, or at once for the empty state or missing pane.</summary>
@@ -699,6 +821,11 @@ public partial class MainWindow : Window
             {
                 await ShowDevWidthPopoverAsync();
             }
+
+            if (ToastsWhenShown)
+            {
+                await ShowDevToastsAsync();
+            }
         }
         // The log line is a dev aid; a failure is logged rather than lost in a discarded task.
         catch (Exception exception)
@@ -711,6 +838,14 @@ public partial class MainWindow : Window
     {
         _opened = false;
         CloseWidthPopover(refocusDocument: false);
+        ToastPopup.IsOpen = false;
+        ToastPopup.Opened -= OnToastPopupOpened;
+        ToastPopup.Closed -= OnToastPopupClosed;
+        if (_toasts is not null)
+        {
+            ((INotifyCollectionChanged)_toasts.Items).CollectionChanged -= OnToastsChanged;
+        }
+
         WindowTitleBar.ContentWidthButton.Click -= OnContentWidthClick;
         WidthPopup.Closed -= OnWidthPopupClosed;
         _viewModel!.PropertyChanged -= OnViewModelPropertyChanged;

@@ -3,6 +3,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Yamv.App.Controls;
+using Yamv.App.Services;
 using Yamv.Core.Widths;
 
 namespace Yamv.App.ViewModels;
@@ -503,12 +504,16 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Logs a store change that failed, and shows <see cref="SaveFailedMessage"/> for 4 s unless the popover is stale.</summary>
+    /// <summary>
+    /// Logs a store change that failed, and shows <see cref="SaveFailedMessage"/> for 4 s; once the popover is stale (closed),
+    /// a toast in the window says so instead.
+    /// </summary>
     private void OnChangeFailed(string logLine)
     {
         _host.Services.Log.LogWarning(logLine);
         if (IsStale)
         {
+            _host.Window.Toasts.Show(ToastKind.Warning, DocumentWindowViewModel.WidthNotSavedToast);
             return;
         }
 

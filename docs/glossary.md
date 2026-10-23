@@ -44,6 +44,7 @@
 - **Text measure**: the width in px of the document's text lines, which is what a stored content width means; the column adds 44 px of side padding on each side.
 - **Text space**: the room a pane leaves for the document's text: the pane width less the page's 88 px of side padding (`ContentWidth.TextSpace`); a content width is compared against it ([content-width.md](design/content-width.md)).
 - **Theme family**: one `.yamv-theme.json` file, holding a light half, a dark half or both ([themes.md](design/themes.md)).
+- **Toast**: a short-lived card at the bottom of the document pane reporting a failed or refused operation the user started (`ToastCenter`, shown through `IToasts`); a repeat of its text counts "×N" and restarts its 5 s fade, the fade pauses while the window is inactive or minimized, and at most three are up ([look.md](design/look.md)).
 - **Token**: a named theme value (a colour, font, size) that drives both the document page (as a `--yamv-*` CSS property) and the app chrome.
 - **Tree order**: the order documents appear in the sidebar tree (groups, then folders before files, case-insensitively), which Close, Ctrl+Tab and Ctrl+Shift+Tab follow; it differs from the order documents were opened.
 - **Unreadable document**: an open document whose file exists but cannot be read (locked by another program, or access denied); the window shows the can't-read pane (`UnreadableDocumentPane`) in place of the page, and the state clears on a successful read, a selection change, or the file going missing.

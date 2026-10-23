@@ -1,0 +1,123 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  xmlns:views="using:Yamv.App.Views"
+  x:Class="Yamv.App.Views.ToastHost"
+  x:DataType="vm:ToastCenter"
+  FontFamily="{DynamicResource YamvUiFont}"
+  FontSize="13"
+  Foreground="{DynamicResource YamvText}"
+>
+  <UserControl.Styles>
+    <Style Selector="Button.toastClose">
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="IsTabStop" Value="False" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Panel Background="Transparent" Width="16" Height="16">
+            <TextBlock Text="✕" FontSize="12" Foreground="{DynamicResource YamvTextMuted}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Border.code">
+      <Setter Property="Background" Value="{DynamicResource YamvCodeBackground}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="5,1" />
+    </Style>
+    <Style Selector="Border.code > TextBlock">
+      <Setter Property="FontFamily" Value="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+  </UserControl.Styles>
+
+  <!--
+    The cards, oldest at the top, each as wide as its line and centred. The transparent margin holds their shadows; the
+    bottom one keeps the newest card 16 px above the foot of the document pane.
+  -->
+  <ItemsControl x:Name="Cards" ItemsSource="{Binding Items}" Margin="24,8,24,16">
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate>
+        <StackPanel Spacing="8" />
+      </ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate>
+      <DataTemplate x:DataType="vm:ToastItem">
+        <Panel HorizontalAlignment="Center" Effect="{DynamicResource ToastNearShadow}">
+          <Border
+            Classes="card"
+            Effect="{DynamicResource ToastFarShadow}"
+            Background="{DynamicResource YamvPageBackground}"
+            BorderBrush="{DynamicResource YamvLine}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12,8,10,9"
+            ClipToBounds="True"
+          >
+            <Panel>
+              <DockPanel>
+                <Panel DockPanel.Dock="Left" Width="14" Height="14" Margin="0,0,9,0" VerticalAlignment="Center">
+                  <Viewbox IsVisible="{Binding IsWarning}">
+                    <Canvas Width="16" Height="16">
+                      <Path Data="M8 1.6 15 14H1z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
+                      <Path Data="M8 6v4" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                      <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
+                    </Canvas>
+                  </Viewbox>
+                  <Viewbox IsVisible="{Binding IsRefusal}">
+                    <Canvas Width="16" Height="16">
+                      <Ellipse
+                        Canvas.Left="1.8"
+                        Canvas.Top="1.8"
+                        Width="12.4"
+                        Height="12.4"
+                        Stroke="{DynamicResource YamvWarning}"
+                        StrokeThickness="1.5"
+                      />
+                      <Path Data="M3.7 12.3 12.3 3.7" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" />
+                    </Canvas>
+                  </Viewbox>
+                </Panel>
+                <Button Classes="toastClose" DockPanel.Dock="Right" Margin="17,0,0,0" AutomationProperties.Name="Close" Click="OnCloseClick" />
+                <Border
+                  Classes="count"
+                  DockPanel.Dock="Right"
+                  Margin="8,0,0,0"
+                  Padding="7,0"
+                  CornerRadius="9"
+                  BorderThickness="1"
+                  BorderBrush="{DynamicResource YamvLine}"
+                  Background="{DynamicResource YamvHoverBackground}"
+                  VerticalAlignment="Center"
+                  IsVisible="{Binding HasCount}"
+                >
+                  <TextBlock
+                    Text="{Binding CountText}"
+                    FontSize="11.5"
+                    FontWeight="SemiBold"
+                    FontFeatures="+tnum"
+                    LineHeight="17"
+                    Foreground="{DynamicResource YamvTextSecondary}"
+                  />
+                </Border>
+                <views:ToastText Segments="{Binding Segments}" VerticalAlignment="Center" />
+              </DockPanel>
+              <!-- The time left of the card's 5 s, along its foot inside the border. -->
+              <views:ToastTimerLine
+                Fraction="{Binding TimeLeft}"
+                Fill="{DynamicResource YamvTextMuted}"
+                Opacity="0.55"
+                Height="2"
+                VerticalAlignment="Bottom"
+                Margin="-12,0,-10,-9"
+                IsHitTestVisible="False"
+              />
+            </Panel>
+          </Border>
+        </Panel>
+      </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>

@@ -170,6 +170,22 @@
         >
           <views:ContentWidthPopover x:Name="WidthPopover" />
         </Popup>
+        <!--
+          The toasts: a native popup over the web view as well, its foot on the foot of the document pane and centred on it. It
+          never takes focus or a click outside its cards, and stays open while the window has a toast.
+        -->
+        <Popup
+          x:Name="ToastPopup"
+          ShouldUseOverlayLayer="False"
+          IsLightDismissEnabled="False"
+          TakesFocusFromNativeControl="False"
+          WindowManagerAddShadowHint="False"
+          Placement="AnchorAndGravity"
+          PlacementAnchor="Bottom"
+          PlacementGravity="Top"
+        >
+          <views:ToastHost x:Name="ToastHost" />
+        </Popup>
       </Panel>
       <GridSplitter
         Grid.Column="1"
