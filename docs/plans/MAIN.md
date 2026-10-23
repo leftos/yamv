@@ -6,19 +6,14 @@
 
 ### Window and launch (5/5 done)
 
-### Features (4/16 done)
+### Features (9/16 done)
 - [/] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
 - [ ] YAMV-50 Content width step: scrollbar in the pane measure, other instances, steps during a render, letter layouts
-- [/] YAMV-11 Theme settings window, Import notice and a watcher on the user themes folder
 - [/] YAMV-48 Toast for failed operations: never only a log line
-- [/] YAMV-49 Link policy: case-sensitive folder tie-break and device-path test rows
-- [ ] YAMV-63 Content width popover: stale cached width, store exceptions, Reset-before-EndDrag segment
-- [ ] YAMV-69 Content-width popover: keep the keyboard focus ring when the Clear all question moves focus
+- [/] YAMV-63 Content width popover: stale cached width, store exceptions, Reset-before-EndDrag segment
 - [ ] YAMV-79 Content-width popover follows a window resize while open
 - [ ] YAMV-56 Width popover: preview an unreachable width on an example document, with a toast
 - [ ] YAMV-81 Tail switch: the view follows text appended to a document
-- [ ] YAMV-84 Content-width popover: a view test that drags the knob
-- [ ] YAMV-88 Link policy: no network I/O before the UNC guard; reject relative link targets
 
 ### Document read and panes (0/11 done)
 - [ ] YAMV-44 CSharpier: three .axaml files on main are unformatted; ThemePreview's reformat changes its text
@@ -55,6 +50,14 @@
 - [ ] YAMV-32 Register: flush the shell's association-change notice before exit
 - [ ] YAMV-83 Settings writer: write only the changed field; close the watcher's stale-read window
 - [ ] YAMV-59 Width and settings stores: cross-process lock; settings store id and appearance checks
+
+### No milestone
+- [ ] YAMV-89 Link targets: a real path segment ending in a dot or space must open exactly what was checked
+- [ ] YAMV-90 More menu: one highlighted row once a second entry joins
+- [ ] YAMV-91 Log an exception that escapes a UI handler instead of ending the app silently
+- [ ] YAMV-92 Theme settings host: close the built window when Show throws
+- [ ] YAMV-93 Content-width popover: a store exception on a read, Reset or Clear all gets the save's recovery
+- [ ] YAMV-94 Content-width popover: re-show the segment when a save finds another window already changed it
 
 ## Single instance
 
