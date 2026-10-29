@@ -1,14 +1,18 @@
+# Commits run only checks scoped to the staged files; the Release build runs at pre-push.
+default_install_hook_types = ["pre-commit", "pre-push"]
+default_stages = ["pre-commit"]
+
 [[repos]]
 repo = "https://github.com/pre-commit/pre-commit-hooks"
 rev = "v6.0.0"
 hooks = [
   { id = "mixed-line-ending", args = ["--fix=lf"] },
-  { id = "end-of-file-fixer", exclude = "^src/Yamv\\.App/Web/vendor/" },
-  { id = "trailing-whitespace", exclude = "(\\.md$|^src/Yamv\\.App/Web/vendor/)" },
+  { id = "end-of-file-fixer", exclude = "^src/Yamv\\.App/Web/vendor/", stages = ["pre-commit"] },
+  { id = "trailing-whitespace", exclude = "(\\.md$|^src/Yamv\\.App/Web/vendor/)", stages = ["pre-commit"] },
   { id = "check-merge-conflict" },
 ]
 
-# C# hooks: the fixers run and re-stage first, the warnings-as-errors build gates the result last.
+# C# hooks: the fixers run and re-stage at commit, the warnings-as-errors build gates the push.
 [[repos]]
 repo = "local"
 
@@ -36,4 +40,6 @@ name = "dotnet build (warnings as errors)"
 entry = "pwsh -NoProfile -File tools/gate.ps1 run --log .tmp/hook-build.log --slot heavy --timeout 600 -- dotnet build Yamv.slnx -c Release"
 language = "system"
 pass_filenames = false
-stages = ["pre-commit"]
+# A push of Markdown alone has nothing to build.
+exclude = '\.md$'
+stages = ["pre-push"]

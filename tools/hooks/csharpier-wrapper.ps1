@@ -6,8 +6,8 @@
 
 .DESCRIPTION
     Runs `dotnet csharpier format` on the files passed by prek, then re-stages any modifications so prek does
-    not fail the commit on "files were modified by this hook". The dotnet-build hook runs last and gates the
-    commit on the formatted result still compiling.
+    not fail the commit on "files were modified by this hook". The pre-push dotnet-build hook
+    gates the push on the formatted result still compiling.
 
     It runs under pwsh rather than bash because a bare `dotnet` in a bash script is resolved by whichever bash
     prek's parent process finds, which from pwsh can be the WSL stub that has no dotnet on its path.

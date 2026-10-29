@@ -10,7 +10,7 @@
     level the CI `--verify-no-changes` check uses. One pass fixes only the IDE0008 sub-rule its first diagnostic
     came from (dotnet/roslyn#80349), so the command is re-run until the files it was given stop changing, at most
     3 passes. Modified files are re-staged so prek does not fail the commit on "files were modified by this hook";
-    the dotnet-build hook runs last and gates the result.
+    the pre-push dotnet-build hook gates the result.
 
     When a staged file's project has no restore output, the wrapper runs `dotnet restore` first.
 
@@ -67,7 +67,7 @@ if (Test-RestoreNeeded -Paths $Files) {
 # `dotnet format` runs one Fix All per diagnostic ID, seeded from the first diagnostic it finds, and never
 # iterates. Each IDE0008 diagnostic carries one of three equivalence keys (built-in type, apparent type,
 # elsewhere) and a pass fixes only the key it started from (dotnet/roslyn#80349), so one pass can leave IDE0008
-# sites behind and the build hook then fails the commit. Re-run until the files stop changing, at most 3 passes.
+# sites behind and the pre-push build hook then fails the push. Re-run until the files stop changing, at most 3 passes.
 $passes = 0
 while ($passes -lt 3) {
     $passes++
