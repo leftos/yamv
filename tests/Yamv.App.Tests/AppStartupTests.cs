@@ -313,7 +313,12 @@ public sealed class AppStartupTests
             var surface = new FakeDocumentSurface();
             var state = new DocumentWindowState(false, _ => null, _ => true, new GroupingOptions(null, StringComparison.OrdinalIgnoreCase));
             var widths = new WidthStore(Path.Combine(themes, "widths.json"), log);
-            var viewModel = new DocumentWindowViewModel(state, surface, new DocumentWindowServices(widths, _ => "", new FakeTimeProvider(), log));
+            var time = new FakeTimeProvider();
+            var viewModel = new DocumentWindowViewModel(
+                state,
+                surface,
+                new DocumentWindowServices(widths, _ => "", time, log, new ToastCenter(time))
+            );
             var window = new MainWindow(viewModel, new Border(), surface, log);
             var composition = new MainWindowComposition(window, viewModel, bridge, surface, session: null);
             try

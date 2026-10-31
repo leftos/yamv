@@ -36,6 +36,9 @@ internal sealed record LinkOpenerSeams(
 /// </summary>
 internal sealed class LinkOpener : IDisposable
 {
+    /// <summary>The toast of a link the app could not act on.</summary>
+    internal const string LinkFailedToast = "Couldn't open the link; see the log";
+
     private readonly ILinkDocuments _documents;
     private readonly IToasts _toasts;
     private readonly IAppLog _log;
@@ -70,6 +73,7 @@ internal sealed class LinkOpener : IDisposable
         catch (Exception exception)
         {
             _log.LogError($"Link: could not handle {e?.Href}.", exception);
+            _toasts.Show(ToastKind.Warning, LinkFailedToast);
         }
     }
 
@@ -170,6 +174,7 @@ internal sealed class LinkOpener : IDisposable
                 return Task.CompletedTask;
             default:
                 _log.LogError($"Link: no action for a {decision.GetType().Name} decision on {link.Href}; nothing opened.");
+                _toasts.Show(ToastKind.Warning, LinkFailedToast);
                 return Task.CompletedTask;
         }
     }
@@ -185,6 +190,7 @@ internal sealed class LinkOpener : IDisposable
         if (!uri.IsAbsoluteUri || uri.IsFile || uri.Scheme is not ("http" or "https" or "mailto"))
         {
             _log.LogError($"Link: refused to hand {uri.OriginalString} to the browser: not an http, https or mailto URI.");
+            _toasts.Show(ToastKind.Warning, LinkFailedToast);
             return;
         }
 
@@ -246,6 +252,7 @@ internal sealed class LinkOpener : IDisposable
         if (toast is not { } shown)
         {
             _log.LogError($"Link: no toast for an ignored link of kind {ignore.Kind}: {href}");
+            _toasts.Show(ToastKind.Warning, LinkFailedToast);
             return;
         }
 

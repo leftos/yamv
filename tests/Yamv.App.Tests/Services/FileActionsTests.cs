@@ -266,6 +266,94 @@ public sealed class FileActionsTests
         Assert.Empty(_toasts.Shown);
     }
 
+    [Fact]
+    public async Task Copy_path_with_no_clipboard_logs_and_toasts()
+    {
+        await Actions().CopyTextToAsync(null, "x");
+
+        LogEntry entry = Assert.Single(_log.Entries);
+        Assert.Equal(("warning", "Copy path: the window has no clipboard."), (entry.Level, entry.Message));
+        Assert.Equal((ToastKind.Warning, "Couldn't copy the path: no clipboard"), Assert.Single(_toasts.Shown));
+    }
+
+    [Fact]
+    public void A_picked_file_with_no_local_path_is_refused_by_name()
+    {
+        List<string> paths = Actions().KeepLocal([("a.md", null)]);
+
+        Assert.Empty(paths);
+        LogEntry entry = Assert.Single(_log.Entries);
+        Assert.Equal(("warning", "Pick: a.md has no local path and is not opened."), (entry.Level, entry.Message));
+        Assert.Equal((ToastKind.Refusal, "YAMV can't open `a.md`: it isn't a local file"), Assert.Single(_toasts.Shown));
+    }
+
+    [Fact]
+    public void Several_picked_files_with_no_local_path_are_refused_once_with_their_count()
+    {
+        List<string> paths = Actions().KeepLocal([("a.md", null), ("b.md", null), ("c.md", null)]);
+
+        Assert.Empty(paths);
+        Assert.Equal(3, _log.Entries.Count);
+        Assert.Equal((ToastKind.Refusal, "YAMV can't open 3 picked files: they aren't local files"), Assert.Single(_toasts.Shown));
+    }
+
+    [Fact]
+    public void A_picked_file_with_a_local_path_shows_no_toast()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "yamv-actions", "a.md");
+
+        List<string> paths = Actions().KeepLocal([("a.md", path)]);
+
+        Assert.Equal([path], paths);
+        Assert.Empty(_log.Entries);
+        Assert.Empty(_toasts.Shown);
+    }
+
+    [Fact]
+    public void A_window_with_no_toasts_only_logs_a_picked_non_local_file()
+    {
+        var actions = new AvaloniaFileActions(_log, null, _started.Add, FileActionSeams.Default);
+
+        Assert.Empty(actions.KeepLocal([("a.md", null)]));
+
+        LogEntry entry = Assert.Single(_log.Entries);
+        Assert.Equal(("warning", "Pick: a.md has no local path and is not opened."), (entry.Level, entry.Message));
+    }
+
+    [Fact]
+    public void A_folder_name_with_a_backtick_stays_inside_the_code_span()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only a Windows path can have no existing root.");
+        string folder = Path.Combine(MissingDriveRoot(), "a`b");
+        string path = Path.Combine(folder, "notes.md");
+
+        Actions().Reveal(path, RevealKind.File);
+
+        (ToastKind kind, string text) = Assert.Single(_toasts.Shown);
+        Assert.Equal(ToastKind.Warning, kind);
+        Assert.Contains('ˋ', text);
+        Assert.Equal(2, text.Count(character => character == '`'));
+        Assert.Equal($"`{folder.Replace('`', 'ˋ')}` no longer exists", text);
+    }
+
+    [Theory]
+    [InlineData(false, "Explorer")]
+    [InlineData(true, "Finder")]
+    public void A_file_name_with_a_backtick_stays_inside_the_code_span(bool mac, string fileManager)
+    {
+        string path = Path.Combine(Path.GetTempPath(), "a`b.md");
+        var seams = new FileActionSeams(mac ? FilePlatform.MacOS : FilePlatform.Windows, (_, _) => new ProcessOutcome(false, 0, string.Empty));
+        var actions = new AvaloniaFileActions(_log, _toasts, _ => throw new Win32Exception(2), seams);
+
+        actions.Reveal(path, RevealKind.File);
+
+        (ToastKind kind, string text) = Assert.Single(_toasts.Shown);
+        Assert.Equal(ToastKind.Warning, kind);
+        Assert.Contains('ˋ', text);
+        Assert.Equal(2, text.Count(character => character == '`'));
+        Assert.Equal($"Couldn't open {fileManager} for `aˋb.md`", text);
+    }
+
     private static FileActionSeams WindowsSeams { get; } = new(FilePlatform.Windows, (_, _) => new ProcessOutcome(false, 0, string.Empty));
 
     private static string ThemePath() => Path.Combine(Path.GetTempPath(), "yamv themes", "a b.yamv-theme.json");

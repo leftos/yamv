@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using Yamv.App.ViewModels;
@@ -76,6 +77,18 @@ public sealed class ToastText : TextBlock
         IReadOnlyList<ToastSegment>?
     >(nameof(Segments));
 
+    /// <summary>The narrowest a code box gets, however narrow the card is.</summary>
+    private const double MinCodeWidth = 60;
+
+    /// <summary>The left and right padding of a <c>Border.code</c>, which its text does not have.</summary>
+    private const double CodeChrome = 10;
+
+    /// <summary>The text of each inline code box, whose width is capped so the box keeps a visible piece of its name.</summary>
+    private readonly List<TextBlock> _codeBlocks = [];
+
+    /// <summary>The line's plain pieces joined, whose width the code boxes leave room for.</summary>
+    private string _plainText = "";
+
     /// <summary>The pieces of the line, in order.</summary>
     public IReadOnlyList<ToastSegment>? Segments
     {
@@ -85,16 +98,49 @@ public sealed class ToastText : TextBlock
 
     protected override Type StyleKeyOverride => typeof(TextBlock);
 
+    /// <summary>
+    /// Caps each code box at the width left once the plain pieces are paid for before laying the line out, so a long name is cut
+    /// inside its box instead of the box collapsing as a whole or taking the line.
+    /// </summary>
+    /// <param name="availableSize">The width the card gives the line.</param>
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        if (double.IsFinite(availableSize.Width) && _codeBlocks.Count > 0)
+        {
+            double maxWidth = Math.Max(MinCodeWidth, (availableSize.Width - PlainWidth() - (_codeBlocks.Count * CodeChrome)) / _codeBlocks.Count);
+            foreach (TextBlock block in _codeBlocks)
+            {
+                block.MaxWidth = maxWidth;
+            }
+        }
+
+        return base.MeasureOverride(availableSize);
+    }
+
+    /// <summary>The width the plain pieces take on one line, so the code boxes are capped to what is left of the line.</summary>
+    private double PlainWidth()
+    {
+        if (_plainText.Length == 0)
+        {
+            return 0;
+        }
+
+        using var layout = new TextLayout(_plainText, new Typeface(FontFamily, FontStyle, FontWeight), FontSize, Foreground);
+        return layout.WidthIncludingTrailingWhitespace;
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
         if (change.Property == SegmentsProperty)
         {
+            _codeBlocks.Clear();
+            _plainText = string.Concat((Segments ?? []).Where(segment => !segment.IsCode).Select(segment => segment.Text));
             Inlines = InlinesOf(Segments ?? []);
         }
     }
 
-    private static InlineCollection InlinesOf(IReadOnlyList<ToastSegment> segments)
+    private InlineCollection InlinesOf(IReadOnlyList<ToastSegment> segments)
     {
         var inlines = new InlineCollection();
         foreach (ToastSegment segment in segments)
@@ -105,9 +151,11 @@ public sealed class ToastText : TextBlock
         return inlines;
     }
 
-    private static InlineUIContainer CodeBox(string text)
+    private InlineUIContainer CodeBox(string text)
     {
-        var box = new Border { Child = new TextBlock { Text = text } };
+        var inner = new TextBlock { Text = text, TextTrimming = TextTrimming.CharacterEllipsis };
+        _codeBlocks.Add(inner);
+        var box = new Border { Child = inner };
         box.Classes.Add("code");
         return new InlineUIContainer(box) { BaselineAlignment = BaselineAlignment.Center };
     }

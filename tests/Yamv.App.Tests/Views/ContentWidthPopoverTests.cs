@@ -805,10 +805,11 @@ public sealed class ContentWidthPopoverTests
             );
             WidthsFile = Path.Combine(_root, "data", "widths.json");
             Widths = new WidthStore(WidthsFile, Log);
+            var time = new FakeTimeProvider();
             ViewModel = new DocumentWindowViewModel(
                 state,
                 Surface,
-                new DocumentWindowServices(Widths, File.ReadAllText, new FakeTimeProvider(), Log)
+                new DocumentWindowServices(Widths, File.ReadAllText, time, Log, new ToastCenter(time))
             );
             Window = new MainWindow(ViewModel, Document, Surface, Log);
             Window.Closed += (_, _) => _closed = true;

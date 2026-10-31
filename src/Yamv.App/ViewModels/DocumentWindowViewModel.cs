@@ -34,6 +34,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>The toast of a content-width change that could not be saved, from a step or a closed popover.</summary>
     internal const string WidthNotSavedToast = "Couldn't save the width; see the log";
 
+    /// <summary>The toast of a content-width change that was saved but could not be sent to the page.</summary>
+    internal const string WidthNotShownToast = "Couldn't apply the width; see the log";
+
     private readonly DocumentWindowState _state;
     private readonly IDocumentSurface _surface;
     private readonly WidthStore _widths;
@@ -64,6 +67,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private int _renderGeneration;
     private string? _shownPath;
 
+    /// <summary>
+    /// The document a read the user started is still due for, so a background read that replaces it, or a state change that
+    /// starts it, still reports a failure.
+    /// </summary>
+    private string? _userReadPath;
+
     /// <summary>A link's fragment and the render generation whose first show scrolls to it; null when none waits.</summary>
     private (string Fragment, int Generation)? _pendingFragment;
     private List<ShapeRow>? _treeShape;
@@ -75,8 +84,8 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <param name="state">The window's documents, selection and layout.</param>
     /// <param name="surface">The view that draws the selected document.</param>
     /// <param name="services">
-    /// The width store, the document reader, the clock, the log and what reports the documents' changes, which the view model
-    /// takes ownership of.
+    /// The width store, the document reader, the clock, the log, where the window's toasts go and what reports the documents'
+    /// changes, which the view model takes ownership of.
     /// </param>
     public DocumentWindowViewModel(DocumentWindowState state, IDocumentSurface surface, DocumentWindowServices services)
     {
@@ -87,6 +96,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(services.ReadText);
         ArgumentNullException.ThrowIfNull(services.Time);
         ArgumentNullException.ThrowIfNull(services.Log);
+        ArgumentNullException.ThrowIfNull(services.Toasts);
         TimeProvider timeProvider = services.Time;
         _state = state;
         _surface = surface;
@@ -103,7 +113,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _surface.ScrollChanged += OnScrollChanged;
         _changes = services.Changes;
         _changes?.Changed += OnDocumentsChangedReported;
-        Toasts = services.Toasts ?? new ToastCenter(timeProvider);
+        Toasts = services.Toasts;
 
         Sync();
         WatchDocuments();
@@ -212,12 +222,15 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     {
         EndGrace();
         bool wasMissing = SelectedIsMissing;
+        // RefreshMissing raises Changed itself, and that starts the render of a file that came back.
+        _userReadPath = wasMissing ? SelectedPath : null;
         if (_state.RefreshMissing() && wasMissing && !SelectedIsMissing)
         {
             return;
         }
 
-        RenderSelection(RenderOrigin.Show);
+        _userReadPath = null;
+        RenderSelection(RenderOrigin.Show, userStarted: true);
     }
 
     /// <summary>
@@ -268,14 +281,14 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         var created = new TaskCompletionSource<ContentWidthViewModel?>(TaskCreationOptions.RunContinuationsAsynchronously);
         QueueWidthWork(async () =>
         {
-            ContentWidthViewModel? popover = null;
             try
             {
-                popover = await OpenContentWidthPopoverAsync(path, paneWidth);
+                created.SetResult(await OpenContentWidthPopoverAsync(path, paneWidth));
             }
-            finally
+            // RunLogged on the window reports this; the queue's own toast would call it a failed save.
+            catch (Exception exception)
             {
-                created.SetResult(popover);
+                created.SetException(exception);
             }
         });
         return created.Task;
@@ -524,7 +537,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         WatchDocuments();
         if (!SamePath(previousPath, SelectedPath) || (wasMissing && !SelectedIsMissing))
         {
-            RenderSelection(RenderOrigin.Show);
+            RenderSelection(RenderOrigin.Show, userStarted: !SamePath(previousPath, SelectedPath));
         }
 
         if (_state.WindowShouldClose && !_closeRequested)
@@ -603,7 +616,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         bool keptWhileInUse = _state.SelectedPath is string selected && _inUseSince.ContainsKey(selected);
         if ((SelectedIsUnreadable || keptWhileInUse) && !RenderInFlight)
         {
-            RenderSelection(RenderOrigin.Reload);
+            RenderSelection(RenderOrigin.Reload, userStarted: false);
         }
     }
 
@@ -698,7 +711,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
         if (!selectedWasMissing && changed.Any(path => SamePath(path, selected)))
         {
-            RenderSelection(RenderOrigin.Reload);
+            RenderSelection(RenderOrigin.Reload, userStarted: false);
         }
     }
 
@@ -753,7 +766,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _state.RefreshMissing([path]);
         if (SamePath(path, _state.SelectedPath) && !IsMissing(path))
         {
-            RenderSelection(RenderOrigin.ReloadAfterGrace);
+            RenderSelection(RenderOrigin.ReloadAfterGrace, userStarted: false);
         }
     }
 
@@ -936,7 +949,11 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// Why the document is read. A reload counts as one only when the selection's page is the one shown and it is not
     /// unreadable; otherwise the read is a first show.
     /// </param>
-    private void RenderSelection(RenderOrigin requested)
+    /// <param name="userStarted">
+    /// Whether the user just asked for this read: a new selection or the Reload command, never a change report, a re-check or
+    /// a file that came back. Only a user's read that is still current shows its failure in a toast.
+    /// </param>
+    private void RenderSelection(RenderOrigin requested, bool userStarted)
     {
         int generation = ++_renderGeneration;
         string? path = _state.SelectedPath;
@@ -945,13 +962,18 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        if (userStarted)
+        {
+            _userReadPath = path;
+        }
+
         bool showsPage = SamePath(_shownPath, path) && !_unreadable.Contains(path);
         RenderOrigin origin = showsPage ? requested : RenderOrigin.Show;
         _renders.RemoveWhere(render => render.IsCompleted);
-        _renders.Add(RenderAsync(path, generation, origin));
+        _renders.Add(RenderAsync(path, generation, origin, SamePath(_userReadPath, path)));
     }
 
-    private async Task RenderAsync(string path, int generation, RenderOrigin origin)
+    private async Task RenderAsync(string path, int generation, RenderOrigin origin, bool userStarted)
     {
         try
         {
@@ -960,6 +982,17 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         catch (Exception exception)
         {
             _log.LogError($"Cannot show the document {path}.", exception);
+            if (userStarted && generation == _renderGeneration && !_disposed && SamePath(path, _state.SelectedPath))
+            {
+                Toasts.Show(ToastKind.Warning, $"Couldn't show {ToastValue.Code(Path.GetFileName(path))}; see the log");
+            }
+        }
+        finally
+        {
+            if (generation == _renderGeneration)
+            {
+                _userReadPath = null;
+            }
         }
     }
 
@@ -1007,16 +1040,23 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         return pending is { } slot && slot.Generation == generation ? slot.Fragment : null;
     }
 
-    /// <summary>Scrolls the shown document to a link's fragment, logging a failure.</summary>
+    /// <summary>Scrolls the shown document to a link's fragment, logging a failure and showing it in a toast.</summary>
     private async Task ScrollToFragmentAsync(string fragment)
     {
+        bool ran;
         try
         {
-            await _surface.ScrollToFragmentAsync(fragment);
+            ran = await _surface.ScrollToFragmentAsync(fragment);
         }
         catch (Exception exception)
         {
             _log.LogError($"Cannot scroll the shown document to the heading {fragment}.", exception);
+            ran = false;
+        }
+
+        if (!ran)
+        {
+            Toasts.Show(ToastKind.Warning, $"Couldn't scroll to {ToastValue.Code(fragment)}; see the log");
         }
     }
 
@@ -1082,6 +1122,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         catch (Exception exception)
         {
             _log.LogError("Cannot change the content width.", exception);
+            Toasts.Show(ToastKind.Warning, WidthNotSavedToast);
         }
     }
 
@@ -1154,14 +1195,21 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 
     private async Task SendSteppedWidthAsync(string path, double? px)
     {
+        bool ran;
         try
         {
-            await _surface.SetContentWidthAsync(px);
+            ran = await _surface.SetContentWidthAsync(px);
         }
         // The send is not awaited by anyone, so its failure is logged here or nowhere.
         catch (Exception exception)
         {
             _log.LogError($"Cannot send the stepped content width of {path} to the page.", exception);
+            ran = false;
+        }
+
+        if (!ran)
+        {
+            Toasts.Show(ToastKind.Warning, WidthNotShownToast);
         }
     }
 
@@ -1353,17 +1401,14 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
 /// What reports the open documents' changes on disk; the view model owns it and disposes it. Null for a window that does not
 /// follow its documents.
 /// </param>
-/// <param name="Toasts">
-/// Where the window shows that an operation the user started failed; the view model owns it and disposes it. Null gives the
-/// window a <see cref="ToastCenter"/> of its own on <paramref name="Time"/>.
-/// </param>
+/// <param name="Toasts">Where the window shows that an operation the user started failed; the view model owns it and disposes it.</param>
 public sealed record DocumentWindowServices(
     WidthStore Widths,
     Func<string, string> ReadText,
     TimeProvider Time,
     IAppLog Log,
-    IDocumentChanges? Changes = null,
-    IToasts? Toasts = null
+    IToasts Toasts,
+    IDocumentChanges? Changes = null
 );
 
 /// <summary>What kind of session change <see cref="DocumentWindowViewModel.SessionDirty"/> reports.</summary>

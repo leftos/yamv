@@ -5,6 +5,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -219,6 +220,90 @@ public sealed class ToastHostTests
             Assert.False(host.HasCardAt(new Point(2, 2)));
             Assert.False(host.HasCardAt(At(wide, wide.Bounds.Width / 2, wide.Bounds.Height + 4)));
             Assert.False(host.HasCardAt(At(narrow, -4, narrow.Bounds.Height / 2)));
+        });
+
+    [Fact]
+    public Task A_long_toast_stays_inside_the_document_pane() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Window.Width = 560;
+            await fixture.ShowAsync();
+
+            fixture.Toasts.Show(ToastKind.Warning, new string('m', 300));
+            fixture.Settle();
+
+            Border card = Assert.Single(fixture.Cards());
+            ToastText text = card.GetVisualDescendants().OfType<ToastText>().Single();
+            Assert.True(card.Bounds.Width <= fixture.Window.DocumentColumn.Bounds.Width);
+            TextLine line = Assert.Single(text.TextLayout.TextLines);
+            Assert.True(line.HasCollapsed);
+        });
+
+    [Fact]
+    public Task A_long_code_value_keeps_its_box_inside_the_card() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Window.Width = 560;
+            await fixture.ShowAsync();
+
+            fixture.Toasts.Show(ToastKind.Warning, $"{ToastValue.Code(new string('m', 64))} no longer exists");
+            fixture.Settle();
+
+            Border card = Assert.Single(fixture.Cards());
+            ToastText text = card.GetVisualDescendants().OfType<ToastText>().Single();
+            Border box = Fixture.Part<Border>(card, "code");
+            TextBlock name = Assert.IsType<TextBlock>(box.Child);
+            Assert.True(name.Bounds.Width > 0, "the code box kept no text");
+            Assert.True(name.Bounds.Width <= name.MaxWidth, "the code box passed its cap");
+            Assert.True(card.Bounds.Width <= fixture.Window.DocumentColumn.Bounds.Width);
+            Assert.True(text.Bounds.Width > name.Bounds.Width, "the code box took the whole line");
+            TextLine line = Assert.Single(name.TextLayout.TextLines);
+            Assert.True(line.HasCollapsed);
+        });
+
+    [Fact]
+    public Task A_long_code_value_after_plain_text_keeps_its_box() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Window.Width = 1000;
+            await fixture.ShowAsync();
+
+            fixture.Toasts.Show(ToastKind.Warning, $"YAMV doesn't open links outside {ToastValue.Code(new string('m', 64))}");
+            fixture.Settle();
+
+            Border card = Assert.Single(fixture.Cards());
+            ToastText text = card.GetVisualDescendants().OfType<ToastText>().Single();
+            Border box = Fixture.Part<Border>(card, "code");
+            TextBlock name = Assert.IsType<TextBlock>(box.Child);
+            Assert.True(name.Bounds.Width > 0, "the code box kept no text");
+            Assert.True(Assert.Single(name.TextLayout.TextLines).HasCollapsed, "the code box did not elide");
+            Assert.True(box.Bounds.Width > 0, "the code box took no room");
+            Assert.True(box.Bounds.Right <= text.Bounds.Width, "the code box ran past the line");
+        });
+
+    [Fact]
+    public Task The_text_after_a_long_code_value_stays_on_the_line() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Window.Width = 1000;
+            await fixture.ShowAsync();
+
+            fixture.Toasts.Show(ToastKind.Warning, $"Couldn't show {ToastValue.Code(new string('m', 64))}; see the log");
+            fixture.Settle();
+
+            Border card = Assert.Single(fixture.Cards());
+            ToastText text = card.GetVisualDescendants().OfType<ToastText>().Single();
+            Border box = Fixture.Part<Border>(card, "code");
+            TextBlock name = Assert.IsType<TextBlock>(box.Child);
+            Assert.True(name.Bounds.Width > 0, "the code box kept no text");
+            Assert.True(Assert.Single(name.TextLayout.TextLines).HasCollapsed, "the code box did not elide");
+            Assert.True(box.Bounds.Width > 0, "the code box took no room");
+            Assert.True(box.Bounds.Right <= text.Bounds.Width, "the code box ran past the line");
+            Assert.False(Assert.Single(text.TextLayout.TextLines).HasCollapsed, "the line elided its own text");
         });
 
     /// <summary>The card's text as it reads: its plain runs and its inline code, in order.</summary>

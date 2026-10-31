@@ -398,7 +398,7 @@ public partial class MainWindow : Window
                 _viewModel!.Reload();
                 break;
             case ShortcutCommand.OpenFiles:
-                RunLogged(OpenFilesAsync, "Open files");
+                RunLogged(OpenFilesAsync, "Open files", "Couldn't open the files; see the log");
                 break;
             case ShortcutCommand.NarrowerWidth:
                 _viewModel!.StepContentWidth(wider: false, DocumentColumn.Bounds.Width);
@@ -425,7 +425,7 @@ public partial class MainWindow : Window
 
         if (!_creatingWidthPopover)
         {
-            RunLogged(OpenWidthPopoverAsync, "Open the content-width popover");
+            RunLogged(OpenWidthPopoverAsync, "Open the content-width popover", "Couldn't open the width popover; see the log");
         }
     }
 
@@ -631,9 +631,9 @@ public partial class MainWindow : Window
 
     private static Color WithOpacity(Color color, double opacity) => Color.FromArgb((byte)Math.Round(opacity * 255), color.R, color.G, color.B);
 
-    private void OnOpenFilesRequested(object? sender, EventArgs e) => RunLogged(OpenFilesAsync, "Open files");
+    private void OnOpenFilesRequested(object? sender, EventArgs e) => RunLogged(OpenFilesAsync, "Open files", "Couldn't open the files; see the log");
 
-    private void OnLocateRequested(object? sender, EventArgs e) => RunLogged(LocateAsync, "Locate");
+    private void OnLocateRequested(object? sender, EventArgs e) => RunLogged(LocateAsync, "Locate", "Couldn't locate the file; see the log");
 
     /// <summary>Opens the files the user picks, selecting the first; a cancelled pick changes nothing.</summary>
     private async Task OpenFilesAsync()
@@ -671,7 +671,7 @@ public partial class MainWindow : Window
     {
         if (RowOf(sender) is { } row)
         {
-            RunLogged(() => FileActions!.CopyTextAsync(this, row.Path), "Copy path");
+            RunLogged(() => FileActions!.CopyTextAsync(this, row.Path), "Copy path", "Couldn't copy the path; see the log");
         }
     }
 
@@ -711,19 +711,26 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Starts <paramref name="action"/> without waiting for it, logging a failure as an error rather than losing it.</summary>
-    private void RunLogged(Func<Task> action, string what) => _ = RunLoggedAsync(action, what);
+    /// <summary>
+    /// Starts <paramref name="action"/> without waiting for it, logging a failure as an error and showing
+    /// <paramref name="toast"/> rather than losing the failure.
+    /// </summary>
+    /// <param name="action">What the user started.</param>
+    /// <param name="what">What the log line names the action.</param>
+    /// <param name="toast">What the window tells the user failed, when this window still holds its toasts.</param>
+    private void RunLogged(Func<Task> action, string what, string toast) => _ = RunLoggedAsync(action, what, toast);
 
-    private async Task RunLoggedAsync(Func<Task> action, string what)
+    private async Task RunLoggedAsync(Func<Task> action, string what, string toast)
     {
         try
         {
             await action();
         }
-        // A handler's task is discarded, so its failure is logged here or nowhere.
+        // A handler's task is discarded, so its failure is logged here or nowhere, and shown in a toast while the window is open.
         catch (Exception exception)
         {
             _log!.LogError($"{what}: failed.", exception);
+            _viewModel?.Toasts.Show(ToastKind.Warning, toast);
         }
     }
 

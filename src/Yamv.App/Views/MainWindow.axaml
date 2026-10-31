@@ -250,7 +250,7 @@
           PlacementAnchor="Bottom"
           PlacementGravity="Top"
         >
-          <views:ToastHost x:Name="ToastHost" />
+          <views:ToastHost x:Name="ToastHost" MaxWidth="{Binding #DocumentColumn.Bounds.Width}" />
         </Popup>
       </Panel>
       <GridSplitter

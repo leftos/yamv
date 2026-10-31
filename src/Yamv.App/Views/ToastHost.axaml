@@ -102,7 +102,7 @@
                     Foreground="{DynamicResource YamvTextSecondary}"
                   />
                 </Border>
-                <views:ToastText Segments="{Binding Segments}" VerticalAlignment="Center" />
+                <views:ToastText Segments="{Binding Segments}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
               </DockPanel>
               <!-- The time left of the card's 5 s, along its foot inside the border. -->
               <views:ToastTimerLine

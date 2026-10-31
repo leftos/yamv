@@ -46,6 +46,39 @@ public sealed class ContentWidthViewModelTests
         });
 
     [Fact]
+    public Task A_failed_page_width_send_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            fixture.Surface.ContentWidthFailure = new InvalidOperationException("The page went away.");
+
+            popover.SliderPosition = 0;
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't apply the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Level == "error" && entry.Message.StartsWith("Cannot send the content width", StringComparison.Ordinal)
+            );
+        });
+
+    [Fact]
+    public Task A_page_width_send_that_did_not_run_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            fixture.Surface.ScriptsFail = true;
+
+            popover.SliderPosition = 0;
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't apply the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "error");
+        });
+
+    [Fact]
     public Task A_popover_the_fixture_opens_has_finished_its_opening_reads() =>
         Headless.RunAsync(async () =>
         {
@@ -1247,8 +1280,8 @@ public sealed class ContentWidthViewModelTests
     {
         /// <param name="persist">Whether the window's state persists, as a main window's does.</param>
         /// <param name="ownToasts">
-        /// True to give the view model no toasts, so it makes and disposes its own <see cref="ToastCenter"/>; else it shows
-        /// them on <see cref="Toasts"/>.
+        /// True to give the view model a <see cref="ToastCenter"/> of its own that the fixture does not hold, and disposes with
+        /// it; else it shows its toasts on <see cref="Toasts"/>.
         /// </param>
         public Fixture(bool persist = true, bool ownToasts = false)
         {
@@ -1261,7 +1294,7 @@ public sealed class ContentWidthViewModelTests
             ViewModel = new DocumentWindowViewModel(
                 State,
                 Surface,
-                new DocumentWindowServices(Widths, path => Reader(path), Timers, Log, Toasts: ownToasts ? null : Toasts)
+                new DocumentWindowServices(Widths, path => Reader(path), Timers, Log, Toasts: ownToasts ? new ToastCenter(Timers) : Toasts)
             );
         }
 

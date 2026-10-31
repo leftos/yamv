@@ -90,8 +90,8 @@ public static class MainWindowFactory
                 DocumentText.Read,
                 TimeProvider.System,
                 log,
-                changes,
-                new ToastCenter(TimeProvider.System)
+                new ToastCenter(TimeProvider.System),
+                changes
             );
             viewModel = new DocumentWindowViewModel(state, view, services);
             viewModel.Restore(session);
@@ -173,8 +173,8 @@ public static class MainWindowFactory
                 DocumentText.Read,
                 TimeProvider.System,
                 log,
-                changes,
-                new ToastCenter(TimeProvider.System)
+                new ToastCenter(TimeProvider.System),
+                changes
             );
             viewModel = new DocumentWindowViewModel(state, surface, services);
             viewModel.Open(ExistingFirst(files));

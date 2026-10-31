@@ -112,12 +112,15 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     }
 
     /// <summary>Changes the shown document's text measure in px, live; null makes it full width.</summary>
-    public Task SetContentWidthAsync(double? px)
+    /// <returns>
+    /// False when the host could not run the page script; true when it ran, or when a newer call or a show replaced it.
+    /// </returns>
+    public async Task<bool> SetContentWidthAsync(double? px)
     {
         Dispatcher.UIThread.VerifyAccess();
         string width = CssWidth(px, nameof(px));
         _latestContentWidth = width;
-        return RunAsync(CallKind.ContentWidth, "setContentWidth", ContentWidthScript(width));
+        return !(await RunAsync(CallKind.ContentWidth, "setContentWidth", ContentWidthScript(width))).Failed;
     }
 
     /// <summary>
@@ -173,11 +176,14 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     /// Scrolls the shown document to the element whose id is <paramref name="fragment"/>, already decoded, without a render; a
     /// missing id does nothing.
     /// </summary>
-    public Task ScrollToFragmentAsync(string fragment)
+    /// <returns>
+    /// False when the host could not run the page script; true when it ran, or when a newer call or a show replaced it.
+    /// </returns>
+    public async Task<bool> ScrollToFragmentAsync(string fragment)
     {
         Dispatcher.UIThread.VerifyAccess();
         ArgumentNullException.ThrowIfNull(fragment);
-        return RunAsync(CallKind.Other, "scrollToId", $"window.yamv.scrollToId({Json(fragment)})");
+        return !(await RunAsync(CallKind.Other, "scrollToId", $"window.yamv.scrollToId({Json(fragment)})")).Failed;
     }
 
     /// <summary>Removes every find highlight, leaving the document text as it was.</summary>
@@ -290,13 +296,13 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     {
         try
         {
-            return new ScriptOutcome(true, await _webView.InvokeScript(script));
+            return new ScriptOutcome(true, await _webView.InvokeScript(script), Failed: false);
         }
-        // Every failure is logged and turned into "did not run": the callers' tasks and the queue must never fault.
+        // Every failure is logged and turned into "failed": the callers' tasks and the queue must never fault.
         catch (Exception exception)
         {
             _log.LogError($"Page script {name} failed: {Truncate(script)}", exception);
-            return ScriptOutcome.NotRun;
+            return ScriptOutcome.ScriptFailed;
         }
     }
 
@@ -554,10 +560,14 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         Other,
     }
 
-    /// <summary>What a script call came to: whether it ran, and the JSON value it returned.</summary>
-    private readonly record struct ScriptOutcome(bool Ran, string? Value)
+    /// <summary>What a script call came to: whether it ran, the JSON value it returned, and whether it failed.</summary>
+    private readonly record struct ScriptOutcome(bool Ran, string? Value, bool Failed)
     {
-        public static ScriptOutcome NotRun { get; } = new(false, null);
+        /// <summary>A call a newer one or a show replaced, or one dropped before it ran; nothing is wrong.</summary>
+        public static ScriptOutcome NotRun { get; } = new(false, null, false);
+
+        /// <summary>A call the page could not run.</summary>
+        public static ScriptOutcome ScriptFailed { get; } = new(false, null, true);
     }
 
     private sealed record PendingCall(CallKind Kind, string Name, string Script, TaskCompletionSource<ScriptOutcome> Completion);

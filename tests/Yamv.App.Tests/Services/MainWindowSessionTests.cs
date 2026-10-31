@@ -165,10 +165,11 @@ public sealed class MainWindowSessionTests
             SessionFile = Path.Combine(_root, "data", "session.json");
             var state = new DocumentWindowState(persist: true, _ => null, File.Exists, new GroupingOptions(null, StringComparison.OrdinalIgnoreCase));
             var widths = new WidthStore(Path.Combine(_root, "data", "widths.json"), Log);
+            var time = new FakeTimeProvider();
             ViewModel = new DocumentWindowViewModel(
                 state,
                 Surface,
-                new DocumentWindowServices(widths, File.ReadAllText, new FakeTimeProvider(), Log)
+                new DocumentWindowServices(widths, File.ReadAllText, time, Log, new ToastCenter(time))
             );
             Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             _session = new MainWindowSession(Window, ViewModel, new SessionStore(SessionFile, Log), Time, Log);

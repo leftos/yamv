@@ -40,15 +40,34 @@ internal sealed class FakeFileActions : IFileActions
     /// <summary>Every text copied, oldest first.</summary>
     public List<string> Copied { get; } = [];
 
+    /// <summary>When set, <see cref="PickDocumentsAsync"/> throws it instead of answering the pick.</summary>
+    public Exception? PickFailure { get; set; }
+
+    /// <summary>When set, <see cref="PickReplacementAsync"/> throws it instead of answering the pick.</summary>
+    public Exception? ReplacementFailure { get; set; }
+
+    /// <summary>When set, <see cref="CopyTextAsync"/> throws it instead of recording the text.</summary>
+    public Exception? CopyFailure { get; set; }
+
     public Task<IReadOnlyList<string>> PickDocumentsAsync(TopLevel owner)
     {
         DocumentPicks++;
+        if (PickFailure is { } failure)
+        {
+            throw failure;
+        }
+
         return Task.FromResult(DocumentsToPick);
     }
 
     public Task<string?> PickReplacementAsync(TopLevel owner, string oldPath)
     {
         ReplacementRequests.Add(oldPath);
+        if (ReplacementFailure is { } failure)
+        {
+            throw failure;
+        }
+
         return Task.FromResult(ReplacementToPick);
     }
 
@@ -86,6 +105,11 @@ internal sealed class FakeFileActions : IFileActions
 
     public Task CopyTextAsync(TopLevel owner, string text)
     {
+        if (CopyFailure is { } failure)
+        {
+            throw failure;
+        }
+
         Copied.Add(text);
         return Task.CompletedTask;
     }

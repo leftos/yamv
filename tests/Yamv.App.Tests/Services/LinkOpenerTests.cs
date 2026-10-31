@@ -166,8 +166,39 @@ public sealed class LinkOpenerTests
             await fixture.ClickAsync(Click("x", new Uri("https://example.com/"), Doc));
 
             fixture.AssertNothingOpened();
-            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Equal((ToastKind.Warning, LinkOpener.LinkFailedToast), Assert.Single(fixture.Toasts.Shown));
             Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error");
+        });
+
+    [Fact]
+    public Task A_non_web_uri_handed_to_the_browser_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            var fixture = new Fixture { Decision = new OpenExternal(new Uri("javascript:alert(1)"), []) };
+
+            await fixture.ClickAsync(Click("x", new Uri("https://example.com/"), Doc));
+
+            Assert.Empty(fixture.Browser);
+            Assert.Equal((ToastKind.Warning, LinkOpener.LinkFailedToast), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error");
+        });
+
+    [Fact]
+    public Task A_link_that_throws_while_opening_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            string target = Path.Combine(Root, "docs", "b.md");
+            var fixture = new Fixture { Decision = new OpenDocument(target, "B.md", null) };
+            fixture.Documents.OpenFailure = new IOException("The window went away.");
+
+            fixture.Opener.OnLinkActivated(null, Click("B.md", new Uri(target), Doc));
+            Dispatcher.UIThread.RunJobs();
+            fixture.RunOne();
+
+            Assert.Empty(fixture.Documents.Opened);
+            Assert.Equal((ToastKind.Warning, LinkOpener.LinkFailedToast), Assert.Single(fixture.Toasts.Shown));
+            LogEntry entry = Assert.Single(fixture.Log.Entries, logged => logged.Level == "error");
+            Assert.IsType<IOException>(entry.Exception);
         });
 
     [Theory]
@@ -374,7 +405,7 @@ public sealed class LinkOpenerTests
             await fixture.ClickAsync(Click("a.md", new Uri(Path.Combine(Root, "a.md")), Doc));
 
             fixture.AssertNothingOpened();
-            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Equal((ToastKind.Warning, LinkOpener.LinkFailedToast), Assert.Single(fixture.Toasts.Shown));
             LogEntry entry = Assert.Single(fixture.Log.Entries);
             Assert.Equal("error", entry.Level);
             Assert.Contains(nameof(UnknownDecision), entry.Message, StringComparison.Ordinal);
@@ -391,7 +422,7 @@ public sealed class LinkOpenerTests
 
             Assert.Equal(0, fixture.Runs);
             fixture.AssertNothingOpened();
-            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Equal((ToastKind.Warning, LinkOpener.LinkFailedToast), Assert.Single(fixture.Toasts.Shown));
             LogEntry entry = Assert.Single(fixture.Log.Entries);
             Assert.Equal("error", entry.Level);
             Assert.IsType<ArgumentNullException>(entry.Exception);
@@ -413,9 +444,20 @@ public sealed class LinkOpenerTests
 
         public List<(string Path, string? Fragment)> Opened { get; } = [];
 
+        /// <summary>When set, <see cref="OpenLinkedDocument"/> throws it instead of opening the document.</summary>
+        public Exception? OpenFailure { get; set; }
+
         public string? GroupRootOf(string documentPath) => Roots.GetValueOrDefault(documentPath);
 
-        public void OpenLinkedDocument(string path, string? fragment) => Opened.Add((path, fragment));
+        public void OpenLinkedDocument(string path, string? fragment)
+        {
+            if (OpenFailure is { } failure)
+            {
+                throw failure;
+            }
+
+            Opened.Add((path, fragment));
+        }
     }
 
     /// <summary>
@@ -503,6 +545,22 @@ public sealed class LinkOpenerTests
             }
 
             await handled.WaitAsync(Backstop, TestContext.Current.CancellationToken);
+        }
+
+        /// <summary>Runs one held piece of work, as the runner would, and lets the UI thread finish what it starts.</summary>
+        public void RunOne()
+        {
+            Assert.True(_pending.TryDequeue(out (Func<LinkDecision> Work, TaskCompletionSource<LinkDecision> Done) next));
+            try
+            {
+                next.Done.SetResult(next.Work());
+            }
+            catch (Exception exception)
+            {
+                next.Done.SetException(exception);
+            }
+
+            Dispatcher.UIThread.RunJobs();
         }
 
         /// <summary>Asserts that no browser, default app or document was opened.</summary>

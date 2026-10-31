@@ -33,13 +33,19 @@ public interface IDocumentSurface
     /// Changes the shown document's content width in px, live; null makes it full width. A show carries its own width, so
     /// this is for a change while a document stays shown.
     /// </summary>
-    Task SetContentWidthAsync(double? px);
+    /// <returns>
+    /// False when the host could not run the page script; true when it ran, or when a newer call or a show replaced it.
+    /// </returns>
+    Task<bool> SetContentWidthAsync(double? px);
 
     /// <summary>
     /// Scrolls the shown document to the element whose id is <paramref name="fragment"/>, without a render; the fragment is
     /// already decoded (by <c>LinkPolicy</c>). A missing id does nothing.
     /// </summary>
-    Task ScrollToFragmentAsync(string fragment);
+    /// <returns>
+    /// False when the host could not run the page script; true when it ran, or when a newer call or a show replaced it.
+    /// </returns>
+    Task<bool> ScrollToFragmentAsync(string fragment);
 
     /// <summary>Opens the in-page find bar and focuses its field.</summary>
     Task OpenFindAsync();

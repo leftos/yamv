@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Microsoft.Extensions.Time.Testing;
 using Yamv.App.Controls;
+using Yamv.App.Services;
 using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.App.Views;
@@ -624,6 +625,21 @@ public sealed class MainWindowTests
         });
 
     [Fact]
+    public Task A_failed_copy_path_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Files.CopyFailure = new IOException("The clipboard refused.");
+
+            fixture.Choose(fixture.RightClick(fixture.Row(fixture.DocA)), "Copy path");
+
+            ToastItem toast = Assert.Single(fixture.Toasts.Items);
+            Assert.Equal((ToastKind.Warning, "Couldn't copy the path; see the log"), (toast.Kind, toast.Text));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == "Copy path: failed.");
+        });
+
+    [Fact]
     public Task Command_O_opens_the_picked_files_and_selects_the_first() =>
         Headless.RunAsync(async () =>
         {
@@ -689,6 +705,21 @@ public sealed class MainWindowTests
             Assert.Equal(1, fixture.Files.DocumentPicks);
             Assert.Equal([fixture.DocA, fixture.DocB], fixture.State.Documents);
             Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task A_failed_file_pick_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Files.PickFailure = new IOException("The picker went away.");
+
+            fixture.Press(Key.O, CommandModifier);
+
+            ToastItem toast = Assert.Single(fixture.Toasts.Items);
+            Assert.Equal((ToastKind.Warning, "Couldn't open the files; see the log"), (toast.Kind, toast.Text));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == "Open files: failed.");
         });
 
     [Fact]
@@ -765,6 +796,21 @@ public sealed class MainWindowTests
             Assert.Equal([fixture.Gone, fixture.DocA], fixture.State.Documents);
             Assert.Equal(fixture.Gone, fixture.ViewModel.SelectedPath);
             Assert.True(fixture.Window.MissingPane.IsVisible);
+        });
+
+    [Fact]
+    public Task A_failed_locate_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.Gone, fixture.DocA);
+            fixture.Files.ReplacementFailure = new IOException("The picker went away.");
+
+            fixture.ClickEvent(fixture.Window.MissingPane.LocateButton);
+
+            ToastItem toast = Assert.Single(fixture.Toasts.Items);
+            Assert.Equal((ToastKind.Warning, "Couldn't locate the file; see the log"), (toast.Kind, toast.Text));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == "Locate: failed.");
         });
 
     [Fact]
@@ -1082,16 +1128,20 @@ public sealed class MainWindowTests
             );
             WidthsFile = Path.Combine(_root, "data", "widths.json");
             Widths = new WidthStore(WidthsFile, Log);
-            ViewModel = new DocumentWindowViewModel(
-                State,
-                Surface,
-                new DocumentWindowServices(Widths, path => Reader(path), new FakeTimeProvider(), Log)
-            );
+            Time = new FakeTimeProvider();
+            Toasts = new ToastCenter(Time);
+            ViewModel = new DocumentWindowViewModel(State, Surface, new DocumentWindowServices(Widths, path => Reader(path), Time, Log, Toasts));
             Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             Window.Closed += (_, _) => IsClosed = true;
         }
 
         public bool IsClosed { get; private set; }
+
+        /// <summary>The window's clock, which its toasts fade on.</summary>
+        public FakeTimeProvider Time { get; }
+
+        /// <summary>The window's toasts, as the view model shows them.</summary>
+        public ToastCenter Toasts { get; }
 
         /// <summary>The window's widths file, in the fixture's temp folder.</summary>
         public string WidthsFile { get; }

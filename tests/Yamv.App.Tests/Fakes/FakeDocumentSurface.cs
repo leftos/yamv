@@ -66,11 +66,23 @@ public sealed class FakeDocumentSurface : IDocumentSurface
         return Task.CompletedTask;
     }
 
-    public Task SetContentWidthAsync(double? px)
+    /// <summary>When set, <see cref="SetContentWidthAsync"/> throws it instead of recording the width.</summary>
+    public Exception? ContentWidthFailure { get; set; }
+
+    /// <summary>Whether the page scripts fail: both width and fragment calls record their call and then report it.</summary>
+    public bool ScriptsFail { get; set; }
+
+    public async Task<bool> SetContentWidthAsync(double? px)
     {
+        if (ContentWidthFailure is { } failure)
+        {
+            throw failure;
+        }
+
         ContentWidths.Add(px);
         Calls.Add(new ContentWidthSet(px));
-        return Completion();
+        await Completion();
+        return !ScriptsFail;
     }
 
     private Task Completion()
@@ -88,10 +100,18 @@ public sealed class FakeDocumentSurface : IDocumentSurface
     /// <summary>Every fragment passed to <see cref="ScrollToFragmentAsync"/>, oldest first.</summary>
     public List<string> ScrolledFragments { get; } = [];
 
-    public Task ScrollToFragmentAsync(string fragment)
+    /// <summary>When set, <see cref="ScrollToFragmentAsync"/> throws it instead of recording the fragment.</summary>
+    public Exception? ScrollFailure { get; set; }
+
+    public async Task<bool> ScrollToFragmentAsync(string fragment)
     {
+        if (ScrollFailure is { } failure)
+        {
+            throw failure;
+        }
+
         ScrolledFragments.Add(fragment);
-        return Task.CompletedTask;
+        return !ScriptsFail;
     }
 
     public Task OpenFindAsync() => Task.CompletedTask;

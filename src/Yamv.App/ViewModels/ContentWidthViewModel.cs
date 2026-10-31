@@ -579,14 +579,21 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
 
     private async Task SendToPageAsync(double? px)
     {
+        bool ran;
         try
         {
-            await _host.Surface.SetContentWidthAsync(px);
+            ran = await _host.Surface.SetContentWidthAsync(px);
         }
         // The send is not awaited by anyone, so its failure is logged here or nowhere.
         catch (Exception exception)
         {
             _host.Services.Log.LogError($"Cannot send the content width of {DocumentPath} to the page.", exception);
+            ran = false;
+        }
+
+        if (!ran)
+        {
+            _host.Window.Toasts.Show(ToastKind.Warning, DocumentWindowViewModel.WidthNotShownToast);
         }
     }
 

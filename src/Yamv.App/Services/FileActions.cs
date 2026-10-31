@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
+using Yamv.App.ViewModels;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Documents;
 using Yamv.Core.Links;
@@ -23,22 +24,15 @@ public static class ThemeFileTypes
 
 /// <summary>
 /// The platform's file actions: the window's storage provider for the pickers, Explorer or Finder for reveal, the app the
-/// system associates with a file for opening it, and the window's clipboard. Failures it can meet (no local path, no
-/// clipboard, an app that will not start) are logged as warnings; a reveal that fails is shown in a toast as well.
+/// system associates with a file for opening it, and the window's clipboard. A failure or refusal of an action the user started
+/// is logged as a warning and shown in a toast as well.
 /// </summary>
 /// <param name="log">Where warnings go.</param>
-/// <param name="toasts">Where a failed reveal is shown; null for a window with no toasts, whose failures are only logged.</param>
+/// <param name="toasts">Where a failure or refusal of a user's action is shown as well; null for a window with no toasts, whose failures are only logged.</param>
 /// <param name="startProcess">Starts a process and lets it run on its own; <see cref="StartProcess"/> outside tests.</param>
 /// <param name="seams">The platform and the way a process is waited for; <see cref="FileActionSeams.Default"/> outside tests.</param>
 internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<ProcessStartInfo> startProcess, FileActionSeams seams) : IFileActions
 {
-    /// <summary>The file actions of a window with no toasts, such as the theme settings window: failures are only logged.</summary>
-    /// <param name="log">Where warnings go.</param>
-    /// <param name="startProcess">Starts a process and lets it run on its own; <see cref="StartProcess"/> outside tests.</param>
-    /// <param name="seams">The platform and the way a process is waited for; <see cref="FileActionSeams.Default"/> outside tests.</param>
-    public AvaloniaFileActions(IAppLog log, Action<ProcessStartInfo> startProcess, FileActionSeams seams)
-        : this(log, null, startProcess, seams) { }
-
     /// <summary>The longest <c>open</c> is waited for; it hands the file off and returns well before this.</summary>
     private static readonly TimeSpan MacOpenTimeout = TimeSpan.FromSeconds(2);
 
@@ -133,7 +127,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         {
             log.LogWarning($"Reveal: no folder of {path} exists.");
             string folder = kind == RevealKind.File ? Path.GetDirectoryName(path) ?? path : path;
-            toasts?.Show(ToastKind.Warning, $"`{folder}` no longer exists");
+            toasts?.Show(ToastKind.Warning, $"{ToastValue.Code(folder)} no longer exists");
             return;
         }
 
@@ -158,7 +152,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
             log.LogWarning($"Reveal: could not start {command.Program} for {path}.", exception);
             string fileManager = seams.Platform == FilePlatform.MacOS ? "Finder" : "Explorer";
             string name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } fileName ? fileName : path;
-            toasts?.Show(ToastKind.Warning, $"Couldn't open {fileManager} for `{name}`");
+            toasts?.Show(ToastKind.Warning, $"Couldn't open {fileManager} for {ToastValue.Code(name)}");
         }
     }
 
@@ -293,32 +287,72 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
     public async Task CopyTextAsync(TopLevel owner, string text)
     {
         ArgumentNullException.ThrowIfNull(owner);
-        if (owner.Clipboard is not { } clipboard)
+        await CopyTextToAsync(owner.Clipboard, text);
+    }
+
+    /// <summary>
+    /// Puts <paramref name="text"/> on <paramref name="clipboard"/>, logging a window with no clipboard as a warning and showing
+    /// it in a toast as well.
+    /// </summary>
+    /// <param name="clipboard">The clipboard to copy to; null for a window that has none.</param>
+    /// <param name="text">The text to copy.</param>
+    internal async Task CopyTextToAsync(IClipboard? clipboard, string text)
+    {
+        if (clipboard is not { } target)
         {
             log.LogWarning("Copy path: the window has no clipboard.");
+            toasts?.Show(ToastKind.Warning, "Couldn't copy the path: no clipboard");
             return;
         }
 
-        await clipboard.SetTextAsync(text);
+        await target.SetTextAsync(text);
     }
 
-    /// <summary>The local paths of the picked files, in pick order; a file with no local path is logged and left out.</summary>
+    /// <summary>The local paths of the picked files, in pick order, keeping each pick's name for <see cref="KeepLocal"/>.</summary>
     private List<string> LocalPaths(IReadOnlyList<IStorageFile> files)
     {
-        List<string> paths = [];
+        List<(string Name, string? Path)> picks = [];
         foreach (IStorageFile file in files)
         {
             using (file)
             {
-                if (file.TryGetLocalPath() is string path)
-                {
-                    paths.Add(path);
-                }
-                else
-                {
-                    log.LogWarning($"Pick: {file.Name} has no local path and is not opened.");
-                }
+                picks.Add((file.Name, file.TryGetLocalPath()));
             }
+        }
+
+        return KeepLocal(picks);
+    }
+
+    /// <summary>
+    /// The local paths of <paramref name="picks"/>, in pick order; a pick with no local path is logged and left out, and the
+    /// refusal is shown in one toast for the files picked. Avalonia's storage interfaces cannot be implemented in tests, so the
+    /// tests call this rather than <see cref="LocalPaths"/>.
+    /// </summary>
+    /// <param name="picks">Each picked file's name and its local path, or null for a file with none.</param>
+    internal List<string> KeepLocal(IReadOnlyList<(string Name, string? Path)> picks)
+    {
+        List<string> paths = [];
+        List<string> refused = [];
+        foreach ((string name, string? path) in picks)
+        {
+            if (path is not null)
+            {
+                paths.Add(path);
+            }
+            else
+            {
+                log.LogWarning($"Pick: {name} has no local path and is not opened.");
+                refused.Add(name);
+            }
+        }
+
+        if (refused.Count == 1)
+        {
+            toasts?.Show(ToastKind.Refusal, $"YAMV can't open {ToastValue.Code(refused[0])}: it isn't a local file");
+        }
+        else if (refused.Count > 1)
+        {
+            toasts?.Show(ToastKind.Refusal, $"YAMV can't open {refused.Count} picked files: they aren't local files");
         }
 
         return paths;

@@ -539,7 +539,7 @@ public partial class App : Application
         var bridge = new ThemeBridge(catalog, this, log);
         _harnessBridge = bridge;
         bridge.Apply(ThemeCatalog.DefaultThemeId, "system");
-        var fileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
+        var fileActions = new AvaloniaFileActions(log, null, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
         string? importFile = Environment.GetEnvironmentVariable(ImportFileVariable) is { } given && !string.IsNullOrWhiteSpace(given) ? given : null;
         string? pendingImport = null;
         (ThemeSettingsWindow window, ThemeSettingsViewModel viewModel) = ThemeSettingsHost.BuildWindow(

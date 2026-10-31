@@ -402,6 +402,244 @@ public sealed class DocumentWindowViewModelTests
         });
 
     [Fact]
+    public Task A_render_failure_on_a_first_show_toasts_the_file_name() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Reader = _ => throw new InvalidOperationException("Unexpected.");
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't show `a.md`; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task A_render_failure_on_a_reload_only_logs() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = _ => throw new InvalidOperationException("Unexpected.");
+
+            fixture.Changes.Raise(RepoDocA);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task A_change_report_after_a_failed_first_show_only_logs() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Reader = _ => throw new InvalidOperationException("Unexpected.");
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.Single(fixture.Toasts.Shown);
+
+            fixture.Changes.Raise(RepoDocA);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Single(fixture.Toasts.Shown);
+            Assert.Equal(2, fixture.Log.Entries.Count(entry => entry.Level == "error"));
+        });
+
+    [Fact]
+    public Task A_missing_file_that_comes_back_and_fails_to_render_only_logs() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Absent.Add(RepoDocA);
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            fixture.Reader = _ => throw new InvalidOperationException("Unexpected.");
+
+            fixture.Absent.Remove(RepoDocA);
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task A_superseded_render_failure_shows_no_toast() =>
+        Headless.RunAsync(async () =>
+        {
+            using var gate = new ManualResetEventSlim();
+            using var firstRead = new ManualResetEventSlim();
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocB, RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = path =>
+            {
+                if (SamePath(path, RepoDocA))
+                {
+                    firstRead.Set();
+                    WaitFor(gate);
+                    throw new InvalidOperationException("Unexpected.");
+                }
+
+                return "# B";
+            };
+
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocA);
+            WaitFor(firstRead);
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            gate.Set();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task The_Reload_command_toasts_a_render_failure() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = _ => throw new InvalidOperationException("Unexpected.");
+
+            fixture.ViewModel.Reload();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't show `a.md`; see the log"), Assert.Single(fixture.Toasts.Shown));
+        });
+
+    [Fact]
+    public Task A_change_report_during_a_user_read_keeps_its_toast() =>
+        Headless.RunAsync(async () =>
+        {
+            using var gate = new ManualResetEventSlim();
+            using var firstRead = new ManualResetEventSlim();
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocB, RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            int reads = 0;
+            fixture.Reader = _ =>
+            {
+                if (Interlocked.Increment(ref reads) == 1)
+                {
+                    firstRead.Set();
+                    WaitFor(gate);
+                    return "# A";
+                }
+
+                throw new InvalidOperationException("Unexpected.");
+            };
+
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocA);
+            WaitFor(firstRead);
+            fixture.Changes.Raise(RepoDocA);
+            gate.Set();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't show `a.md`; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task A_reload_that_finds_a_missing_file_back_toasts_a_render_failure() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Absent.Add(RepoDocA);
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            fixture.Reader = _ => throw new InvalidOperationException("Unexpected.");
+
+            fixture.Absent.Remove(RepoDocA);
+            fixture.ViewModel.Reload();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't show `a.md`; see the log"), Assert.Single(fixture.Toasts.Shown));
+        });
+
+    [Fact]
+    public Task A_reload_of_a_file_still_missing_leaves_no_later_toast() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Absent.Add(RepoDocA);
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+
+            fixture.ViewModel.Reload();
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+
+            fixture.Reader = _ => throw new InvalidOperationException("Unexpected.");
+            fixture.Absent.Remove(RepoDocA);
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(fixture.ViewModel.SelectedIsMissing);
+            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task A_finished_user_read_leaves_later_change_reports_silent() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = _ => throw new InvalidOperationException("Unexpected.");
+
+            fixture.Changes.Raise(RepoDocA);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "error" && entry.Message.Contains(RepoDocA, StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task A_failed_scroll_to_a_heading_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.ScrollFailure = new InvalidOperationException("No such heading.");
+
+            fixture.ViewModel.OpenLinkedDocument(RepoDocA, "set up");
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't scroll to `set up`; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Equal(
+                "Cannot scroll the shown document to the heading set up.",
+                Assert.Single(fixture.Log.Entries, entry => entry.Level == "error").Message
+            );
+        });
+
+    [Fact]
+    public Task A_scroll_to_a_heading_that_did_not_run_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.ScriptsFail = true;
+
+            fixture.ViewModel.OpenLinkedDocument(RepoDocA, "set up");
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't scroll to `set up`; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "error");
+        });
+
+    [Fact]
     public Task Selecting_missing_document_sets_SelectedIsMissing_and_does_not_show() =>
         Headless.RunAsync(async () =>
         {
@@ -1675,6 +1913,56 @@ public sealed class DocumentWindowViewModelTests
         });
 
     [Fact]
+    public Task A_failed_queued_width_change_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.QueueWidthWork(() => throw new InvalidOperationException("Unexpected."));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't save the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == "Cannot change the content width.");
+        });
+
+    [Fact]
+    public Task A_failed_page_width_send_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.ContentWidthFailure = new InvalidOperationException("The page went away.");
+
+            fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't apply the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Message.StartsWith("Cannot send the stepped content width", StringComparison.Ordinal)
+            );
+        });
+
+    [Fact]
+    public Task A_page_width_send_that_did_not_run_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Surface.ScriptsFail = true;
+
+            fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal((ToastKind.Warning, "Couldn't apply the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "error");
+        });
+
+    [Fact]
     public Task A_step_whose_write_fails_after_the_window_closed_is_logged_once_and_throws_nothing() =>
         Headless.RunAsync(async () =>
         {
@@ -1979,8 +2267,8 @@ public sealed class DocumentWindowViewModelTests
 
         /// <param name="persist">Whether the window's state persists, as a main window's does.</param>
         /// <param name="ownToasts">
-        /// True to give the view model no toasts, so it makes and disposes its own <see cref="ToastCenter"/>; else it shows
-        /// them on <see cref="Toasts"/>.
+        /// True to give the view model a <see cref="ToastCenter"/> of its own that the fixture does not hold, and disposes with
+        /// it; else it shows its toasts on <see cref="Toasts"/>.
         /// </param>
         public Fixture(bool persist = true, bool ownToasts = false)
         {
@@ -1992,7 +2280,7 @@ public sealed class DocumentWindowViewModelTests
             ViewModel = new DocumentWindowViewModel(
                 State,
                 Surface,
-                new DocumentWindowServices(Widths, path => Reader(path), Time, Log, Changes, ownToasts ? null : Toasts)
+                new DocumentWindowServices(Widths, path => Reader(path), Time, Log, ownToasts ? new ToastCenter(Time) : Toasts, Changes)
             );
         }
 

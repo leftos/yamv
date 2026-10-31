@@ -101,7 +101,7 @@ internal sealed class ThemeSettingsHost : IDisposable
         var seams = new ThemeSettingsHostSeams
         {
             Trash = windowOf => new PlatformTrash(() => windowOf().TryGetPlatformHandle()?.Handle ?? 0),
-            FileActions = new AvaloniaFileActions(log, AvaloniaFileActions.StartProcess, FileActionSeams.Default),
+            FileActions = new AvaloniaFileActions(log, null, AvaloniaFileActions.StartProcess, FileActionSeams.Default),
         };
         return new ThemeSettingsHost(bridge, new ThemeCatalog(AppPaths.ThemesDirectory, log), log, seams);
     }
