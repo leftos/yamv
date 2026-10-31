@@ -15,6 +15,9 @@ public sealed class FileAppLog(string filePath) : IAppLog
 
     public string FilePath { get; } = filePath;
 
+    /// <summary>Runs inside the lock with the append stream open and the line not yet written; a test deletes the folder here.</summary>
+    internal Action? WhileAppending { get; init; }
+
     public void LogInfo(string message) => Write("INFO", message, null);
 
     public void LogWarning(string message, Exception? exception = null) => Write("WARN", message, exception);
@@ -42,7 +45,10 @@ public sealed class FileAppLog(string filePath) : IAppLog
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
                 RollIfFull();
-                File.AppendAllText(FilePath, line);
+                using var stream = new FileStream(FilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+                WhileAppending?.Invoke();
+                using var writer = new StreamWriter(stream);
+                writer.Write(line);
             }
             catch (IOException ioException)
             {

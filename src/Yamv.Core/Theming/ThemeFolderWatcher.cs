@@ -11,7 +11,8 @@ namespace Yamv.Core.Theming;
 /// <remarks>
 /// <para>
 /// <see cref="Changed"/> is raised on a thread-pool thread; a subscriber posts its work to its UI thread and never waits on it
-/// there, since <see cref="Dispose"/> waits for a <see cref="Changed"/> already running. A subscriber that throws is logged.
+/// there, since <see cref="Dispose"/> waits for a <see cref="Changed"/> already running, and a check that starts after it
+/// returns probes and logs nothing. A subscriber that throws is logged.
 /// </para>
 /// <para>
 /// Every 2 s the watcher checks that the folder exists and is still the folder it watches: a missing folder is watched once it
@@ -84,7 +85,10 @@ public sealed partial class ThemeFolderWatcher : IDisposable
     /// <summary>Raised on a thread-pool thread once the folder has changed and been quiet for 300 ms.</summary>
     public event EventHandler? Changed;
 
-    /// <summary>Stops watching and waits for a <see cref="Changed"/> already running; nothing is raised after it returns.</summary>
+    /// <summary>
+    /// Stops watching and waits for a <see cref="Changed"/> already running; nothing is raised after it returns, and a check
+    /// that starts after it returns probes nothing and logs nothing.
+    /// </summary>
     public void Dispose()
     {
         IFolderEvents? stale;
@@ -163,6 +167,14 @@ public sealed partial class ThemeFolderWatcher : IDisposable
 
     private void OnTick(object? state)
     {
+        lock (gate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+        }
+
         try
         {
             Tick();

@@ -30,6 +30,16 @@ public sealed class FileAppLogTests : IDisposable
     }
 
     [Fact]
+    public void The_logs_folder_can_be_deleted_while_a_line_is_being_written()
+    {
+        var log = new FileAppLog(_file) { WhileAppending = () => Directory.Delete(_folder, recursive: true) };
+
+        log.LogInfo("a line written while the folder goes");
+
+        Assert.False(Directory.Exists(_folder));
+    }
+
+    [Fact]
     public void An_exception_holding_a_forged_line_writes_no_line_at_column_zero_after_the_first()
     {
         var log = new FileAppLog(_file);

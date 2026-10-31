@@ -477,6 +477,21 @@ public sealed class ThemeFolderWatcherTests
     }
 
     [Fact]
+    public void A_tick_after_dispose_neither_probes_nor_logs()
+    {
+        var clock = new ManualTimeProvider();
+        var failing = new FailingProbe();
+        var watcher = new ThemeFolderWatcher(Folder, clock, log, arm.Arm, failing);
+        ManualTimeProvider.ManualTimer tick = Assert.Single(clock.Timers);
+
+        watcher.Dispose();
+        tick.Fire();
+
+        Assert.Equal(0, failing.Calls);
+        Assert.Empty(log.Entries);
+    }
+
+    [Fact]
     public void Dispose_Twice_NoOp()
     {
         ThemeFolderWatcher watcher = StartArmed();
@@ -578,5 +593,46 @@ public sealed class ThemeFolderWatcherTests
         Assert.Equal(1, changes);
         changes = 0;
         return watcher;
+    }
+
+    /// <summary>
+    /// A clock that runs nothing on its own: the test fires each timer by hand, a timer disposed before it fired included, as a
+    /// real timer's already queued callback still runs after the timer is disposed.
+    /// </summary>
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        public List<ManualTimer> Timers { get; } = [];
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ManualTimer(callback, state);
+            Timers.Add(timer);
+            return timer;
+        }
+
+        internal sealed class ManualTimer(TimerCallback callback, object? state) : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+            /// <summary>Releases nothing: the test holds the callback and runs it when it asks to.</summary>
+            public void Dispose() { }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+            /// <summary>Runs the callback, as a queued callback of a real timer does.</summary>
+            public void Fire() => callback(state);
+        }
+    }
+
+    /// <summary>A probe that counts its calls and fails, so a check that ran at all shows both as its call and as its log line.</summary>
+    private sealed class FailingProbe : IFolderProbe
+    {
+        public int Calls { get; private set; }
+
+        public FolderState Probe(string folder)
+        {
+            Calls++;
+            throw new IOException($"the check ran for {folder} after the watcher was disposed");
+        }
     }
 }
