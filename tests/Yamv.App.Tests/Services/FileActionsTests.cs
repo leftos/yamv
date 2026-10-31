@@ -320,6 +320,33 @@ public sealed class FileActionsTests
         Assert.Empty(_started);
     }
 
+    [Theory]
+    [InlineData("release.1 notes")]
+    [InlineData("a.b c")]
+    [InlineData("a. b")]
+    [InlineData("a b.c d")]
+    public void OpenConfirmed_refuses_a_program_twin_behind_an_extension_holding_a_space(string name)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows reads a drive-letter path as fully qualified.");
+        string path = @"C:\yamv links\" + name;
+
+        IOException refused = Assert.Throws<IOException>(() => ActionsWithFile(path + ".cmd").OpenConfirmed(path, isDirectory: false));
+
+        Assert.Equal($"{path} has a program of the same name beside it, which Windows might run instead.", refused.Message);
+        Assert.Empty(_started);
+    }
+
+    [Fact]
+    public void OpenConfirmed_opens_a_file_whose_extension_the_shell_sees_beside_a_same_named_program()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows reads a drive-letter path as fully qualified.");
+        string path = @"C:\yamv links\a.zzz";
+
+        ActionsWithFile(path + ".cmd").OpenConfirmed(path, isDirectory: false);
+
+        Assert.Equal(path, Assert.Single(_started).FileName);
+    }
+
     [Fact]
     public void A_file_with_its_own_extension_opens_beside_a_same_named_program()
     {

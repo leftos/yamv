@@ -38,6 +38,7 @@
 - **Pin**: a view at the very top (or very bottom) of a document when it reloads stays at the top (or follows text appended at the bottom), instead of keeping a block in place.
 - **Popover**: the content-width control the title bar's ⟷ button opens: a native Avalonia Popup, which is a window of its own so it can sit over the web view ([content-width.md](design/content-width.md)).
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.
+- **Program twin**: a program of the same name beside a linked file (`notes.cmd` beside `notes`), which the Windows shell may run instead of the file when it reads the file's name as having no extension.
 - **Reveal**: showing a path in the platform's file manager from a tree menu: a file is shown selected in Explorer or Finder, a folder or group root is opened, and a missing document opens its nearest folder that still exists (`RevealCommand`).
 - **Saved for**: the content-width popover's segmented control: the folders a width can be saved for, deepest first, then All documents (`WidthScopes`, [content-width.md](design/content-width.md)).
 - **Scroll anchor**: where a document's view stands as a top-level block and a place in it: the block's `data-line` source line and the fraction of its height above the top of the view (`ScrollAnchor`); it restores the view on a tab switch back and a session restore, and is saved in `session.json`.

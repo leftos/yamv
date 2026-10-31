@@ -42,5 +42,7 @@ Every busy command goes through `pwsh -NoProfile -File tools/gate.ps1`, written 
 - **Nothing an agent runs may show a window on the owner's desktop or take focus.** A real `yamv.exe` (a harness, a screenshot, an end-to-end check) runs only through `pwsh -NoProfile -File tools/hidden-desktop.ps1 -- <command>` (a private Win32 desktop, copied from godot-mcp), and its capture happens inside that desktop, never through a bring-to-front.
 
   Avalonia UI tests use `Avalonia.Headless`. Page-only CSS/JS checks render in headless Chromium (`npx playwright screenshot`). A check that cannot run hidden is tagged `[Trait("Category", "Desktop")]`, excluded by default (the test project's `DesktopTestFilter` property), and run only when the owner asks, with `-p:DesktopTestFilter='--filter-trait "Category=Desktop"'`.
+
+  Opening a file with no handler starts `OpenWith.exe -Embedding` through COM, whose "Pick an app" dialog appears on the owner's desktop even under `tools/hidden-desktop.ps1`, so a probe that may reach it blocks Open With's COM class `{e44e9428-bdbc-4987-a099-40dc8fd255e7}` in its own process first. A single-instance handler forwards to an instance already on the owner's desktop, so a probe never opens such types.
 - Test mode: stable (the full suite runs at every landing).
 - The look follows `docs/design/look.md`; a UI change that departs from it gets a mock first.

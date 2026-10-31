@@ -1,3 +1,5 @@
+using Yamv.Core.Platform;
+
 namespace Yamv.Core.Links;
 
 /// <summary>The words of the card that asks before a link opens a file YAMV does not show.</summary>
@@ -59,6 +61,12 @@ public sealed record ConfirmText(string Title, string Body)
         if (isFolder && !(isMac && extension.Length > 0))
         {
             return new ConfirmText(title, $"It's a folder. YAMV doesn't show folders; it will open in {(isMac ? "Finder" : "Explorer")}.");
+        }
+
+        // The Windows shell reads a name whose last dot is followed by a space as having no extension, so the card says the same.
+        if (!isMac && ShellExtension.IsMissing(path))
+        {
+            extension = string.Empty;
         }
 
         if (Shortcuts.Contains(extension))

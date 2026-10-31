@@ -41,8 +41,9 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
     private const string ConfirmedLogPrefix = "Open confirmed link:";
 
     /// <summary>
-    /// The program extensions the Windows shell tries on a path with no extension of its own, before the path itself: opening
-    /// <c>foo</c> ran <c>foo.cmd</c> beside it, while opening <c>foo.txt</c> left <c>foo.txt.cmd</c> alone.
+    /// The program extensions the Windows shell tries on a path it reads as having no extension (see
+    /// <see cref="ShellExtension"/>), before the path itself: opening <c>foo</c> ran <c>foo.cmd</c> beside it, while opening
+    /// <c>foo.txt</c> left <c>foo.txt.cmd</c> alone.
     /// </summary>
     private static readonly string[] ProgramExtensions = [".pif", ".com", ".exe", ".bat", ".cmd", ".lnk"];
 
@@ -259,7 +260,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
 
         if (
             platform == FilePlatform.Windows
-            && Path.GetExtension(path).Length == 0
+            && ShellExtension.IsMissing(path)
             && ProgramExtensions.Any(extension => seams.FileExists(path + extension))
         )
         {
