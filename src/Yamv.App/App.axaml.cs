@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Yamv.App.Services;
 using Yamv.App.ViewModels;
@@ -88,6 +89,15 @@ public partial class App : Application
     /// <summary>The last stamp given to a document window's activation; a higher stamp is a more recent activation.</summary>
     private long _activationStamp;
 
+    /// <summary>The activate requests that arrived during the launch grace, unanswered until it ends.</summary>
+    private readonly List<InstanceRequest> _heldActivates = [];
+
+    /// <summary>The running launch grace's timer, or null when no grace runs.</summary>
+    private ITimer? _graceTimer;
+
+    /// <summary>The lifetime whose Finder opens and Dock clicks the app follows, or null when the platform has none.</summary>
+    private IActivatableLifetime? _activatable;
+
     /// <summary>The files the first window opens: empty for a main launch. Set before Avalonia starts.</summary>
     internal static IReadOnlyList<string> ViewerFiles { get; set; } = [];
 
@@ -96,7 +106,8 @@ public partial class App : Application
 
     /// <summary>
     /// The latch every instance-server request reaches the UI thread through; the app opens it once its framework is initialized
-    /// and its start window shown. Null for harness launches. Set before Avalonia starts.
+    /// and its start window shown, or, when the start waits the launch grace, once the grace has begun. Null for harness launches.
+    /// Set before Avalonia starts.
     /// </summary>
     internal static UiReadyLatch? ReadyLatch { get; set; }
 
@@ -105,6 +116,15 @@ public partial class App : Application
     /// for harness launches, where a start uses a fresh quit rule. Set before Avalonia starts.
     /// </summary>
     internal static AppLifetimePolicy? Lifetime { get; set; }
+
+    /// <summary>
+    /// Whether a start waits the launch grace before its start window, so file events from the OS that arrive just after start
+    /// can replace the main window: true on macOS, false on Windows. Set before Avalonia starts.
+    /// </summary>
+    internal static bool LaunchGrace { get; set; }
+
+    /// <summary>The clock the launch grace runs on; a test replaces it with a fake one.</summary>
+    internal static TimeProvider LaunchClock { get; set; } = TimeProvider.System;
 
     /// <summary>When set, what the quit job calls instead of shutting the desktop lifetime down; a test records the quit with it.</summary>
     internal static Action? QuitForTests { get; set; }
@@ -185,6 +205,7 @@ public partial class App : Application
                 _desktop = desktop;
                 desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 CreateStartWindow();
+                SubscribeActivation();
             }
         }
 
@@ -293,11 +314,15 @@ public partial class App : Application
     /// <summary>
     /// The window a start shows: with <c>YAMV_DEV_HARNESS</c> at <c>1</c>, the theme settings window when
     /// <c>YAMV_DEV_THEME_SETTINGS</c> is <c>1</c> too, else the dev harness; otherwise the main window, or a viewer window
-    /// over <see cref="ViewerFiles"/> when the launch named files, as the launch arbiter's start entry decides. A harness window is
-    /// returned unshown, for the lifetime to show as its main window; a main or viewer start window is shown here, through the
-    /// same guarded path as any later window, and a start window that fails to show is removed like any other.
+    /// over <see cref="ViewerFiles"/> when the launch named files, as the launch arbiter's start entry decides. With
+    /// <see cref="LaunchGrace"/> set, the main window waits for the grace to end instead, and a Finder open during it replaces
+    /// it. A harness window is returned unshown, for the lifetime to show as its main window; a main or viewer start window is
+    /// shown here, through the same guarded path as any later window, and a start window that fails to show is removed like any
+    /// other.
     /// </summary>
-    /// <returns>The start window, or null when the main or viewer start window failed to open.</returns>
+    /// <returns>
+    /// The start window, or null when the main or viewer start window failed to open or the main window waits for the grace.
+    /// </returns>
     internal Window? CreateStartWindow()
     {
         if (IsHarnessStart)
@@ -309,12 +334,262 @@ public partial class App : Application
         _policy = Lifetime ?? new AppLifetimePolicy(LastWindowBehavior.Quit);
         _arbiter = new LaunchArbiter();
         _exited = false;
+        StopGraceTimer();
+        if (LaunchGrace)
+        {
+            return StartWithGrace();
+        }
+
         return _arbiter.Start(ViewerFiles) switch
         {
             OpenViewerWindow viewer => ShowViewer(viewer.Files, ApplyDevStartHooks),
             OpenMainWindow => ShowMain(ApplyDevStartHooks),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Starts the launch grace on <see cref="LaunchClock"/>, and shows a viewer over <see cref="ViewerFiles"/> at once when the
+    /// launch named files, as a Finder open in the grace would.
+    /// </summary>
+    /// <returns>The viewer start window, or null when the launch named no files or the viewer failed to open.</returns>
+    private MainWindow? StartWithGrace()
+    {
+        if (_arbiter.FrameworkReady() is StartGraceTimer timer)
+        {
+            LaunchArbiter arbiter = _arbiter;
+            _graceTimer = LaunchClock.CreateTimer(
+                _ => Dispatcher.UIThread.Post(() => EndGrace(arbiter)),
+                null,
+                timer.Delay,
+                Timeout.InfiniteTimeSpan
+            );
+        }
+
+        return ViewerFiles.Count > 0 && _arbiter.FilesOpened(ViewerFiles) is OpenViewerWindow viewer
+            ? ShowViewer(viewer.Files, ApplyDevStartHooks)
+            : null;
+    }
+
+    /// <summary>
+    /// Ends the launch grace on the UI thread: takes the held activates whose launchers still wait (one that hung up is dropped
+    /// and asks for nothing), tells the arbiter how many, and opens the main window when it says so. Then answers every taken
+    /// activate: <c>opened</c> when the main window showed, or when it did not and the most recently active viewer came forward
+    /// instead; <c>refused</c> when no window did. A grace whose start was replaced or released does nothing.
+    /// </summary>
+    private void EndGrace(LaunchArbiter arbiter)
+    {
+        if (!ReferenceEquals(arbiter, _arbiter) || _exited)
+        {
+            return;
+        }
+
+        StopGraceTimer();
+        List<InstanceRequest> begun = BeginHeldActivates();
+        _arbiter.HeldActivatesBegun(begun.Count);
+        LaunchAction action = _arbiter.GraceElapsed();
+        bool forward = false;
+        try
+        {
+            forward = GraceWindowForward(action, begun.Count);
+        }
+        // A job on the UI thread must not end the loop, and the held launchers wait for this answer.
+        catch (Exception exception)
+        {
+            Log.LogError("Launch grace: could not bring a window forward.", exception);
+        }
+
+        foreach (InstanceRequest request in begun)
+        {
+            request.Complete(forward ? InstanceReply.Opened : InstanceReply.Refused);
+        }
+    }
+
+    /// <summary>
+    /// Opens the main window when the grace's <paramref name="action"/> asks for it, with the start's dev hooks when it is the first
+    /// window; when it does not show and <paramref name="live"/> held activates wait, brings the main or most recently active viewer
+    /// window forward instead.
+    /// </summary>
+    /// <returns>True when a window showed or came forward.</returns>
+    private bool GraceWindowForward(LaunchAction action, int live)
+    {
+        bool mainShown = action is OpenMainWindow && ShowMain(DocumentWindowCount == 0 ? ApplyDevStartHooks : null) is not null;
+        return mainShown || (live > 0 && BringWindowForward());
+    }
+
+    /// <summary>Takes every held activate for carrying out and forgets them; one whose launcher hung up meanwhile is dropped.</summary>
+    private List<InstanceRequest> BeginHeldActivates()
+    {
+        List<InstanceRequest> begun = [];
+        foreach (InstanceRequest request in _heldActivates)
+        {
+            if (request.TryBegin())
+            {
+                begun.Add(request);
+            }
+            else
+            {
+                Log.LogInfo("Activate: abandoned while held for the launch grace; dropped.");
+            }
+        }
+
+        _heldActivates.Clear();
+        return begun;
+    }
+
+    /// <summary>Stops the launch grace's timer, if one runs.</summary>
+    private void StopGraceTimer()
+    {
+        _graceTimer?.Dispose();
+        _graceTimer = null;
+    }
+
+    /// <summary>Follows the platform's Finder opens and Dock clicks, when it reports them.</summary>
+    private void SubscribeActivation()
+    {
+        if (TryGetFeature(typeof(IActivatableLifetime)) is IActivatableLifetime activatable)
+        {
+            _activatable = activatable;
+            activatable.Activated += OnLifetimeActivated;
+        }
+    }
+
+    /// <summary>
+    /// Runs on the UI thread for each activation the platform reports; turns a Finder open's storage items into names and local
+    /// paths, then carries the activation out. Nothing it throws escapes into the framework.
+    /// </summary>
+    private void OnLifetimeActivated(object? sender, ActivatedEventArgs e)
+    {
+        IReadOnlyList<ActivationItem> items;
+        try
+        {
+            items = e is FileActivatedEventArgs opened ? ReadActivationItems([.. opened.Files.Select(ReaderOf)]) : [];
+        }
+        // A framework handler must not throw back into Avalonia; the failure is logged instead.
+        catch (Exception exception)
+        {
+            Log.LogError($"Activation ({e.Kind}): could not read what it opened.", exception);
+            return;
+        }
+
+        OnActivated(e.Kind, items);
+    }
+
+    /// <summary>How to read one storage item a Finder open named, with the item's kind for the log when the read throws.</summary>
+    private static (string Kind, Func<ActivationItem> Read) ReaderOf(IStorageItem item) =>
+        item is IStorageFolder
+            ? ("folder", () => new ActivationItem(item.Name, LocalPath: null, IsFolder: true))
+            : ("file", () => new ActivationItem(item.Name, item.TryGetLocalPath(), IsFolder: false));
+
+    /// <summary>
+    /// Reads each item a Finder open named; an item whose read throws is skipped with one warning naming its kind, and the others
+    /// are kept.
+    /// </summary>
+    /// <param name="readers">Each item's kind (<c>file</c> or <c>folder</c>) and how to read it, in the order the event named them.</param>
+    /// <returns>The items that could be read, in order.</returns>
+    internal List<ActivationItem> ReadActivationItems(IReadOnlyList<(string Kind, Func<ActivationItem> Read)> readers)
+    {
+        List<ActivationItem> items = [];
+        foreach ((string kind, Func<ActivationItem> read) in readers)
+        {
+            try
+            {
+                items.Add(read());
+            }
+            // One unreadable item must not drop the rest of the open; it is logged and skipped.
+            catch (Exception exception)
+            {
+                Log.LogWarning($"Finder open: could not read a {kind} it named; skipped.", exception);
+            }
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// Carries out one activation on the UI thread: a Finder open opens its files as a launch's open does, a Dock click raises or
+    /// reopens the main window; a background change, or a URI open the app registers none for, is ignored. A failure is logged and
+    /// never thrown.
+    /// </summary>
+    /// <param name="kind">What the platform reported.</param>
+    /// <param name="items">What a Finder open named; empty for every other kind.</param>
+    internal void OnActivated(ActivationKind kind, IReadOnlyList<ActivationItem> items)
+    {
+        try
+        {
+            if (kind == ActivationKind.File)
+            {
+                OpenActivatedFiles(items);
+            }
+            else if (kind == ActivationKind.Reopen)
+            {
+                ReopenFromDock();
+            }
+        }
+        // A framework handler must not throw back into Avalonia; the failure is logged instead.
+        catch (Exception exception)
+        {
+            Log.LogError($"Activation ({kind}): could not carry it out.", exception);
+        }
+    }
+
+    /// <summary>
+    /// Opens a Finder open's files through the launch arbiter and <see cref="OpenFiles"/>; a folder or an item with no local path
+    /// is skipped and logged.
+    /// </summary>
+    private void OpenActivatedFiles(IReadOnlyList<ActivationItem> items)
+    {
+        List<string> paths = [];
+        foreach (ActivationItem item in items)
+        {
+            if (item.IsFolder)
+            {
+                Log.LogWarning($"Finder open: {item.Name} is a folder; skipped.");
+            }
+            else if (item.LocalPath is not { } path)
+            {
+                Log.LogWarning($"Finder open: {item.Name} has no local path; skipped.");
+            }
+            else
+            {
+                paths.Add(path);
+            }
+        }
+
+        if (!_policy.MayOpenWindows)
+        {
+            Log.LogInfo($"Finder open: the app is closing; opening none of {paths.Count} file(s).");
+            return;
+        }
+
+        if (_arbiter.FilesOpened(paths) is OpenViewerWindow)
+        {
+            OpenFiles(paths);
+        }
+    }
+
+    /// <summary>
+    /// A Dock click: raises the open main window, or opens it when it is closed, minimized windows counting as open. A stopping
+    /// app opens nothing.
+    /// </summary>
+    private void ReopenFromDock()
+    {
+        if (!_policy.MayOpenWindows)
+        {
+            Log.LogInfo("Dock: the app is closing; not opening a window.");
+            return;
+        }
+
+        switch (_arbiter.Reopen(anyWindowOpen: DocumentWindowCount > 0))
+        {
+            case ActivateMainWindow when _main is { } main:
+                Raise(main);
+                Log.LogInfo("Dock: main window brought forward.");
+                break;
+            case OpenMainWindow when ShowMain(beforeShow: null) is not null:
+                Log.LogInfo("Dock: main window opened.");
+                break;
+        }
     }
 
     private static bool IsHarnessStart => Environment.GetEnvironmentVariable(HarnessVariable) == "1";
@@ -371,7 +646,7 @@ public partial class App : Application
         try
         {
             holder.Composition.ViewModel.Select(held.File);
-            Raise(holder.Composition.Window);
+            Raise(holder);
             Log.LogInfo($"Open: {held.File} is already open; brought its window forward.");
         }
         // A job on the UI thread must not end the loop, and the launcher already heard opened.
@@ -434,9 +709,10 @@ public partial class App : Application
     /// <summary>
     /// Brings the app forward for a launch's <paramref name="request"/>, on the UI thread, and answers it as one job. A stopping app
     /// answers <c>closing</c>; a request the server already abandoned raises nothing; otherwise the answer comes after the window
-    /// is forward: <c>opened</c> when one was raised or built, <c>refused</c> when none was or raising it threw.
+    /// is forward: <c>opened</c> when one was raised or built, <c>refused</c> when none was or raising it threw. During the launch
+    /// grace the request is held unbegun and answered when the grace ends.
     /// </summary>
-    /// <returns>True when a window was raised or built for the request.</returns>
+    /// <returns>True when a window was raised or built for the request, or the request is held for the grace.</returns>
     internal bool ActivateRequested(InstanceRequest request)
     {
         if (!_policy.MayOpenWindows)
@@ -444,6 +720,14 @@ public partial class App : Application
             request.Complete(InstanceReply.Closing);
             Log.LogInfo("Activate: the app is closing; answered closing.");
             return false;
+        }
+
+        // Asked only in the grace: outside it the arbiter's answer counts the main window open, which an abandoned request must not do.
+        if (_arbiter.InGrace && _arbiter.ActivateRequested() is HoldUntilGraceEnds)
+        {
+            _heldActivates.Add(request);
+            Log.LogInfo("Activate: held until the launch grace ends.");
+            return true;
         }
 
         if (!request.TryBegin())
@@ -654,24 +938,40 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Follows a document window until it closes: each activation stamps it as the most recently active, its theme settings
-    /// requests open the theme settings window, and its close removes it.
+    /// Follows a document window until it closes: each activation stamps it as the most recently active, each state other than
+    /// minimized is kept for a raise to restore, its theme settings requests open the theme settings window, and its close
+    /// removes it.
     /// </summary>
     private DocumentWindow Track(MainWindowComposition composition)
     {
         var tracked = new DocumentWindow(composition);
         MainWindow window = composition.Window;
+        if (window.WindowState != WindowState.Minimized)
+        {
+            tracked.RestoreState = window.WindowState;
+        }
+
         void OnActivated(object? sender, EventArgs e) => tracked.ActivatedAt = ++_activationStamp;
 
         void OnClosed(object? sender, EventArgs e) => RemoveDocumentWindow(tracked);
 
+        void OnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs change)
+        {
+            if (change.Property == Window.WindowStateProperty && window.WindowState != WindowState.Minimized)
+            {
+                tracked.RestoreState = window.WindowState;
+            }
+        }
+
         window.Activated += OnActivated;
         window.Closed += OnClosed;
+        window.PropertyChanged += OnPropertyChanged;
         window.ThemeSettingsRequested += OnThemeSettingsRequested;
         tracked.Unhook = () =>
         {
             window.Activated -= OnActivated;
             window.Closed -= OnClosed;
+            window.PropertyChanged -= OnPropertyChanged;
             window.ThemeSettingsRequested -= OnThemeSettingsRequested;
         };
         return tracked;
@@ -832,14 +1132,14 @@ public partial class App : Application
     {
         if (_main is { } main)
         {
-            Raise(main.Composition.Window);
+            Raise(main);
             Log.LogInfo("Activate: main window brought forward.");
             return true;
         }
 
         if (_viewers.Count > 0)
         {
-            Raise(_viewers.MaxBy(viewer => viewer.ActivatedAt)!.Composition.Window);
+            Raise(_viewers.MaxBy(viewer => viewer.ActivatedAt)!);
             Log.LogInfo("Activate: viewer window brought forward.");
             return true;
         }
@@ -848,11 +1148,13 @@ public partial class App : Application
         return false;
     }
 
-    private static void Raise(Window window)
+    /// <summary>Shows and activates a document window, restoring a minimized one to the state it had before, maximized included.</summary>
+    private static void Raise(DocumentWindow tracked)
     {
+        Window window = tracked.Composition.Window;
         if (window.WindowState == WindowState.Minimized)
         {
-            window.WindowState = WindowState.Normal;
+            window.WindowState = tracked.RestoreState;
         }
 
         window.Show();
@@ -869,6 +1171,10 @@ public partial class App : Application
     internal void ReleaseMainWindow()
     {
         _exited = true;
+        _activatable?.Activated -= OnLifetimeActivated;
+        _activatable = null;
+        StopGraceTimer();
+        ReleaseHeldActivates();
         _themeSettingsHost?.Dispose();
         _themeSettingsHost = null;
         if (_policy.Exiting())
@@ -901,6 +1207,23 @@ public partial class App : Application
         _widths = null;
         _harnessBridge?.Dispose();
         _harnessBridge = null;
+    }
+
+    /// <summary>Answers <c>closing</c> to every activate still held for the launch grace, since the app exits before it ends.</summary>
+    private void ReleaseHeldActivates()
+    {
+        if (_heldActivates.Count == 0)
+        {
+            return;
+        }
+
+        foreach (InstanceRequest request in _heldActivates)
+        {
+            request.Complete(InstanceReply.Closing);
+        }
+
+        Log.LogInfo($"Activate: the app exits during the launch grace; answered closing to {_heldActivates.Count} held activate(s).");
+        _heldActivates.Clear();
     }
 
     /// <summary>Stops watching <c>settings.json</c>, waiting for a report already running; a failure to stop is logged.</summary>
@@ -1039,12 +1362,21 @@ public partial class App : Application
         return window;
     }
 
+    /// <summary>One item a Finder open named, as the app reads it.</summary>
+    /// <param name="Name">The item's name, for the log.</param>
+    /// <param name="LocalPath">The item's full local path, or null when it has none.</param>
+    /// <param name="IsFolder">Whether the item is a folder, which the app does not open.</param>
+    internal readonly record struct ActivationItem(string Name, string? LocalPath, bool IsFolder);
+
     /// <summary>A main or viewer window the app follows, with what unhooks the app's handlers from it.</summary>
     private sealed class DocumentWindow(MainWindowComposition composition)
     {
         public MainWindowComposition Composition { get; } = composition;
 
         public Action Unhook { get; set; } = () => { };
+
+        /// <summary>The state the window had before it was last minimized, which a raise restores.</summary>
+        public WindowState RestoreState { get; set; } = WindowState.Normal;
 
         /// <summary>The app's activation stamp at this window's last activation; 0 until it is first activated.</summary>
         public long ActivatedAt { get; set; }

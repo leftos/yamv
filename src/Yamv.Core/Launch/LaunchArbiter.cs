@@ -17,6 +17,13 @@ public sealed record ActivateMainWindow : LaunchAction;
 /// <param name="Delay">How long to wait before reporting.</param>
 public sealed record StartGraceTimer(TimeSpan Delay) : LaunchAction;
 
+/// <summary>
+/// Keep the activate request unanswered until the grace period ends. Then, if its launcher still waits, the caller reports it
+/// through <see cref="LaunchArbiter.HeldActivatesBegun"/>, the main window opens, and the request is answered once a window has
+/// come forward or none could; a request whose launcher hung up is dropped and opens nothing.
+/// </summary>
+public sealed record HoldUntilGraceEnds : LaunchAction;
+
 /// <summary>Nothing to do for this input.</summary>
 public sealed record None : LaunchAction;
 
@@ -46,6 +53,9 @@ public sealed class LaunchArbiter
     /// until <see cref="MainWindowClosed"/>.
     /// </summary>
     public bool MainWindowOpen => _mainOpen;
+
+    /// <summary>Whether the grace period runs: from <see cref="FrameworkReady"/> until <see cref="GraceElapsed"/>.</summary>
+    public bool InGrace => _inGrace;
 
     /// <summary>
     /// Reports that the UI framework initialized for a start with no grace period: a viewer window over <paramref name="files"/>
@@ -132,13 +142,16 @@ public sealed class LaunchArbiter
         return anyWindowOpen && _mainOpen ? new ActivateMainWindow() : OpenMain();
     }
 
-    /// <summary>Reports an activate request, which activates the main window or opens it when it was closed.</summary>
+    /// <summary>
+    /// Reports an activate request, which activates the main window or opens it when it was closed. During the grace period the
+    /// request is held and asks for nothing yet: when the grace ends the caller takes the held requests whose launchers still
+    /// wait, reports how many through <see cref="HeldActivatesBegun"/>, and answers them once the grace's window has shown.
+    /// </summary>
     public LaunchAction ActivateRequested()
     {
         if (_inGrace)
         {
-            _mainRequested = true;
-            return new None();
+            return new HoldUntilGraceEnds();
         }
 
         if (!_frameworkReady)
@@ -147,6 +160,23 @@ public sealed class LaunchArbiter
         }
 
         return _mainOpen ? new ActivateMainWindow() : OpenMain();
+    }
+
+    /// <summary>
+    /// Reports, just before <see cref="GraceElapsed"/>, how many held activates the caller took for carrying out; any one of them
+    /// asks for the main window. A held activate whose launcher hung up is not counted, so it opens nothing. Outside the grace
+    /// it is ignored.
+    /// </summary>
+    /// <param name="live">The held activates taken for carrying out; zero or more.</param>
+    public LaunchAction HeldActivatesBegun(int live)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(live);
+        if (_inGrace && live > 0)
+        {
+            _mainRequested = true;
+        }
+
+        return new None();
     }
 
     /// <summary>Reports that the main window is shown.</summary>

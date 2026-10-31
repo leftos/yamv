@@ -1516,6 +1516,484 @@ public sealed class AppStartupTests
             Assert.Same(b, settings.Owner);
         });
 
+    [Fact]
+    public Task A_grace_start_shows_the_main_window_only_once_the_grace_ends() =>
+        Headless.Run(() =>
+        {
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            Assert.Null(start.StartWindow);
+
+            clock.Advance(LaunchArbiter.GracePeriod - TimeSpan.FromMilliseconds(1));
+            Dispatcher.UIThread.RunJobs();
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Empty(start.App.ViewerWindows);
+
+            // The timer's callback only posts: the window is built by the UI job, not on the timer's thread.
+            clock.Advance(TimeSpan.FromMilliseconds(1));
+            Assert.Null(start.App.MainDocumentWindow);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(start.App.MainDocumentWindow?.IsVisible);
+            Assert.Empty(start.App.ViewerWindows);
+        });
+
+    [Fact]
+    public Task A_Finder_open_in_the_grace_opens_a_viewer_and_no_main_window() =>
+        Headless.Run(() =>
+        {
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            string file = MissingFile();
+
+            start.App.OnActivated(ActivationKind.File, [new App.ActivationItem("a.md", file, IsFolder: false)]);
+            Window viewer = Assert.Single(start.App.ViewerWindows);
+            clock.Advance(LaunchArbiter.GracePeriod);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Same(viewer, Assert.Single(start.App.ViewerWindows));
+            Assert.Equal(file, Assert.IsType<DocumentWindowViewModel>(viewer.DataContext).SelectedPath);
+        });
+
+    [Fact]
+    public Task A_grace_start_with_launch_files_opens_their_viewer_and_no_main_window() =>
+        Headless.Run(() =>
+        {
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [MissingFile()], clock);
+            Window viewer = start.Window;
+
+            clock.Advance(LaunchArbiter.GracePeriod);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Same(viewer, Assert.Single(start.App.ViewerWindows));
+        });
+
+    [Fact]
+    public Task An_activate_in_the_grace_is_answered_opened_once_the_main_window_shows() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+
+            Assert.True(start.App.ActivateRequested(request));
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: held until the launch grace ends.");
+            Assert.False(outcome.IsCompleted);
+
+            clock.Advance(LaunchArbiter.GracePeriod);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(start.App.MainDocumentWindow?.IsVisible);
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task An_activate_in_the_grace_after_a_Finder_open_opens_the_main_window_too() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            start.App.OnActivated(ActivationKind.File, [new App.ActivationItem("a.md", MissingFile(), IsFolder: false)]);
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+
+            Assert.True(start.App.ActivateRequested(request));
+            clock.Advance(LaunchArbiter.GracePeriod);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(start.App.MainDocumentWindow?.IsVisible);
+            Assert.Single(start.App.ViewerWindows);
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task An_activate_in_the_grace_is_answered_refused_when_the_main_window_fails() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var watchers = new FailingSettingsWatchers(failures: 1);
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+
+            Assert.True(start.App.ActivateRequested(request));
+            clock.Advance(LaunchArbiter.GracePeriod);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Contains(start.Log.Entries, entry => entry.Level == "error" && entry.Message == "The main window could not open.");
+            Assert.Equal(
+                InstanceRequestOutcome.Refused,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task An_activate_held_in_the_grace_whose_launcher_hung_up_is_dropped() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            start.App.OnActivated(ActivationKind.File, [new App.ActivationItem("a.md", MissingFile(), IsFolder: false)]);
+            Window viewer = Assert.Single(start.App.ViewerWindows);
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+            Assert.True(start.App.ActivateRequested(request));
+            await Task.Run(requests.Server.Coordinator.StopAnswering, TestContext.Current.CancellationToken);
+
+            clock.Advance(LaunchArbiter.GracePeriod);
+            Dispatcher.UIThread.RunJobs();
+
+            // An abandoned activate is never carried out: it asks for no main window, so the Finder viewer stays the only window.
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Same(viewer, Assert.Single(start.App.ViewerWindows));
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: abandoned while held for the launch grace; dropped.");
+            Assert.Equal(
+                InstanceRequestOutcome.Closing,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task An_activate_held_when_the_app_exits_is_answered_closing_and_opens_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            using var opened = new OpenedMainWindows();
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+            Assert.True(start.App.ActivateRequested(request));
+
+            start.App.ReleaseMainWindow();
+            Assert.Equal(
+                InstanceRequestOutcome.Closing,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+            Assert.Contains(
+                start.Log.Entries,
+                entry => entry.Message == "Activate: the app exits during the launch grace; answered closing to 1 held activate(s)."
+            );
+
+            clock.Advance(LaunchArbiter.GracePeriod);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(opened.Windows);
+            Assert.Null(start.App.MainDocumentWindow);
+        });
+
+    [Fact]
+    public Task An_activate_in_the_grace_brings_the_Finder_viewer_forward_when_the_main_window_fails() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            start.App.OnActivated(ActivationKind.File, [new App.ActivationItem("a.md", MissingFile(), IsFolder: false)]);
+            Window viewer = Assert.Single(start.App.ViewerWindows);
+            Dispatcher.UIThread.RunJobs();
+            viewer.WindowState = WindowState.Minimized;
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+            Assert.True(start.App.ActivateRequested(request));
+
+            using (FailingOpens(_ => { }))
+            {
+                clock.Advance(LaunchArbiter.GracePeriod);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Equal(WindowState.Normal, viewer.WindowState);
+            Assert.Contains(start.Log.Entries, entry => entry.Level == "error" && entry.Message == "The main window could not open.");
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: viewer window brought forward.");
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task A_Dock_click_while_the_app_is_stopping_opens_nothing() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            start.Window.Close();
+            using var opened = new OpenedMainWindows();
+
+            start.App.OnActivated(ActivationKind.Reopen, []);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(opened.Windows);
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Dock: the app is closing; not opening a window.");
+        });
+
+    [Fact]
+    public Task A_Finder_item_that_cannot_be_read_is_skipped_and_the_rest_open() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            string file = MissingFile();
+
+            List<App.ActivationItem> items = start.App.ReadActivationItems([
+                ("file", () => throw new IOException("The item is gone.")),
+                ("file", () => new App.ActivationItem("a.md", file, IsFolder: false)),
+            ]);
+            start.App.OnActivated(ActivationKind.File, items);
+
+            Window viewer = Assert.Single(start.App.ViewerWindows);
+            Assert.Equal(file, Assert.IsType<DocumentWindowViewModel>(viewer.DataContext).SelectedPath);
+            LogEntry warning = Assert.Single(start.Log.Entries, entry => entry.Level == "warning");
+            Assert.Equal("Finder open: could not read a file it named; skipped.", warning.Message);
+        });
+
+    [Fact]
+    public Task Raise_restores_a_window_that_was_maximized_before_it_was_tracked() =>
+        Headless.Run(() =>
+        {
+            var clock = new FakeTimeProvider();
+            using var start = new GateStart(viewerFiles: [], clock);
+            new SessionStore(start.SessionFile, start.Log).Save(new SessionState { Window = new WindowBounds(10, 10, 800, 600, IsMaximized: true) });
+            clock.Advance(LaunchArbiter.GracePeriod);
+            Dispatcher.UIThread.RunJobs();
+            Window window = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
+            Assert.Equal(WindowState.Maximized, window.WindowState);
+
+            window.WindowState = WindowState.Minimized;
+            start.App.BringAppForward();
+
+            Assert.Equal(WindowState.Maximized, window.WindowState);
+        });
+
+    [Fact]
+    public Task A_Finder_open_of_a_file_already_open_brings_its_window_forward() =>
+        Headless.Run(() =>
+        {
+            string file = MissingFile();
+            using var start = new GateStart(viewerFiles: [file], stopAnswering: null);
+            Window holder = start.Window;
+            Window other = ShowViewer(start.App);
+            Dispatcher.UIThread.RunJobs();
+            holder.WindowState = WindowState.Minimized;
+
+            start.App.OnActivated(ActivationKind.File, [new App.ActivationItem("a.md", file, IsFolder: false)]);
+
+            Window[] stillOpen = [holder, other];
+            Assert.Equal(stillOpen, start.App.ViewerWindows);
+            Assert.Equal(WindowState.Normal, holder.WindowState);
+            Assert.True(holder.IsActive);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == $"Open: {file} is already open; brought its window forward.");
+        });
+
+    [Fact]
+    public Task A_Finder_open_of_a_new_file_opens_a_viewer_over_it() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            string file = MissingFile();
+
+            start.App.OnActivated(ActivationKind.File, [new App.ActivationItem("a.md", file, IsFolder: false)]);
+
+            Window viewer = Assert.Single(start.App.ViewerWindows);
+            Assert.Equal(file, Assert.IsType<DocumentWindowViewModel>(viewer.DataContext).SelectedPath);
+        });
+
+    [Fact]
+    public Task A_Finder_open_skips_and_logs_folders_and_items_without_a_local_path() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            string file = MissingFile();
+
+            start.App.OnActivated(
+                ActivationKind.File,
+                [
+                    new App.ActivationItem("notes", Path.GetTempPath(), IsFolder: true),
+                    new App.ActivationItem("remote.md", LocalPath: null, IsFolder: false),
+                    new App.ActivationItem("a.md", file, IsFolder: false),
+                ]
+            );
+
+            Window viewer = Assert.Single(start.App.ViewerWindows);
+            DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(viewer.DataContext);
+            Assert.Equal(file, viewModel.SelectedPath);
+            Assert.False(viewModel.HasDocument(Path.GetTempPath()));
+            Assert.Contains(start.Log.Entries, entry => entry.Level == "warning" && entry.Message == "Finder open: notes is a folder; skipped.");
+            Assert.Contains(
+                start.Log.Entries,
+                entry => entry.Level == "warning" && entry.Message == "Finder open: remote.md has no local path; skipped."
+            );
+        });
+
+    [Fact]
+    public Task A_Finder_open_of_only_a_folder_opens_nothing() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            using var opened = new OpenedMainWindows();
+
+            start.App.OnActivated(ActivationKind.File, [new App.ActivationItem("notes", Path.GetTempPath(), IsFolder: true)]);
+
+            Assert.Empty(opened.Windows);
+            Assert.Empty(start.App.ViewerWindows);
+        });
+
+    [Fact]
+    public Task A_Dock_click_with_no_window_opens_the_main_window() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null, LastWindowBehavior.KeepRunning);
+            start.Window.Close();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Null(start.App.MainDocumentWindow);
+
+            start.App.OnActivated(ActivationKind.Reopen, []);
+
+            Assert.True(start.App.MainDocumentWindow?.IsVisible);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Dock: main window opened.");
+        });
+
+    [Fact]
+    public Task A_Dock_click_with_only_a_viewer_open_opens_the_main_window() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [MissingFile()], stopAnswering: null, LastWindowBehavior.KeepRunning);
+            Window viewer = start.Window;
+
+            start.App.OnActivated(ActivationKind.Reopen, []);
+
+            Assert.True(start.App.MainDocumentWindow?.IsVisible);
+            Assert.Same(viewer, Assert.Single(start.App.ViewerWindows));
+        });
+
+    [Fact]
+    public Task A_Dock_click_raises_a_minimized_main_window() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null, LastWindowBehavior.KeepRunning);
+            using var opened = new OpenedMainWindows();
+            Window main = start.Window;
+            Dispatcher.UIThread.RunJobs();
+            main.WindowState = WindowState.Minimized;
+
+            start.App.OnActivated(ActivationKind.Reopen, []);
+
+            Assert.Equal(WindowState.Normal, main.WindowState);
+            Assert.Same(main, start.App.MainDocumentWindow);
+            Assert.Empty(opened.Windows);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Dock: main window brought forward.");
+        });
+
+    [Fact]
+    public Task A_background_activation_changes_nothing() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null, LastWindowBehavior.KeepRunning);
+            start.Window.Close();
+            Dispatcher.UIThread.RunJobs();
+            using var opened = new OpenedMainWindows();
+
+            start.App.OnActivated(ActivationKind.Background, []);
+
+            Assert.Empty(opened.Windows);
+            Assert.Null(start.App.MainDocumentWindow);
+        });
+
+    [Fact]
+    public Task An_activation_that_throws_is_logged_and_does_not_escape() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null, LastWindowBehavior.KeepRunning);
+            Window main = start.Window;
+            Dispatcher.UIThread.RunJobs();
+            main.WindowState = WindowState.Minimized;
+
+            static void ThrowOnRaise(object? sender, AvaloniaPropertyChangedEventArgs change)
+            {
+                if (change.Property == Window.WindowStateProperty)
+                {
+                    throw new InvalidOperationException("The window could not come forward.");
+                }
+            }
+
+            main.PropertyChanged += ThrowOnRaise;
+            try
+            {
+                start.App.OnActivated(ActivationKind.Reopen, []);
+            }
+            finally
+            {
+                main.PropertyChanged -= ThrowOnRaise;
+            }
+
+            LogEntry error = Assert.Single(start.Log.Entries, entry => entry.Level == "error");
+            Assert.Equal("Activation (Reopen): could not carry it out.", error.Message);
+        });
+
+    [Fact]
+    public Task A_quit_with_the_main_window_open_saves_the_session_and_releases() =>
+        Headless.Run(() =>
+        {
+            int stops = 0;
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => stops++, LastWindowBehavior.KeepRunning);
+            Assert.IsType<DocumentWindowViewModel>(start.Window.DataContext).ToggleSidebar();
+            var request = new ShutdownRequestedEventArgs();
+            int askedAgain = 0;
+
+            // Cmd+Q and the Dock's Quit reach the lifetime's ShutdownRequested, then its Exit runs ReleaseMainWindow.
+            start.App.OnShutdownRequested(request, () => askedAgain++);
+            Assert.False(request.Cancel);
+            start.App.ReleaseMainWindow();
+
+            Assert.Equal(0, askedAgain);
+            Assert.Equal(1, stops);
+            Assert.True(start.LoadSavedSession().SidebarHidden);
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Null(start.App.Bridge);
+        });
+
+    [Fact]
+    public Task Raise_restores_a_maximized_window_maximized() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            Window window = start.Window;
+            Dispatcher.UIThread.RunJobs();
+            window.WindowState = WindowState.Maximized;
+            window.WindowState = WindowState.Minimized;
+
+            start.App.BringAppForward();
+
+            Assert.Equal(WindowState.Maximized, window.WindowState);
+        });
+
+    [Fact]
+    public Task Raise_restores_a_normal_window_normal_after_it_was_once_maximized() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            Window window = start.Window;
+            Dispatcher.UIThread.RunJobs();
+            window.WindowState = WindowState.Maximized;
+            window.WindowState = WindowState.Normal;
+            window.WindowState = WindowState.Minimized;
+
+            start.App.BringAppForward();
+
+            Assert.Equal(WindowState.Normal, window.WindowState);
+        });
+
     /// <summary>Shows a viewer window over a missing file as an open request does once the app took it, and returns it.</summary>
     private static Window ShowViewer(App app)
     {
@@ -2516,12 +2994,21 @@ public sealed class AppStartupTests
             : this(viewerFiles, stopAnswering, LastWindowBehavior.Quit) { }
 
         public GateStart(IReadOnlyList<string> viewerFiles, Action? stopAnswering, LastWindowBehavior lastWindow)
+            : this(viewerFiles, stopAnswering, lastWindow, graceClock: null) { }
+
+        /// <summary>A macOS start: it keeps running at the last window and waits the launch grace on <paramref name="graceClock"/>.</summary>
+        public GateStart(IReadOnlyList<string> viewerFiles, FakeTimeProvider graceClock)
+            : this(viewerFiles, stopAnswering: null, LastWindowBehavior.KeepRunning, graceClock) { }
+
+        private GateStart(IReadOnlyList<string> viewerFiles, Action? stopAnswering, LastWindowBehavior lastWindow, FakeTimeProvider? graceClock)
         {
             App = Assert.IsType<App>(Application.Current);
             try
             {
                 Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, _dataFolder);
                 Environment.SetEnvironmentVariable(App.HarnessVariable, null);
+                App.LaunchGrace = graceClock is not null;
+                App.LaunchClock = graceClock ?? TimeProvider.System;
                 App.ViewerFiles = viewerFiles;
                 App.ProcessLog = Log;
                 App.Lifetime = new AppLifetimePolicy(lastWindow);
@@ -2595,6 +3082,8 @@ public sealed class AppStartupTests
             _opened.Dispose();
             App.ResetLog();
             App.ViewerFiles = [];
+            App.LaunchGrace = false;
+            App.LaunchClock = TimeProvider.System;
             App.ProcessLog = null;
             App.Lifetime = null;
             App.QuitForTests = null;

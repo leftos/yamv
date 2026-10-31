@@ -122,8 +122,34 @@ public sealed class LaunchArbiterTests
         arbiter.FrameworkReady();
         arbiter.FilesOpened(First);
 
-        Assert.IsType<None>(arbiter.ActivateRequested());
+        Assert.IsType<HoldUntilGraceEnds>(arbiter.ActivateRequested());
+        Assert.IsType<None>(arbiter.HeldActivatesBegun(1));
         Assert.IsType<OpenMainWindow>(arbiter.GraceElapsed());
+    }
+
+    [Fact]
+    public void GraceElapsed_FilesAndAbandonedActivateInGrace_OpensNoMainWindow()
+    {
+        LaunchArbiter arbiter = new();
+        arbiter.FrameworkReady();
+        arbiter.FilesOpened(First);
+
+        Assert.IsType<HoldUntilGraceEnds>(arbiter.ActivateRequested());
+        Assert.IsType<None>(arbiter.HeldActivatesBegun(0));
+        Assert.IsType<None>(arbiter.GraceElapsed());
+        Assert.False(arbiter.MainWindowOpen);
+    }
+
+    [Fact]
+    public void HeldActivatesBegun_OutsideTheGrace_AsksForNothing()
+    {
+        LaunchArbiter arbiter = new();
+        arbiter.FilesOpened(First);
+        Assert.IsType<None>(arbiter.HeldActivatesBegun(1));
+
+        arbiter.FrameworkReady();
+        Assert.IsType<None>(arbiter.GraceElapsed());
+        Assert.Throws<ArgumentOutOfRangeException>(() => arbiter.HeldActivatesBegun(-1));
     }
 
     [Fact]
@@ -291,14 +317,33 @@ public sealed class LaunchArbiterTests
     }
 
     [Fact]
-    public void ActivateRequested_BeforeGraceElapsed_ReturnsNoneThenOpensMainWindowOnce()
+    public void ActivateRequested_BeforeGraceElapsed_HoldsThenOpensMainWindowOnce()
     {
         LaunchArbiter arbiter = new();
         arbiter.FrameworkReady();
 
-        Assert.IsType<None>(arbiter.ActivateRequested());
+        Assert.IsType<HoldUntilGraceEnds>(arbiter.ActivateRequested());
+        Assert.IsType<HoldUntilGraceEnds>(arbiter.ActivateRequested());
         Assert.IsType<OpenMainWindow>(arbiter.GraceElapsed());
         Assert.IsType<None>(arbiter.GraceElapsed());
+        Assert.IsType<ActivateMainWindow>(arbiter.ActivateRequested());
+    }
+
+    [Fact]
+    public void InGrace_RunsFromFrameworkReadyUntilGraceElapsed()
+    {
+        LaunchArbiter arbiter = new();
+        Assert.False(arbiter.InGrace);
+
+        arbiter.FrameworkReady();
+        Assert.True(arbiter.InGrace);
+
+        arbiter.GraceElapsed();
+        Assert.False(arbiter.InGrace);
+
+        LaunchArbiter started = new();
+        started.Start([]);
+        Assert.False(started.InGrace);
     }
 
     [Fact]

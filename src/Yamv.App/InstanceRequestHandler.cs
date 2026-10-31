@@ -12,7 +12,8 @@ namespace Yamv.App;
 /// Queues a job on the UI thread and returns at once (the app's ready latch); a throw refuses the request it carried.
 /// </param>
 /// <param name="activate">
-/// Brings the app forward for the request and answers it, on the UI thread; true when a window came forward.
+/// Brings the app forward for the request and answers it, on the UI thread; true when a window came forward, or when the app
+/// holds the request to answer at the end of the launch grace.
 /// </param>
 /// <param name="openViewer">
 /// Opens the files or brings forward a window holding them, on the UI thread; true when the app took the request.
@@ -78,8 +79,8 @@ internal sealed class InstanceRequestHandler(
 
     /// <summary>
     /// The cold-start readiness measure: once per process, how long after the process started the UI thread took its first request
-    /// (one the app carried out or began, not one it answered closing or found abandoned), which is what a launcher's request
-    /// deadline waits for.
+    /// (one the app carried out, began or held for the launch grace, not one it answered closing or found abandoned), which is what
+    /// a launcher's request deadline waits for.
     /// </summary>
     private void LogReadinessOnce()
     {

@@ -103,7 +103,7 @@ internal static class Program
     /// <summary>
     /// Starts the instance server at once, then Avalonia; the coordinator holds the lock until the caller disposes it. Every
     /// request reaches the UI thread through the ready latch, which the app opens once its framework is initialized and its start
-    /// window shown, so no pool thread posts to the dispatcher before then.
+    /// window shown (on macOS, once the launch grace has begun), so no pool thread posts to the dispatcher before then.
     /// </summary>
     private static int RunMain(InstanceCoordinator coordinator, IAppLog log, string[] args)
     {
@@ -118,6 +118,7 @@ internal static class Program
         coordinator.StartServer(handler.Handle);
         App.ReadyLatch = latch;
         App.Lifetime = new AppLifetimePolicy(OperatingSystem.IsMacOS() ? LastWindowBehavior.KeepRunning : LastWindowBehavior.Quit);
+        App.LaunchGrace = OperatingSystem.IsMacOS();
         App.StopAnswering = () => StopAnsweringInBackground(coordinator, log);
         return RunAsApp(() => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args), coordinator.StopAnswering, log);
     }
