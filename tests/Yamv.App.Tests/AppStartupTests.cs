@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reflection;
 using System.Text;
 using System.Threading.Channels;
@@ -625,6 +626,322 @@ public sealed class AppStartupTests
             Assert.Contains(
                 start.Log.Entries,
                 entry => entry.Message == "Open: an open of 1 file(s) was abandoned before the app took it; opening nothing."
+            );
+        });
+
+    [Fact]
+    public Task A_launch_naming_a_file_open_in_a_viewer_brings_it_forward_and_opens_no_window() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string file = MissingFile();
+            using var start = new GateStart(viewerFiles: [file], stopAnswering: null);
+            Window viewer = start.Window;
+            DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(viewer.DataContext);
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([file]);
+            viewer.WindowState = WindowState.Minimized;
+
+            Assert.True(start.App.OpenViewer([file], request));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Single(start.App.ViewerWindows);
+            Assert.Same(viewer, start.App.ViewerWindows[0]);
+            Assert.Equal(WindowState.Normal, viewer.WindowState);
+            Assert.True(viewer.IsActive);
+            Assert.Equal(file, viewModel.SelectedPath);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == $"Open: {file} is already open; brought its window forward.");
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task A_launch_naming_a_file_in_the_main_window_selects_it_there() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string first = MissingFile();
+            string second = MissingFile();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            MainWindow main = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
+            DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(main.DataContext);
+            viewModel.Open([first]);
+            viewModel.Open([second]);
+            main.WindowState = WindowState.Minimized;
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([first]);
+
+            Assert.True(start.App.OpenViewer([first], request));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(start.App.ViewerWindows);
+            Assert.Same(main, start.App.MainDocumentWindow);
+            Assert.Equal(WindowState.Normal, main.WindowState);
+            Assert.Equal(first, viewModel.SelectedPath);
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task A_launch_naming_an_open_file_picks_the_most_recently_active_window() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string file = MissingFile();
+            using var start = new GateStart(viewerFiles: [file], stopAnswering: null);
+            Window older = start.Window;
+            start.App.ShowNewViewer([file]);
+            Window newer = start.App.ViewerWindows[1];
+            older.Activate();
+            Dispatcher.UIThread.RunJobs();
+            newer.Activate();
+            Dispatcher.UIThread.RunJobs();
+            older.WindowState = WindowState.Minimized;
+            newer.WindowState = WindowState.Minimized;
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([file]);
+
+            Assert.True(start.App.OpenViewer([file], request));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(2, start.App.ViewerWindows.Count);
+            Assert.Equal(WindowState.Normal, newer.WindowState);
+            Assert.Equal(WindowState.Minimized, older.WindowState);
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task A_launch_with_an_open_file_and_new_files_opens_the_rest_in_one_viewer() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string earlier = MissingFile();
+            string open = MissingFile();
+            string first = MissingFile();
+            string second = MissingFile();
+            using var start = new GateStart(viewerFiles: [earlier, open], stopAnswering: null);
+            DocumentWindowViewModel holder = Assert.IsType<DocumentWindowViewModel>(start.Window.DataContext);
+            int shownBefore = start.Log.Entries.Count(entry => entry.Message == "Window: shown");
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([open, first, second]);
+
+            Assert.True(start.App.OpenViewer([open, first, second], request));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(2, start.App.ViewerWindows.Count);
+            DocumentWindowViewModel fresh = Assert.IsType<DocumentWindowViewModel>(start.App.ViewerWindows[1].DataContext);
+            Assert.True(fresh.HasDocument(first));
+            Assert.True(fresh.HasDocument(second));
+            Assert.False(fresh.HasDocument(open));
+            Assert.Equal(first, fresh.SelectedPath);
+            Assert.Equal(open, holder.SelectedPath);
+            List<LogEntry> entries = [.. start.Log.Entries];
+            int viewerShown = entries.FindLastIndex(entry => entry.Message == "Window: shown");
+            int broughtForward = entries.FindIndex(entry => entry.Message == $"Open: {open} is already open; brought its window forward.");
+            Assert.Equal(shownBefore + 1, entries.Count(entry => entry.Message == "Window: shown"));
+            Assert.True(viewerShown < broughtForward, "the new viewer opened before the holder came forward");
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task A_path_the_OS_cannot_read_keeps_the_app() =>
+        Headless.Run(() =>
+        {
+            string open = MissingFile();
+            string unreadable = "yamv-unreadable-" + '\0' + ".md";
+            using var start = new GateStart(viewerFiles: [open], stopAnswering: null);
+            Window viewer = start.Window;
+
+            start.App.OpenFiles([unreadable]);
+
+            Assert.Single(start.App.ViewerWindows);
+            Assert.True(viewer.IsVisible);
+            Assert.Contains(
+                start.Log.Entries,
+                entry => entry.Level == "warning" && entry.Message == $"Open: cannot compare the path {unreadable}; opening it in a viewer."
+            );
+            Assert.Contains(
+                start.Log.Entries,
+                entry => entry.Level == "error" && entry.Message == "Open: the viewer window for 1 file(s) could not open."
+            );
+        });
+
+    [Fact]
+    public Task A_failed_bring_forward_still_opens_the_held_file_and_the_rest() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string earlier = MissingFile();
+            string open = MissingFile();
+            string added = MissingFile();
+            using var start = new GateStart(viewerFiles: [earlier, open], stopAnswering: null);
+            DocumentWindowViewModel holder = Assert.IsType<DocumentWindowViewModel>(start.Window.DataContext);
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([open, added]);
+            static void FailOnSelection(object? sender, PropertyChangedEventArgs e)
+            {
+                if (e.PropertyName == nameof(DocumentWindowViewModel.SelectedPath))
+                {
+                    throw new InvalidOperationException("The window could not come forward.");
+                }
+            }
+
+            holder.PropertyChanged += FailOnSelection;
+            try
+            {
+                Assert.True(start.App.OpenViewer([open, added], request));
+            }
+            finally
+            {
+                holder.PropertyChanged -= FailOnSelection;
+            }
+
+            Assert.Equal(3, start.App.ViewerWindows.Count);
+            DocumentWindowViewModel rest = Assert.IsType<DocumentWindowViewModel>(start.App.ViewerWindows[1].DataContext);
+            Assert.Equal(added, rest.SelectedPath);
+            DocumentWindowViewModel reopened = Assert.IsType<DocumentWindowViewModel>(start.App.ViewerWindows[2].DataContext);
+            Assert.Equal(open, reopened.SelectedPath);
+            Assert.Contains(
+                start.Log.Entries,
+                entry => entry.Level == "error" && entry.Message == $"Open: could not bring the window of {open} forward; opening it in a viewer."
+            );
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task Two_files_held_by_different_windows_bring_forward_the_first_only() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string firstFile = MissingFile();
+            string secondFile = MissingFile();
+            using var start = new GateStart(viewerFiles: [firstFile], stopAnswering: null);
+            Window firstWindow = start.Window;
+            start.App.ShowNewViewer([secondFile]);
+            Window secondWindow = start.App.ViewerWindows[1];
+            DocumentWindowViewModel firstModel = Assert.IsType<DocumentWindowViewModel>(firstWindow.DataContext);
+            DocumentWindowViewModel secondModel = Assert.IsType<DocumentWindowViewModel>(secondWindow.DataContext);
+            secondWindow.Activate();
+            Dispatcher.UIThread.RunJobs();
+            firstWindow.WindowState = WindowState.Minimized;
+            secondWindow.WindowState = WindowState.Minimized;
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([firstFile, secondFile]);
+
+            Assert.True(start.App.OpenViewer([firstFile, secondFile], request));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(2, start.App.ViewerWindows.Count);
+            Assert.Equal(WindowState.Normal, firstWindow.WindowState);
+            Assert.Equal(WindowState.Minimized, secondWindow.WindowState);
+            Assert.Equal(firstFile, firstModel.SelectedPath);
+            Assert.Equal(secondFile, secondModel.SelectedPath);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == $"Open: {firstFile} is already open; brought its window forward.");
+            Assert.DoesNotContain(start.Log.Entries, entry => entry.Message == $"Open: {secondFile} is already open; brought its window forward.");
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task A_launch_naming_only_new_files_opens_one_viewer() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string open = MissingFile();
+            string added = MissingFile();
+            using var start = new GateStart(viewerFiles: [open], stopAnswering: null);
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([added]);
+
+            Assert.True(start.App.OpenViewer([added], request));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(2, start.App.ViewerWindows.Count);
+            DocumentWindowViewModel fresh = Assert.IsType<DocumentWindowViewModel>(start.App.ViewerWindows[1].DataContext);
+            Assert.Equal(added, fresh.SelectedPath);
+            Assert.False(fresh.HasDocument(open));
+            Assert.DoesNotContain(
+                start.Log.Entries,
+                entry =>
+                    entry.Message.StartsWith("Open: ", StringComparison.Ordinal) && entry.Message.Contains("already open", StringComparison.Ordinal)
+            );
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task A_launch_of_an_open_file_while_stopping_answers_closing_and_selects_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string open = MissingFile();
+            string other = MissingFile();
+            using var start = new GateStart(viewerFiles: [open], stopAnswering: null);
+            Window viewer = start.Window;
+            DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(viewer.DataContext);
+            viewModel.Open([other]);
+            App.Lifetime!.Exiting();
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([open]);
+
+            Assert.False(start.App.OpenViewer([open], request));
+
+            Assert.Equal(other, viewModel.SelectedPath);
+            Assert.Single(start.App.ViewerWindows);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Open: the app is closing; answered closing to an open of 1 file(s).");
+            Assert.Equal(
+                InstanceRequestOutcome.Closing,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task A_launch_of_an_open_file_answers_opened_before_it_selects() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            string first = MissingFile();
+            string second = MissingFile();
+            using var start = new GateStart(viewerFiles: [first, second], stopAnswering: null);
+            DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(start.Window.DataContext);
+            viewModel.Select(second);
+            Dispatcher.UIThread.RunJobs();
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([first]);
+            int refused = 0;
+            void RefuseOnSelection(object? sender, PropertyChangedEventArgs e)
+            {
+                if (e.PropertyName == nameof(DocumentWindowViewModel.SelectedPath))
+                {
+                    refused++;
+                    request.Complete(InstanceReply.Refused);
+                }
+            }
+
+            viewModel.PropertyChanged += RefuseOnSelection;
+            try
+            {
+                Assert.True(start.App.OpenViewer([first], request));
+            }
+            finally
+            {
+                viewModel.PropertyChanged -= RefuseOnSelection;
+            }
+
+            Assert.Equal(1, refused);
+            Assert.False(request.TryBegin());
+            Assert.Equal(first, viewModel.SelectedPath);
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
             );
         });
 

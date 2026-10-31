@@ -320,9 +320,10 @@ public partial class App : Application
     private static bool IsHarnessStart => Environment.GetEnvironmentVariable(HarnessVariable) == "1";
 
     /// <summary>
-    /// Opens a viewer window over <paramref name="files"/> for a launch's <paramref name="request"/>, on the UI thread. A stopping
-    /// app answers <c>closing</c>; a request the server already abandoned opens nothing; otherwise the request is answered
-    /// <c>opened</c> as soon as it is taken, before the window shows, and a window that then fails to open is the app's to report.
+    /// Opens a launch's <paramref name="files"/> for its <paramref name="request"/>, on the UI thread. A stopping app answers
+    /// <c>closing</c>; a request the server already abandoned opens nothing; otherwise the request is answered <c>opened</c> as
+    /// soon as it is taken, before any window moves, and <see cref="OpenFiles"/> then opens or brings forward a window. A window
+    /// that then fails to open is the app's to report.
     /// </summary>
     /// <returns>True when the app took the request, whether or not its window then opened.</returns>
     internal bool OpenViewer(IReadOnlyList<string> files, InstanceRequest request)
@@ -341,8 +342,58 @@ public partial class App : Application
         }
 
         request.Complete(InstanceReply.Opened);
-        ShowNewViewer(files);
+        OpenFiles(files);
         return true;
+    }
+
+    /// <summary>
+    /// Opens a launch's <paramref name="files"/>: a file already open in a document window brings that window forward with the
+    /// file selected, and only the files no window holds open in one new viewer.
+    /// </summary>
+    /// <param name="files">The files the launch named.</param>
+    internal void OpenFiles(IReadOnlyList<string> files)
+    {
+        IEnumerable<DocumentWindow> tracked = _main is { } main ? _viewers.Prepend(main) : _viewers;
+        List<DocumentWindow> windows = [.. tracked.OrderByDescending(document => document.ActivatedAt)];
+        List<(string File, DocumentWindow? Holder)> named = [.. files.Select(file => (file, HolderOf(file, windows)))];
+        List<string> rest = [.. named.Where(entry => entry.Holder is null).Select(entry => entry.File)];
+        if (rest.Count > 0)
+        {
+            ShowNewViewer(rest);
+        }
+
+        (string File, DocumentWindow? Holder) held = named.Find(entry => entry.Holder is not null);
+        if (held.Holder is not { } holder)
+        {
+            return;
+        }
+
+        try
+        {
+            holder.Composition.ViewModel.Select(held.File);
+            Raise(holder.Composition.Window);
+            Log.LogInfo($"Open: {held.File} is already open; brought its window forward.");
+        }
+        // A job on the UI thread must not end the loop, and the launcher already heard opened.
+        catch (Exception exception)
+        {
+            Log.LogError($"Open: could not bring the window of {held.File} forward; opening it in a viewer.", exception);
+            ShowNewViewer([held.File]);
+        }
+    }
+
+    /// <summary>The most recently active window holding <paramref name="file"/>, or null; a path the OS cannot read has none, so a viewer shows it.</summary>
+    private DocumentWindow? HolderOf(string file, List<DocumentWindow> windows)
+    {
+        try
+        {
+            return windows.Find(document => document.Composition.ViewModel.HasDocument(file));
+        }
+        catch (ArgumentException exception)
+        {
+            Log.LogWarning($"Open: cannot compare the path {file}; opening it in a viewer.", exception);
+            return null;
+        }
     }
 
     /// <summary>

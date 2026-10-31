@@ -366,6 +366,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>Whether <paramref name="path"/> is one of this window's documents.</summary>
+    public bool HasDocument(string path) => _state.Documents.Contains(Path.GetFullPath(path), _state.PathComparer);
+
+    /// <summary>Selects an open document, as the tree does.</summary>
+    public void Select(string path) => _state.Select(path);
+
     /// <summary>
     /// Replaces a document's path with another (Locate…), keeping its place in the list, its scroll position and its scroll anchor.
     /// </summary>

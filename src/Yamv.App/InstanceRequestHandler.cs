@@ -15,7 +15,7 @@ namespace Yamv.App;
 /// Brings the app forward for the request and answers it, on the UI thread; true when a window came forward.
 /// </param>
 /// <param name="openViewer">
-/// Opens a viewer window over the files for the request, on the UI thread; true when the app took the request.
+/// Opens the files or brings forward a window holding them, on the UI thread; true when the app took the request.
 /// </param>
 /// <param name="sinceProcessStart">How long ago the process started, for the one line that says when the UI took its first request.</param>
 /// <param name="log">The process's log.</param>

@@ -3,7 +3,11 @@
 A quiet markdown viewer for Windows and macOS.
 
 - `yamv` opens the main window with the documents you had open last time, grouped on the right by git repo or folder.
-- `yamv a.md b.md` opens a separate viewer window with just those files; when YAMV is already running, the files open in a new viewer window of that process and the command exits 0 once it confirms (exit 1 if it does not). It remembers nothing: it saves no session, opens at the default size and place, shows the tree only with 2+ documents, closes when its last document closes, and reads no session; its theme and Appearance come from the app-wide settings (`settings.json`).
+- `yamv a.md b.md` opens a separate viewer window with just those files; when YAMV is already running, the files open in a new viewer window of that process and the command exits 0 once it confirms (exit 1 if it does not).
+
+  A file already open in a viewer or in the main window's tree is not opened again: that window comes forward with the file selected (the most recently active one when several hold it). Of several files, the window holding the first open one comes forward and only the files no window holds open in one new viewer.
+
+  A viewer remembers nothing: it saves no session, opens at the default size and place, shows the tree only with 2+ documents, closes when its last document closes, and reads no session; its theme and Appearance come from the app-wide settings (`settings.json`).
 - A file that does not exist opens as a missing document (**Locate…**, **Remove from list**) instead of failing; `yamv a.md gone.md` opens one viewer with `a.md` selected and `gone.md` as a missing row.
 - Ctrl+O (Cmd+O on macOS), the title bar's folder button (**Open…**, first among the tools) or the empty window's **Open files…** button picks one or more markdown or text files and opens them; a file that is already open is selected instead of added twice.
 - Dragging files over a window shows an overlay below the title bar: "Drop to open" when the drag holds a `.md`, `.markdown`, `.mdx` or `.txt` file, else a grey "Drop .md, .markdown, .mdx or .txt files". Dropping opens the documents as one batch with the first selected and brings the window forward; a folder is not a document. A drop that also holds other files opens the documents and shows a toast with the same hint once.

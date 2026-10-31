@@ -42,6 +42,47 @@ public sealed class DocumentWindowViewModelTests
         });
 
     [Fact]
+    public Task HasDocument_finds_an_open_file_and_a_missing_row() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string gone = Path.Combine(Repo, "docs", "gone.md");
+            fixture.Absent.Add(gone);
+            fixture.ViewModel.Open([RepoDocA, gone]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(fixture.ViewModel.HasDocument(RepoDocA));
+            Assert.True(fixture.ViewModel.HasDocument(gone));
+        });
+
+    [Fact]
+    public Task HasDocument_is_false_for_another_file() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(fixture.ViewModel.HasDocument(RepoDocB));
+            Assert.False(fixture.ViewModel.HasDocument(AlphaDoc));
+        });
+
+    [Fact]
+    public Task Select_moves_the_selection_to_an_open_document() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.Select(RepoDocB);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(RepoDocB, fixture.ViewModel.SelectedPath);
+            Assert.Contains(fixture.Surface.Shown, shown => shown.DocumentPath == RepoDocB);
+        });
+
+    [Fact]
     public Task Stale_render_is_dropped_when_selection_moves_before_it_finishes() =>
         Headless.RunAsync(async () =>
         {
