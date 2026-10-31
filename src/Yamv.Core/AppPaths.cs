@@ -47,6 +47,9 @@ public static class AppPaths
 
     public static string MainLockFile => Path.Combine(DataDirectory, "main.lock");
 
+    /// <summary>The lock a failed launch holds while its not-responding box is up, so a burst of them shows one box.</summary>
+    public static string LaunchErrorLockFile => Path.Combine(DataDirectory, "launch-error.lock");
+
     public static string LogFile => Path.Combine(DataDirectory, "logs", "yamv.log");
 
     /// <summary>The folder the user's own theme files live in.</summary>

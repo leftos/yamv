@@ -5,10 +5,12 @@ using Yamv.Core.Launch;
 namespace Yamv.App.Tests;
 
 /// <summary>What a launch that did not get the main-instance lock does, with the second launch's two ways faked.</summary>
-public sealed class ProgramLaunchTests
+public sealed class ProgramLaunchTests : IDisposable
 {
     private readonly RecordingAppLog _log = new();
     private readonly List<string> _calls = [];
+    private readonly List<string> _errors = [];
+    private readonly string _gateRoot = Path.Combine(Path.GetTempPath(), "yamv-launch-error-tests-" + Guid.NewGuid().ToString("N"));
 
     [Theory]
     [InlineData(SecondLaunchOutcome.Activated, 0)]
@@ -22,6 +24,7 @@ public sealed class ProgramLaunchTests
 
         Assert.Equal(exitCode, result);
         Assert.Equal(["activate"], _calls);
+        Assert.Empty(_errors);
     }
 
     [Fact]
@@ -59,6 +62,139 @@ public sealed class ProgramLaunchTests
         Assert.Equal(1, result);
         Assert.Equal(["open"], _calls);
         Assert.Contains(_log.Entries, entry => entry.Message == "Second launch: the 2 file(s) were not opened (NotResponding); exiting 1.");
+    }
+
+    [Fact]
+    public void Files_NotOpened_ShowsTheNotRespondingBoxOnce()
+    {
+        int? result = Run([@"C:\docs\a.md"], SecondLaunchResult.Activated, SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding));
+
+        Assert.Equal(1, result);
+        Assert.Equal(["YAMV is not responding; the file was not opened."], _errors);
+    }
+
+    [Fact]
+    public void Files_NotOpened_CountsTheFilesInTheBox()
+    {
+        int? result = Run(
+            [@"C:\docs\a.md", @"C:\docs\b.md", @"C:\docs\c.md"],
+            SecondLaunchResult.Activated,
+            SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding)
+        );
+
+        Assert.Equal(1, result);
+        Assert.Equal(["YAMV is not responding; 3 files were not opened."], _errors);
+    }
+
+    [Theory]
+    [InlineData(SecondLaunchFailure.Unsendable)]
+    [InlineData(SecondLaunchFailure.Refused)]
+    [InlineData(SecondLaunchFailure.NotResponding)]
+    [InlineData(SecondLaunchFailure.Denied)]
+    public void Files_NotOpened_ShowsTheBoxForEveryFailure(SecondLaunchFailure failure)
+    {
+        int? result = Run([@"C:\docs\a.md"], SecondLaunchResult.Activated, SecondLaunchResult.Failed(failure));
+
+        Assert.Equal(1, result);
+        Assert.Equal(["YAMV is not responding; the file was not opened."], _errors);
+    }
+
+    [Fact]
+    public void Files_OpenedByTheApp_ShowsNothing()
+    {
+        Assert.Equal(0, Run([@"C:\docs\a.md"], SecondLaunchResult.Activated, SecondLaunchResult.Opened));
+
+        Assert.Empty(_errors);
+    }
+
+    [Fact]
+    public void Files_WhenTheAppHasExited_ShowsNothing()
+    {
+        Assert.Null(Run([@"C:\docs\a.md"], SecondLaunchResult.Activated, SecondLaunchResult.BecameMain));
+
+        Assert.Empty(_errors);
+    }
+
+    [Fact]
+    public void NoFiles_NotBroughtForward_ShowsNothing()
+    {
+        Assert.Equal(1, Run([], SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding), SecondLaunchResult.Opened));
+
+        Assert.Empty(_errors);
+    }
+
+    [Fact]
+    public void Files_NotOpened_WhileAnotherLaunchHoldsTheBox_ShowsNothingAndLogs()
+    {
+        string gate = NewGatePath();
+        using IDisposable held = Assert.IsType<LaunchErrorBoxTaken>(LaunchErrorGate.TryTake(gate)).Holder;
+
+        int? result = RunWith(
+            [@"C:\docs\a.md"],
+            SecondLaunchResult.Activated,
+            SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding),
+            _errors.Add,
+            gate
+        );
+
+        Assert.Equal(1, result);
+        Assert.Empty(_errors);
+        Assert.Contains(
+            _log.Entries,
+            entry => entry.Message == "Second launch: another launch is already showing the not-responding box; not showing another."
+        );
+    }
+
+    [Fact]
+    public void Files_NotOpened_WhenTheBoxLockCannotBeOpened_LogsAndShowsTheBoxAnyway()
+    {
+        string gate = NewGatePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(gate)!);
+        File.WriteAllText(gate, "read only");
+        File.SetAttributes(gate, FileAttributes.ReadOnly);
+
+        int? result;
+        try
+        {
+            result = RunWith(
+                [@"C:\docs\a.md"],
+                SecondLaunchResult.Activated,
+                SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding),
+                _errors.Add,
+                gate
+            );
+        }
+        finally
+        {
+            File.SetAttributes(gate, FileAttributes.Normal);
+        }
+
+        Assert.Equal(1, result);
+        Assert.Equal(["YAMV is not responding; the file was not opened."], _errors);
+        LogEntry error = Assert.Single(_log.Entries, entry => entry.Level == "error");
+        Assert.Equal($"Second launch: could not open the not-responding box's lock at {gate}; showing the box without it.", error.Message);
+        Assert.IsType<UnauthorizedAccessException>(error.Exception);
+    }
+
+    [Fact]
+    public void Files_NotOpened_WhenShowingTheBoxFails_IsLoggedAndReleasesIt()
+    {
+        string gate = NewGatePath();
+        var thrown = new InvalidOperationException("The box failed.");
+
+        int? result = RunWith(
+            [@"C:\docs\a.md"],
+            SecondLaunchResult.Activated,
+            SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding),
+            _ => throw thrown,
+            gate
+        );
+
+        Assert.Equal(1, result);
+        LogEntry error = Assert.Single(_log.Entries, entry => entry.Level == "error");
+        Assert.Equal("Second launch: showing the not-responding box failed.", error.Message);
+        Assert.Same(thrown, error.Exception);
+        using IDisposable later = Assert.IsType<LaunchErrorBoxTaken>(LaunchErrorGate.TryTake(gate)).Holder;
     }
 
     [Fact]
@@ -129,6 +265,15 @@ public sealed class ProgramLaunchTests
     }
 
     private int? Run(IReadOnlyList<string> files, SecondLaunchResult activated, SecondLaunchResult opened) =>
+        RunWith(files, activated, opened, _errors.Add, NewGatePath());
+
+    private int? RunWith(
+        IReadOnlyList<string> files,
+        SecondLaunchResult activated,
+        SecondLaunchResult opened,
+        Action<string> showError,
+        string gatePath
+    ) =>
         Program.RunSecondLaunch(
             files,
             () =>
@@ -141,6 +286,18 @@ public sealed class ProgramLaunchTests
                 _calls.Add("open");
                 return opened;
             },
-            _log
+            _log,
+            showError,
+            gatePath
         );
+
+    private string NewGatePath() => Path.Combine(_gateRoot, Guid.NewGuid().ToString("N"), "launch-error.lock");
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_gateRoot))
+        {
+            Directory.Delete(_gateRoot, recursive: true);
+        }
+    }
 }

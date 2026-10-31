@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Channels;
 using Yamv.Core.Diagnostics;
+using Yamv.Core.Platform;
 
 namespace Yamv.Core.Instance;
 
@@ -227,7 +228,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
 
                 _lockStream = new FileStream(_paths.FullLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
-            catch (IOException ex) when (IsShareViolation(ex))
+            catch (IOException ex) when (ShareViolation.IsShareViolation(ex))
             {
                 if (logHeldByAnother)
                 {
@@ -946,21 +947,6 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         exception is SocketException socketException
             ? $"Could not connect to pipe '{pipeName}' ({socketException.SocketErrorCode}); a retry cannot fix this."
             : $"Pipe '{pipeName}' belongs to another user; not sending to it.";
-
-    private static bool IsShareViolation(IOException exception)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            const int ErrorSharingViolation = 32;
-            const int ErrorLockViolation = 33;
-            int win32Error = exception.HResult & 0xFFFF;
-            return win32Error is ErrorSharingViolation or ErrorLockViolation;
-        }
-
-        // On Unix, .NET raises a failed flock(LOCK_EX | LOCK_NB) as an IOException whose HResult is the raw errno EWOULDBLOCK.
-        int eWouldBlock = OperatingSystem.IsLinux() ? 11 : 35;
-        return exception.HResult == eWouldBlock;
-    }
 
     private void LogDroppedMessages()
     {

@@ -61,7 +61,9 @@ internal static class Program
                 files,
                 () => launch.RunAsync(SecondLaunch.RequestDeadline, SecondLaunch.NoPidDeadline, SecondLaunch.OverallCap).GetAwaiter().GetResult(),
                 () => launch.OpenAsync(files, SecondLaunch.RequestDeadline, SecondLaunch.OverallCap).GetAwaiter().GetResult(),
-                log
+                log,
+                text => ShowLaunchError(text, log),
+                AppPaths.LaunchErrorLockFile
             );
             if (exitCode is { } code)
             {
@@ -75,9 +77,19 @@ internal static class Program
     /// <summary>
     /// What a launch that did not get the lock does: with no files it asks the app to come forward (<paramref name="activate"/>),
     /// with files it sends them (<paramref name="open"/>). Returns the exit code, or null when the app had exited and this launch
-    /// now holds the lock, so it runs as the app.
+    /// now holds the lock, so it runs as the app. A launch with files that failed shows one box through
+    /// <paramref name="showError"/>, unless another launch is already showing its box (the lock at <paramref name="gatePath"/>).
+    /// A launcher that hangs up just as the app begins its request may have its files opened while its box still shows; that
+    /// narrow race is accepted.
     /// </summary>
-    internal static int? RunSecondLaunch(IReadOnlyList<string> files, Func<SecondLaunchResult> activate, Func<SecondLaunchResult> open, IAppLog log)
+    internal static int? RunSecondLaunch(
+        IReadOnlyList<string> files,
+        Func<SecondLaunchResult> activate,
+        Func<SecondLaunchResult> open,
+        IAppLog log,
+        Action<string> showError,
+        string gatePath
+    )
     {
         SecondLaunchResult result = files.Count == 0 ? activate() : open();
         switch (result.Outcome)
@@ -87,16 +99,79 @@ internal static class Program
             case SecondLaunchOutcome.BecameMain:
                 return null;
             default:
-                if (result.Failure is { } failure)
+                LogFailure(files.Count, result.Failure, log);
+                if (files.Count > 0)
                 {
-                    log.LogWarning(
-                        files.Count == 0
-                            ? $"Second launch: the app did not bring a window forward ({failure}); exiting 1."
-                            : $"Second launch: the {files.Count} file(s) were not opened ({failure}); exiting 1."
-                    );
+                    ShowFailure(files.Count, showError, gatePath, log);
                 }
 
                 return 1;
+        }
+    }
+
+    /// <summary>Writes the launch's failure to the log; the reason is for the log and never reaches the user.</summary>
+    private static void LogFailure(int fileCount, SecondLaunchFailure? failure, IAppLog log)
+    {
+        if (failure is { } reason)
+        {
+            log.LogWarning(
+                fileCount == 0
+                    ? $"Second launch: the app did not bring a window forward ({reason}); exiting 1."
+                    : $"Second launch: the {fileCount} file(s) were not opened ({reason}); exiting 1."
+            );
+        }
+    }
+
+    /// <summary>
+    /// Shows the not-responding box for a failed launch with files, held by the lock at <paramref name="gatePath"/> while it is up.
+    /// A launch that finds the lock held shows nothing, so a burst of failed launches leaves one box on screen; a launch whose
+    /// lock cannot be opened at all shows its box anyway, without the lock.
+    /// </summary>
+    private static void ShowFailure(int fileCount, Action<string> showError, string gatePath, IAppLog log)
+    {
+        LaunchErrorGateResult gate = LaunchErrorGate.TryTake(gatePath);
+        if (gate is LaunchErrorBoxHeld)
+        {
+            log.LogWarning("Second launch: another launch is already showing the not-responding box; not showing another.");
+            return;
+        }
+
+        if (gate is LaunchErrorBoxCannotOpen cannotOpen)
+        {
+            log.LogError(
+                $"Second launch: could not open the not-responding box's lock at {gatePath}; showing the box without it.",
+                cannotOpen.Failure
+            );
+        }
+
+        using IDisposable? box = (gate as LaunchErrorBoxTaken)?.Holder;
+        try
+        {
+            showError(LaunchFailureText.For(fileCount));
+        }
+        catch (Exception exception)
+        {
+            log.LogError("Second launch: showing the not-responding box failed.", exception);
+        }
+    }
+
+    /// <summary>
+    /// Shows the launch's error with the platform's own dialog: a Windows message box, an osascript dialog on macOS. On any other
+    /// system there is no dialog, so the text is only logged.
+    /// </summary>
+    private static void ShowLaunchError(string text, FileAppLog log)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            LaunchErrorBox.ShowOnWindows(text);
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            LaunchErrorBox.ShowOnMac(text);
+        }
+        else
+        {
+            log.LogInfo($"Second launch: {text}");
         }
     }
 
