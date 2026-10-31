@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia.Threading;
 using Microsoft.Extensions.Time.Testing;
 using Yamv.App.Controls;
@@ -281,6 +282,27 @@ public sealed class LinkOpenerTests
         });
 
     [Fact]
+    public Task An_http_link_reaches_the_browser_only_from_inside_the_runner() =>
+        Headless.RunAsync(async () =>
+        {
+            var decided = new Uri("https://example.com/inside");
+            var fixture = new Fixture { Decision = new OpenExternal(decided, []) };
+
+            Task handled = fixture.Opener.HandleAsync(Click("https://example.com/inside", decided, Doc));
+            fixture.RunOne();
+
+            Assert.Empty(fixture.Browser);
+            Assert.Equal(2, fixture.Runs);
+            Assert.False(handled.IsCompleted);
+
+            fixture.RunOne();
+
+            Assert.Same(decided, Assert.Single(fixture.Browser));
+            Assert.True(handled.IsCompleted);
+            await handled;
+        });
+
+    [Fact]
     public Task A_mailto_with_dropped_fields_logs_them() =>
         Headless.RunAsync(async () =>
         {
@@ -369,6 +391,31 @@ public sealed class LinkOpenerTests
         });
 
     [Fact]
+    public Task A_browser_that_throws_inside_the_runner_shows_the_toast() =>
+        Headless.RunAsync(async () =>
+        {
+            var fixture = new Fixture
+            {
+                Decision = new OpenExternal(new Uri("https://example.com/"), []),
+                Browse = () => Task.FromException<bool>(new InvalidOperationException("No browser.")),
+            };
+
+            Task handled = fixture.Opener.HandleAsync(Click("https://example.com/", new Uri("https://example.com/"), Doc));
+            fixture.RunOne();
+            fixture.RunOne();
+
+            Assert.True(handled.IsCompleted);
+            await handled;
+
+            Assert.Single(fixture.Browser);
+            Assert.Equal((ToastKind.Warning, "Couldn't open the link in your browser"), Assert.Single(fixture.Toasts.Shown));
+            LogEntry failed = Assert.Single(fixture.Log.Entries, entry => entry.Exception is not null);
+            Assert.IsType<InvalidOperationException>(failed.Exception);
+            Assert.Empty(fixture.Files.Viewed);
+            Assert.Empty(fixture.Documents.Opened);
+        });
+
+    [Fact]
     public Task A_document_link_opens_the_document_with_its_fragment() =>
         Headless.RunAsync(async () =>
         {
@@ -382,6 +429,54 @@ public sealed class LinkOpenerTests
             Assert.Empty(fixture.Files.Viewed);
             Assert.Empty(fixture.Toasts.Shown);
             Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level != "info");
+        });
+
+    [Fact]
+    public Task A_click_on_a_link_to_the_shown_document_through_a_junction_scrolls_instead_of_opening_a_row() =>
+        Headless.RunAsync(async () =>
+        {
+            (string TempRoot, string ResolvedRoot, string Alias, bool Made) folder = ("", "", "", false);
+            try
+            {
+                folder = await MakeAliasedFolderAsync();
+                Assert.SkipUnless(folder.Made, "This machine does not let the test make a junction or a link.");
+                string shown = Path.Combine(folder.Alias, "a.md");
+                var fixture = new Fixture { DecideBy = null };
+                fixture.Documents.Roots[shown] = folder.TempRoot;
+
+                await fixture.ClickAsync(Click("a.md", new Uri(shown), shown));
+
+                Assert.Equal((shown, (string?)null), Assert.Single(fixture.Documents.Opened));
+            }
+            finally
+            {
+                DeleteAliasedFolder(folder.TempRoot, folder.Alias);
+            }
+        });
+
+    [Fact]
+    public Task A_click_on_a_link_to_another_document_through_a_junction_keeps_its_real_path() =>
+        Headless.RunAsync(async () =>
+        {
+            (string TempRoot, string ResolvedRoot, string Alias, bool Made) folder = ("", "", "", false);
+            try
+            {
+                folder = await MakeAliasedFolderAsync();
+                Assert.SkipUnless(folder.Made, "This machine does not let the test make a junction or a link.");
+                string shown = Path.Combine(folder.Alias, "a.md");
+                var fixture = new Fixture { DecideBy = null };
+                fixture.Documents.Roots[shown] = folder.TempRoot;
+
+                await fixture.ClickAsync(Click("b.md", new Uri(Path.Combine(folder.Alias, "b.md")), shown));
+
+                (string opened, string? fragment) = Assert.Single(fixture.Documents.Opened);
+                Assert.Equal(Path.Combine(folder.ResolvedRoot, "real", "b.md"), opened);
+                Assert.Null(fragment);
+            }
+            finally
+            {
+                DeleteAliasedFolder(folder.TempRoot, folder.Alias);
+            }
         });
 
     [Fact]
@@ -765,6 +860,67 @@ public sealed class LinkOpenerTests
     private static LinkActivatedEventArgs NewWindow(Uri uri) => new(uri.AbsoluteUri, uri, 0, LinkSource.NewWindow, Doc);
 
     private static string P(params string[] parts) => Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", Path.Combine(parts));
+
+    /// <summary>Makes a temp folder holding <c>real\a.md</c> and <c>real\b.md</c>, with <c>alias</c> a link to <c>real</c>.</summary>
+    private static async Task<(string TempRoot, string ResolvedRoot, string Alias, bool Made)> MakeAliasedFolderAsync()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), $"yamv-link-{Guid.NewGuid():N}");
+        string real = Path.Combine(tempRoot, "real");
+        string alias = Path.Combine(tempRoot, "alias");
+        Directory.CreateDirectory(real);
+        await File.WriteAllTextAsync(Path.Combine(real, "a.md"), "# A", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(real, "b.md"), "# B", TestContext.Current.CancellationToken);
+        bool made = OperatingSystem.IsWindows() ? await TryJunction(alias, real) : TryLink(alias, real);
+        string resolvedRoot =
+            RealPath.Resolve(tempRoot)?.Path ?? throw new InvalidOperationException($"The test folder '{tempRoot}' did not resolve.");
+        return (tempRoot, resolvedRoot, alias, made);
+    }
+
+    /// <summary>Deletes the link first, since a recursive delete cannot go through a junction, then the whole folder.</summary>
+    private static void DeleteAliasedFolder(string tempRoot, string alias)
+    {
+        if (Directory.Exists(alias))
+        {
+            Directory.Delete(alias);
+        }
+
+        if (Directory.Exists(tempRoot))
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    private static bool TryLink(string link, string target)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task<bool> TryJunction(string junction, string target)
+    {
+        var start = new ProcessStartInfo("cmd.exe")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (string argument in (string[])["/c", "mklink", "/J", junction, target])
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(start) ?? throw new InvalidOperationException("cmd.exe did not start.");
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        return process.ExitCode == 0;
+    }
 
     /// <summary>The documents of a window: which group root each open document has, and every linked document opened.</summary>
     private sealed class FakeLinkDocuments : ILinkDocuments

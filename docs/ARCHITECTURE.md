@@ -212,9 +212,9 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
     `Services/LinkOpener` (`LinkOpener(ILinkDocuments, IToasts, IAppLog, LinkOpenerSeams)`) carries out a clicked link; `MainWindow` builds one over its view model and disposes it on close.
 
-    Its seams are the browser (over `TopLevel.Launcher.LaunchUriAsync`), the window's current `IFileActions`, `LinkPolicy.Decide` and a runner over `Task.Run`. Only a `Click` acts. The group root comes from the clicked document (`ILinkDocuments.GroupRootOf(DocumentPath)`), `Decide` runs off the UI thread, and the newest click in a window wins.
+    Its seams are the browser (over `TopLevel.Launcher.LaunchUriAsync`), the window's current `IFileActions`, `LinkPolicy.Decide` and a runner over `Task.Run`. Only a `Click` acts. The group root comes from the clicked document (`ILinkDocuments.GroupRootOf(DocumentPath)`), `Decide` runs off the UI thread, as does the browser call (Avalonia's launcher starts the handler synchronously, so a slow one would freeze the window), and the newest click in a window wins.
 
-    The actions: `OpenExternal` hands the browser `Uri.AbsoluteUri`; `OpenDocument` opens the document in the same window (`DocumentWindowViewModel.OpenLinkedDocument`; a missing document becomes a missing row) and scrolls to its fragment on first show, while a link to the shown document only scrolls it, with no render.
+    The actions: `OpenExternal` hands the browser `Uri.AbsoluteUri` inside the runner; `OpenDocument` opens the document in the same window (`DocumentWindowViewModel.OpenLinkedDocument`; a missing document becomes a missing row) and scrolls to its fragment on first show, while a link to the shown document only scrolls it, with no render. A link that resolves to the shown document under another spelling (through a junction or a symbolic link) is handed back with the shown document's own path, so it scrolls too instead of adding a row; a `subst` drive is not mapped.
 
     The other actions: `OpenWithDefaultApp` goes through `IFileActions.OpenViewable`; `Confirm` shows the [confirm card](glossary.md) (below) and opens nothing until the user answers Open, which goes through `IFileActions.OpenConfirmed`; an `Ignore` shows a toast of the text for its `IgnoreKind`.
 

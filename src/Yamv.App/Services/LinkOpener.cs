@@ -1,6 +1,7 @@
 using Avalonia.Threading;
 using Yamv.App.Controls;
 using Yamv.App.ViewModels;
+using Yamv.Core;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Links;
 
@@ -18,13 +19,19 @@ internal interface ILinkDocuments
     bool IsShown(string documentPath);
 
     /// <summary>Opens <paramref name="path"/> in the window and selects it, scrolled to <paramref name="fragment"/> when given.</summary>
-    /// <param name="path">The document's real path, as the link policy decided it; it need not exist.</param>
+    /// <param name="path">
+    /// The document's path as the link policy decided it, or the shown document's own spelling when the link resolves to it;
+    /// it need not exist.
+    /// </param>
     /// <param name="fragment">The heading to scroll to, already decoded; null for none.</param>
     void OpenLinkedDocument(string path, string? fragment);
 }
 
 /// <summary>What a <see cref="LinkOpener"/> hands its work to: the browser, the file actions, the policy and the thread pool.</summary>
-/// <param name="OpenInBrowser">Opens an http, https or mailto URI in the platform's browser or mail app; false when it did not.</param>
+/// <param name="OpenInBrowser">
+/// Opens an http, https or mailto URI in the platform's browser or mail app, off the UI thread, inside <see cref="Run"/>; false
+/// when it did not.
+/// </param>
 /// <param name="FileActions">Reads the window's current file actions, which open a viewable file in its default app.</param>
 /// <param name="Decide">Decides what a link opens; <see cref="LinkPolicy.Decide(Uri?, LinkContext)"/> outside tests.</param>
 /// <param name="Run">Runs blocking work off the UI thread; <c>Task.Run</c> outside tests.</param>
@@ -132,7 +139,7 @@ internal sealed class LinkOpener : IDisposable
         LinkDecision decision;
         try
         {
-            decision = await _seams.Run(() => _seams.Decide(link.ResolvedUri, context));
+            decision = await _seams.Run(() => ToShownSpelling(_seams.Decide(link.ResolvedUri, context), documentPath, context));
         }
         catch (Exception exception)
         {
@@ -225,6 +232,23 @@ internal sealed class LinkOpener : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Gives an <see cref="OpenDocument"/> decision the spelling of the shown document it names, so a link to that document
+    /// through a junction or a symbolic link scrolls it instead of opening a second row; other decisions pass unchanged.
+    /// </summary>
+    /// <param name="decision">The decision the link policy made.</param>
+    /// <param name="documentPath">The path the document holding the link was shown with.</param>
+    /// <param name="context">The link's context, whose resolver gives that document's real path.</param>
+    private static LinkDecision ToShownSpelling(LinkDecision decision, string documentPath, LinkContext context) =>
+        decision is OpenDocument document
+        && context.Resolve(documentPath) is ResolvedPath shown
+        && AppPaths.PathComparer.Equals(shown.Path, document.Path)
+            ? document with
+            {
+                Path = documentPath,
+            }
+            : decision;
+
     /// <summary>Does the one thing <paramref name="decision"/> names.</summary>
     private Task ActAsync(LinkDecision decision, LinkActivatedEventArgs link, LinkContext context, int click)
     {
@@ -268,10 +292,14 @@ internal sealed class LinkOpener : IDisposable
         }
 
         _log.LogInfo($"Link: opening {LogText.Clean(uri.AbsoluteUri)} in the browser.");
-        bool opened;
+        bool opened = false;
         try
         {
-            opened = await _seams.OpenInBrowser(uri);
+            await _seams.Run(() =>
+            {
+                opened = _seams.OpenInBrowser(uri).GetAwaiter().GetResult();
+                return external;
+            });
         }
         catch (Exception exception)
         {
