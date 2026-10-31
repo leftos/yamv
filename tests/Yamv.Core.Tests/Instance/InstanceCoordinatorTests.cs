@@ -719,6 +719,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
     [Fact]
     public async Task Request_UnknownReplyText_ClientGetsRefused()
     {
+        Directory.CreateDirectory(_stateRoot);
         using InstanceCoordinator unstarted = new(_lockPath, _log);
         NamedPipeServerStream raw = new(
             unstarted.Endpoint,
@@ -1187,6 +1188,7 @@ public sealed class InstanceCoordinatorTests : IDisposable
     [Fact]
     public async Task Request_ReplyOverTheReplyCap_IsRefusedUnread()
     {
+        Directory.CreateDirectory(_stateRoot);
         using InstanceCoordinator unstarted = new(_lockPath, _log);
         NamedPipeServerStream raw = new(
             unstarted.Endpoint,
