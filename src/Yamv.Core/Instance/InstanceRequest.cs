@@ -9,9 +9,9 @@ namespace Yamv.Core.Instance;
 /// hung up, the server's reply bound passed, the server is stopping, or the handler threw), whichever comes first. An abandoned
 /// request has already been answered: <see cref="InstanceReply.Closing"/> when the server is stopping, <see cref="InstanceReply.Refused"/>
 /// when the handler threw, and nothing when its launcher is gone or the reply bound passed. It must never be carried out, so the
-/// UI job's first act is <see cref="TryBegin"/>, and the app calls <see cref="Complete"/> right after it succeeds: <c>opened</c>
-/// means the app took the request and is opening it, never that a window has shown. <c>activate</c> expects no reply; the
-/// server never writes to its connection and nothing has to complete it.
+/// UI job's first act is <see cref="TryBegin"/>. What <c>opened</c> says depends on the message: for an <c>open</c> the app took the
+/// request and is opening it, answered right after <see cref="TryBegin"/> and never saying that a window has shown; for an
+/// <c>activate</c> the app carried it out, answered once a window has come forward.
 /// </remarks>
 public sealed class InstanceRequest
 {
@@ -22,17 +22,13 @@ public sealed class InstanceRequest
     private readonly TaskCompletionSource<InstanceReply> _reply = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _state = Pending;
 
-    internal InstanceRequest(string message, bool expectsReply)
+    internal InstanceRequest(string message)
     {
         Message = message;
-        ExpectsReply = expectsReply;
     }
 
     /// <summary>The message text the launch sent, for example <c>activate</c> or an <c>open</c> message.</summary>
     public string Message { get; }
-
-    /// <summary>False for <c>activate</c>, which its sender does not wait to hear about.</summary>
-    public bool ExpectsReply { get; }
 
     /// <summary>
     /// Takes the request for carrying out. True once, for the first caller while the request is pending; false when it was
@@ -95,7 +91,7 @@ public sealed class InstanceRequest
 /// </summary>
 public enum InstanceRequestOutcome
 {
-    /// <summary>The app answered <c>opened</c>: it took the request and is opening it.</summary>
+    /// <summary>The app answered <c>opened</c>: it took the request (<c>open</c>) or carried it out (<c>activate</c>).</summary>
     Confirmed,
 
     /// <summary>The app answered <c>refused</c>, or a reply the launcher does not know.</summary>

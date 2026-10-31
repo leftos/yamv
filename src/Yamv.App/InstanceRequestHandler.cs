@@ -5,13 +5,15 @@ namespace Yamv.App;
 
 /// <summary>
 /// Answers the instance server's requests on its pool thread, one at a time, and never blocks that thread on the UI thread:
-/// <c>activate</c> is posted to the UI thread as one job, a well-formed <c>open</c> is posted to the UI thread to open a viewer
-/// window, and every other request that expects a reply is refused.
+/// <c>activate</c> is posted to the UI thread to bring the app forward, a well-formed <c>open</c> is posted to the UI thread to open
+/// a viewer window, and every other request is refused.
 /// </summary>
 /// <param name="postToUi">
-/// Queues a job on the UI thread and returns at once (the app's ready latch); a throw refuses the open request it carried.
+/// Queues a job on the UI thread and returns at once (the app's ready latch); a throw refuses the request it carried.
 /// </param>
-/// <param name="activate">Brings the app forward, on the UI thread.</param>
+/// <param name="activate">
+/// Brings the app forward for the request and answers it, on the UI thread; true when a window came forward.
+/// </param>
 /// <param name="openViewer">
 /// Opens a viewer window over the files for the request, on the UI thread; true when the app took the request.
 /// </param>
@@ -19,7 +21,7 @@ namespace Yamv.App;
 /// <param name="log">The process's log.</param>
 internal sealed class InstanceRequestHandler(
     Action<Action> postToUi,
-    Action activate,
+    Func<InstanceRequest, bool> activate,
     Func<IReadOnlyList<string>, InstanceRequest, bool> openViewer,
     Func<TimeSpan> sinceProcessStart,
     IAppLog log
@@ -35,44 +37,32 @@ internal sealed class InstanceRequestHandler(
         ArgumentNullException.ThrowIfNull(request);
         if (request.Message == InstanceMessages.Activate)
         {
-            PostActivate();
+            PostToUi(() => activate(request), "an activate", request);
             return;
         }
 
         if (OpenMessage.TryDecode(request.Message, out IReadOnlyList<string> files))
         {
-            Post(files, request);
+            PostToUi(() => openViewer(files, request), $"an open of {files.Count} file(s)", request);
             return;
         }
 
         string kind = request.Message.StartsWith(InstanceMessages.Open, StringComparison.Ordinal) ? "a malformed open" : "an unknown";
         log.LogWarning($"Instance server: refusing {kind} message '{ForLog(request.Message)}'.");
-        if (request.ExpectsReply)
-        {
-            request.Complete(InstanceReply.Refused);
-        }
+        request.Complete(InstanceReply.Refused);
     }
 
-    private void PostActivate()
-    {
-        try
-        {
-            postToUi(activate);
-        }
-        // An activate expects no reply, so a post that fails is only logged; the launcher already exited.
-        catch (Exception exception)
-        {
-            log.LogError("Instance server: could not hand an activate to the UI thread; dropping it.", exception);
-        }
-    }
-
-    private void Post(IReadOnlyList<string> files, InstanceRequest request)
+    /// <summary>
+    /// Posts <paramref name="job"/>, which says whether the app took <paramref name="request"/>; <paramref name="what"/> names it for
+    /// the log.
+    /// </summary>
+    private void PostToUi(Func<bool> job, string what, InstanceRequest request)
     {
         try
         {
             postToUi(() =>
             {
-                if (openViewer(files, request))
+                if (job())
                 {
                     LogReadinessOnce();
                 }
@@ -81,22 +71,22 @@ internal sealed class InstanceRequestHandler(
         // Whatever stopped the post, the request will never be carried out, so its launcher hears refused rather than waiting.
         catch (Exception exception)
         {
-            log.LogError($"Instance server: could not hand an open of {files.Count} file(s) to the UI thread; refusing it.", exception);
+            log.LogError($"Instance server: could not hand {what} to the UI thread; refusing it.", exception);
             request.Complete(InstanceReply.Refused);
         }
     }
 
     /// <summary>
-    /// The cold-start readiness measure: once per process, how long after the process started the UI thread took its first open
-    /// request (one the app began, not one it answered closing or found abandoned), which is what a launcher's open deadline
-    /// waits for.
+    /// The cold-start readiness measure: once per process, how long after the process started the UI thread took its first request
+    /// (one the app carried out or began, not one it answered closing or found abandoned), which is what a launcher's request
+    /// deadline waits for.
     /// </summary>
     private void LogReadinessOnce()
     {
         if (Interlocked.Exchange(ref _firstRequestTaken, 1) == 0)
         {
             log.LogInfo(
-                $"Instance server: the UI thread took its first open request {sinceProcessStart().TotalMilliseconds:0} ms after the process started."
+                $"Instance server: the UI thread took its first request {sinceProcessStart().TotalMilliseconds:0} ms after the process started."
             );
         }
     }

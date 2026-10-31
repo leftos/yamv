@@ -395,7 +395,7 @@ public sealed class AppStartupTests
             Dispatcher.UIThread.RunJobs();
             window.WindowState = WindowState.Minimized;
 
-            start.App.ActivateRequested();
+            start.App.BringAppForward();
 
             Assert.Equal(WindowState.Normal, window.WindowState);
             Assert.Equal(1, start.BroughtForwardCount);
@@ -419,7 +419,7 @@ public sealed class AppStartupTests
             );
             using var opened = new OpenedMainWindows();
 
-            start.App.ActivateRequested();
+            start.App.BringAppForward();
 
             MainWindow main = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
             Assert.Equal([main], opened.Windows);
@@ -470,7 +470,7 @@ public sealed class AppStartupTests
             using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.KeepRunning);
             Assert.Null(start.StartWindow);
 
-            start.App.ActivateRequested();
+            start.App.BringAppForward();
 
             // Had the arbiter still counted the failed main as open, the activate would only have looked for a window to bring forward.
             MainWindow main = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
@@ -504,7 +504,7 @@ public sealed class AppStartupTests
             using var opened = new OpenedMainWindows();
 
             Assert.Null(start.App.OpenMain());
-            start.App.ActivateRequested();
+            start.App.BringAppForward();
 
             Assert.Empty(opened.Windows);
             Assert.Same(start.Window, start.App.MainDocumentWindow);
@@ -519,7 +519,7 @@ public sealed class AppStartupTests
             Window? failed = null;
             using (FailingOpens(window => failed = window))
             {
-                start.App.ActivateRequested();
+                start.App.BringAppForward();
             }
 
             Assert.NotNull(failed);
@@ -528,7 +528,7 @@ public sealed class AppStartupTests
             Assert.Contains(start.Log.Entries, entry => entry.Level == "error" && entry.Message == "The main window could not open.");
 
             // Had the arbiter still counted the failed main as open, this activate would only bring a window forward.
-            start.App.ActivateRequested();
+            start.App.BringAppForward();
 
             MainWindow main = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
             Assert.NotSame(failed, main);
@@ -550,7 +550,7 @@ public sealed class AppStartupTests
 
             using (FailingOpens(_ => { }))
             {
-                start.App.ActivateRequested();
+                start.App.BringAppForward();
             }
 
             Assert.Equal(WindowState.Normal, first.WindowState);
@@ -750,7 +750,7 @@ public sealed class AppStartupTests
 
             Assert.Empty(calls);
             Assert.Equal(0, start.Quits);
-            start.App.ActivateRequested();
+            start.App.BringAppForward();
             MainWindow reopened = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
             Assert.True(reopened.IsVisible);
 
@@ -927,13 +927,159 @@ public sealed class AppStartupTests
             start.Window.Close();
             using var opened = new OpenedMainWindows();
 
-            start.App.ActivateRequested();
+            Assert.False(start.App.BringAppForward());
             Dispatcher.UIThread.RunJobs();
 
             Assert.Empty(opened.Windows);
             Assert.Null(start.App.MainDocumentWindow);
             Assert.Empty(start.App.ViewerWindows);
             Assert.Contains(start.Log.Entries, entry => entry.Level == "info" && entry.Message == "Activate ignored: the app is stopping.");
+        });
+
+    [Fact]
+    public Task An_activate_is_answered_opened_after_the_window_is_forward() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            Window window = start.Window;
+            Dispatcher.UIThread.RunJobs();
+            window.WindowState = WindowState.Minimized;
+            (InstanceRequest first, Task<InstanceRequestOutcome> firstOutcome) = await requests.SendActivateAsync();
+
+            // A refusal while the window comes forward ends the request only if opened was not answered before: then the launch hears it.
+            void RefuseOnRaise(object? sender, AvaloniaPropertyChangedEventArgs change)
+            {
+                if (change.Property == Window.WindowStateProperty)
+                {
+                    first.Complete(InstanceReply.Refused);
+                }
+            }
+
+            window.PropertyChanged += RefuseOnRaise;
+            Assert.True(start.App.ActivateRequested(first));
+            window.PropertyChanged -= RefuseOnRaise;
+            Assert.Equal(
+                InstanceRequestOutcome.Refused,
+                await firstOutcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+
+            window.WindowState = WindowState.Minimized;
+            (InstanceRequest second, Task<InstanceRequestOutcome> secondOutcome) = await requests.SendActivateAsync();
+
+            Assert.True(start.App.ActivateRequested(second));
+
+            Assert.Equal(WindowState.Normal, window.WindowState);
+            Assert.Equal(
+                InstanceRequestOutcome.Confirmed,
+                await secondOutcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task An_activate_while_stopping_answers_closing_and_raises_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            start.Window.Close();
+            using var opened = new OpenedMainWindows();
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+
+            Assert.False(start.App.ActivateRequested(request));
+
+            Assert.Empty(opened.Windows);
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: the app is closing; answered closing.");
+            Assert.Equal(
+                InstanceRequestOutcome.Closing,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task An_abandoned_activate_raises_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            Window window = start.Window;
+            Dispatcher.UIThread.RunJobs();
+            window.WindowState = WindowState.Minimized;
+            int broughtForward = start.BroughtForwardCount;
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+            await Task.Run(requests.Server.Coordinator.StopAnswering, TestContext.Current.CancellationToken);
+
+            Assert.False(start.App.ActivateRequested(request));
+
+            Assert.Equal(WindowState.Minimized, window.WindowState);
+            Assert.Equal(broughtForward, start.BroughtForwardCount);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: abandoned before the app took it; bringing nothing forward.");
+            Assert.Equal(
+                InstanceRequestOutcome.Closing,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task An_activate_whose_raise_throws_answers_refused_and_keeps_the_loop() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            Window window = start.Window;
+            Dispatcher.UIThread.RunJobs();
+            window.WindowState = WindowState.Minimized;
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+
+            static void ThrowOnRaise(object? sender, AvaloniaPropertyChangedEventArgs change)
+            {
+                if (change.Property == Window.WindowStateProperty)
+                {
+                    throw new InvalidOperationException("The window could not come forward.");
+                }
+            }
+
+            window.PropertyChanged += ThrowOnRaise;
+            bool forward = true;
+            Dispatcher.UIThread.Post(() => forward = start.App.ActivateRequested(request));
+            Dispatcher.UIThread.RunJobs();
+            window.PropertyChanged -= ThrowOnRaise;
+
+            // The job returned instead of throwing into the loop, so the loop goes on to the next one.
+            Assert.False(forward);
+            bool nextRan = false;
+            Dispatcher.UIThread.Post(() => nextRan = true);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(nextRan);
+            LogEntry error = Assert.Single(start.Log.Entries, entry => entry.Level == "error");
+            Assert.Equal("Activate: could not bring a window forward.", error.Message);
+            Assert.Equal(
+                InstanceRequestOutcome.Refused,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
+        });
+
+    [Fact]
+    public Task An_activate_with_no_window_answers_refused() =>
+        Headless.RunAsync(async () =>
+        {
+            using var requests = new OpenRequests();
+            using var watchers = new FailingSettingsWatchers(failures: 1);
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null, LastWindowBehavior.KeepRunning);
+            Assert.Null(start.StartWindow);
+            (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendActivateAsync();
+
+            using (FailingOpens(_ => { }))
+            {
+                Assert.False(start.App.ActivateRequested(request));
+            }
+
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: no main window to bring forward.");
+            Assert.Equal(
+                InstanceRequestOutcome.Refused,
+                await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
+            );
         });
 
     [Fact]
@@ -2018,9 +2164,15 @@ public sealed class AppStartupTests
         public TestInstanceServer Server { get; }
 
         /// <summary>Sends an open launch for <paramref name="files"/>; returns its request as the server read it, and the launch's outcome.</summary>
-        public async Task<(InstanceRequest Request, Task<InstanceRequestOutcome> Outcome)> SendAsync(IReadOnlyList<string> files)
+        public Task<(InstanceRequest Request, Task<InstanceRequestOutcome> Outcome)> SendAsync(IReadOnlyList<string> files) =>
+            ReadRequestAsync(Server.SendOpenAsync(files));
+
+        /// <summary>Sends a no-arg launch's <c>activate</c>; returns its request as the server read it, and the launch's outcome.</summary>
+        public Task<(InstanceRequest Request, Task<InstanceRequestOutcome> Outcome)> SendActivateAsync() =>
+            ReadRequestAsync(Server.SendAsync(InstanceMessages.Activate));
+
+        private async Task<(InstanceRequest Request, Task<InstanceRequestOutcome> Outcome)> ReadRequestAsync(Task<InstanceRequestOutcome> outcome)
         {
-            Task<InstanceRequestOutcome> outcome = Server.SendOpenAsync(files);
             InstanceRequest request = await _requests
                 .Reader.ReadAsync(TestContext.Current.CancellationToken)
                 .AsTask()

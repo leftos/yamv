@@ -38,7 +38,7 @@ internal static partial class WindowsForeground
 
         if (IsIconic(window))
         {
-            _ = ShowWindow(window, RestoreCommand);
+            _ = ShowWindowAsync(window, RestoreCommand);
         }
 
         return SetForegroundWindow(window);
@@ -66,9 +66,10 @@ internal static partial class WindowsForeground
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool IsIconic(nint window);
 
+    // The asynchronous form posts the restore to the target's thread, so a hung target cannot block the launcher.
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool ShowWindow(nint window, int command);
+    private static partial bool ShowWindowAsync(nint window, int command);
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

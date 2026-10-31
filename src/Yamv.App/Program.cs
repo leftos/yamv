@@ -59,8 +59,8 @@ internal static class Program
             // Blocking: no sync context exists before Avalonia.
             int? exitCode = RunSecondLaunch(
                 files,
-                () => launch.RunAsync().GetAwaiter().GetResult(),
-                () => launch.OpenAsync(files, SecondLaunch.OpenDeadline, SecondLaunch.OpenOverallCap).GetAwaiter().GetResult(),
+                () => launch.RunAsync(SecondLaunch.RequestDeadline, SecondLaunch.NoPidDeadline, SecondLaunch.OverallCap).GetAwaiter().GetResult(),
+                () => launch.OpenAsync(files, SecondLaunch.RequestDeadline, SecondLaunch.OverallCap).GetAwaiter().GetResult(),
                 log
             );
             if (exitCode is { } code)
@@ -77,9 +77,9 @@ internal static class Program
     /// with files it sends them (<paramref name="open"/>). Returns the exit code, or null when the app had exited and this launch
     /// now holds the lock, so it runs as the app.
     /// </summary>
-    internal static int? RunSecondLaunch(IReadOnlyList<string> files, Func<SecondLaunchOutcome> activate, Func<SecondLaunchResult> open, IAppLog log)
+    internal static int? RunSecondLaunch(IReadOnlyList<string> files, Func<SecondLaunchResult> activate, Func<SecondLaunchResult> open, IAppLog log)
     {
-        SecondLaunchResult result = files.Count == 0 ? new SecondLaunchResult(activate(), null) : open();
+        SecondLaunchResult result = files.Count == 0 ? activate() : open();
         switch (result.Outcome)
         {
             case SecondLaunchOutcome.Activated or SecondLaunchOutcome.Opened:
@@ -89,7 +89,11 @@ internal static class Program
             default:
                 if (result.Failure is { } failure)
                 {
-                    log.LogWarning($"Second launch: the {files.Count} file(s) were not opened ({failure}); exiting 1.");
+                    log.LogWarning(
+                        files.Count == 0
+                            ? $"Second launch: the app did not bring a window forward ({failure}); exiting 1."
+                            : $"Second launch: the {files.Count} file(s) were not opened ({failure}); exiting 1."
+                    );
                 }
 
                 return 1;
@@ -106,7 +110,7 @@ internal static class Program
         var latch = new UiReadyLatch();
         var handler = new InstanceRequestHandler(
             latch.Post,
-            () => ActivateInApp(log),
+            request => ActivateInApp(request, log),
             (files, request) => OpenInApp(files, request, log),
             SinceProcessStart,
             log
@@ -188,16 +192,17 @@ internal static class Program
         return false;
     }
 
-    /// <summary>Hands an activate to the running app on the UI thread; logs it when no app is there to take it.</summary>
-    private static void ActivateInApp(IAppLog log)
+    /// <summary>Hands an activate to the running app on the UI thread; refuses it when no app is there to take it.</summary>
+    private static bool ActivateInApp(InstanceRequest request, IAppLog log)
     {
         if (Application.Current is App app)
         {
-            app.ActivateRequested();
-            return;
+            return app.ActivateRequested(request);
         }
 
-        log.LogError("Instance server: no app to bring forward; dropping an activate.");
+        log.LogError("Instance server: no app to bring forward; refusing the request.");
+        request.Complete(InstanceReply.Refused);
+        return false;
     }
 
     /// <summary>The platform actions a launch that did not get the lock runs through.</summary>
@@ -205,7 +210,6 @@ internal static class Program
         new(
             ReadPid: () => InstanceCoordinator.TryReadMainPid(AppPaths.MainLockFile, log),
             AllowForeground: pid => AllowForeground(pid, log),
-            Signal: timeout => InstanceCoordinator.SignalAsync(AppPaths.MainLockFile, InstanceMessages.Activate, timeout, log),
             Request: (message, budget) => InstanceCoordinator.RequestAsync(AppPaths.MainLockFile, message, budget, log),
             BringForward: pid => BringForward(pid, log),
             RetryLock: coordinator.TryAcquireMainLockQuietly,

@@ -4,21 +4,21 @@ using Yamv.Core.Instance;
 namespace Yamv.Core.Launch;
 
 /// <summary>
-/// Runs a launch that found the main-instance lock taken. A no-arg launch (<see cref="RunAsync"/>) lets the main instance take
-/// the foreground, asks it to come forward, and when it does not answer brings its window forward directly or, when the main
-/// instance has gone, takes the lock itself. A launch with files (<see cref="OpenAsync"/>) asks the app to open them and waits
-/// for its confirmation.
+/// Runs a launch that found the main-instance lock taken. A no-arg launch (<see cref="RunAsync"/>) lets the app take the
+/// foreground, asks it to come forward and waits for its answer; when it does not answer, the launch brings its window forward
+/// directly and waits for the lock. A launch with files (<see cref="OpenAsync"/>) asks the app to open them and waits for its
+/// confirmation. Only the lock makes either launch the app.
 /// </summary>
 /// <param name="actions">The platform actions the launch runs through.</param>
 /// <param name="log">The process's log.</param>
 public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
 {
-    /// <summary>How long the launch waits for the main instance to read its <c>activate</c> message.</summary>
-    public static readonly TimeSpan SignalTimeout = TimeSpan.FromMilliseconds(1500);
+    /// <summary>How long one <c>activate</c> request waits when no pid is known, so no app may be running to answer it.</summary>
+    public static readonly TimeSpan NoPidDeadline = TimeSpan.FromMilliseconds(1500);
 
     /// <summary>
-    /// How long a launch that found no pid after a failed signal keeps retrying the lock, so a main instance that is still saving
-    /// its session hands over to it once the lock is free.
+    /// How long a launch that got no answer keeps retrying the lock, so an app that is still saving its session hands over to it
+    /// once the lock is free.
     /// </summary>
     public static readonly TimeSpan LockWaitTimeout = TimeSpan.FromSeconds(5);
 
@@ -26,100 +26,138 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
     public static readonly TimeSpan LockRetryInterval = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
-    /// How long one open request waits, from its first connect attempt, for the app to confirm it. It stays below the server's
-    /// 10 s reply bound: past that bound a request the app has begun but not answered is closed with no reply, which the
-    /// launcher reads as closing and may send the files again.
+    /// How long one request waits, from its first connect attempt, for the app to answer it. It stays below the server's 10 s reply
+    /// bound: past that bound a request the app has begun but not answered is closed with no reply, which the launcher reads as
+    /// closing and may send the request again.
     /// </summary>
-    public static readonly TimeSpan OpenDeadline = TimeSpan.FromSeconds(3);
+    public static readonly TimeSpan RequestDeadline = TimeSpan.FromSeconds(3);
 
-    /// <summary>The bound on a whole open launch: every request, lock wait and resend included.</summary>
-    public static readonly TimeSpan OpenOverallCap = TimeSpan.FromSeconds(8);
+    /// <summary>The bound on a whole launch: every request, lock wait and resend included.</summary>
+    public static readonly TimeSpan OverallCap = TimeSpan.FromSeconds(8);
+
+    /// <summary>How long a launch waits for the bring-forward of an app that did not answer: a hung app may hold that call up.</summary>
+    public static readonly TimeSpan BringForwardBound = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Reads the main instance's pid and, when known, allows it the foreground before signalling <c>activate</c>. A signal
-    /// that fails reads the pid again and falls back to bringing that process's window forward, or, with no pid, to retrying the
-    /// lock for up to <see cref="LockWaitTimeout"/>.
+    /// Asks the running app to come forward and waits for its answer, allowing it the foreground first whenever its pid is known.
+    /// Success is the app's <c>opened</c> alone: a <c>refused</c> fails at once and a <c>closing</c> waits for the lock or a new
+    /// app, which gets the request instead. An app that does not answer, or cannot be reached, has its window brought forward from
+    /// here (the pid read afresh, within <see cref="BringForwardBound"/>); the launch then still fails unless the lock comes free or
+    /// a new app appears, and a pipe it may not use fails at once. The lock wait lasts up to <see cref="LockWaitTimeout"/>.
     /// </summary>
-    /// <returns>What the caller does next: exit 0, start as the main instance, or exit 1.</returns>
-    public async Task<SecondLaunchOutcome> RunAsync()
+    /// <param name="requestDeadline">
+    /// The budget of one request when a pid is known; the app passes <see cref="RequestDeadline"/>. Keep it below the server's 10 s
+    /// reply bound.
+    /// </param>
+    /// <param name="noPidDeadline">The budget of one request with no pid; the app passes <see cref="NoPidDeadline"/>.</param>
+    /// <param name="overallCap">The bound on the whole launch; the app passes <see cref="OverallCap"/>.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Any of the times is not positive and finite, or is over <see cref="int.MaxValue"/> ms, which a timer or a cancellation delay
+    /// refuses.
+    /// </exception>
+    /// <returns>Activated (exit 0), BecameMain (start as the app), or Failed with its reason (exit 1).</returns>
+    public async Task<SecondLaunchResult> RunAsync(TimeSpan requestDeadline, TimeSpan noPidDeadline, TimeSpan overallCap)
     {
+        RequirePositiveAndFinite(requestDeadline, nameof(requestDeadline), "An activate launch's request deadline");
+        RequirePositiveAndFinite(noPidDeadline, nameof(noPidDeadline), "An activate launch's no-pid deadline");
+        RequirePositiveAndFinite(overallCap, nameof(overallCap), "An activate launch's overall cap");
+
+        long start = actions.Time.GetTimestamp();
         int? pid = actions.ReadPid();
-        if (pid is { } known)
+        while (true)
         {
-            actions.AllowForeground(known);
-        }
-
-        bool delivered = await actions.Signal(SignalTimeout).ConfigureAwait(false);
-        if (delivered)
-        {
-            return Activated(pid);
-        }
-
-        // A fresh read re-checks the process's start time, so a pid reused while the signal waited is never brought forward.
-        return actions.ReadPid() is { } fresh ? BringForward(fresh) : await WaitForLockAsync().ConfigureAwait(false);
-    }
-
-    private SecondLaunchOutcome Activated(int? pid)
-    {
-        if (pid is null)
-        {
-            pid = actions.ReadPid();
             if (pid is { } known)
             {
                 actions.AllowForeground(known);
             }
-        }
 
-        string shown = pid is { } value ? $"pid {value}" : "pid unknown";
-        log.LogInfo($"Second launch: asked the main instance ({shown}) to come forward.");
-        return SecondLaunchOutcome.Activated;
+            TimeSpan left = overallCap - actions.Time.GetElapsedTime(start);
+            if (left <= TimeSpan.Zero)
+            {
+                return GaveUp(overallCap);
+            }
+
+            TimeSpan budget = Min(pid is null ? noPidDeadline : requestDeadline, left);
+            InstanceRequestOutcome outcome = await actions.Request(InstanceMessages.Activate, budget).ConfigureAwait(false);
+            (SecondLaunchResult? ended, int? newPid) = await AfterActivateAsync(outcome, pid, start, overallCap).ConfigureAwait(false);
+            if (ended is not null)
+            {
+                return ended;
+            }
+
+            pid = newPid;
+        }
     }
 
-    private SecondLaunchOutcome BringForward(int pid)
+    /// <summary>What an activate's outcome leads to: the launch's result, or the pid of a new app to send the request to.</summary>
+    private async Task<(SecondLaunchResult? Ended, int? NewPid)> AfterActivateAsync(
+        InstanceRequestOutcome outcome,
+        int? pid,
+        long start,
+        TimeSpan overallCap
+    )
     {
-        if (actions.BringForward(pid))
+        string shown = pid is { } value ? $"pid {value}" : "pid unknown";
+        switch (outcome)
         {
-            log.LogWarning($"Second launch: the main instance (pid {pid}) did not answer; brought its window forward.");
+            case InstanceRequestOutcome.Confirmed:
+                log.LogInfo($"Second launch: asked the app ({shown}) to come forward.");
+                return (SecondLaunchResult.Activated, null);
+            case InstanceRequestOutcome.Refused:
+                log.LogWarning($"Second launch: the app ({shown}) refused to come forward.");
+                return (SecondLaunchResult.Failed(SecondLaunchFailure.Refused), null);
+            case InstanceRequestOutcome.Closing:
+                return await WaitForLockOrNewAppAsync(pid, start, overallCap, closing: true).ConfigureAwait(false);
+            default:
+                return await AfterNoAnswerAsync(outcome, pid, start, overallCap).ConfigureAwait(false);
         }
-        else
-        {
-            log.LogWarning($"Second launch: the main instance (pid {pid}) did not answer and its window could not be brought forward.");
-        }
-
-        return SecondLaunchOutcome.Failed;
     }
 
     /// <summary>
-    /// Retries the lock every <see cref="LockRetryInterval"/> until it is taken or <see cref="LockWaitTimeout"/> has passed: a
-    /// main instance that stopped answering keeps the lock until it has saved its session. A lock file that cannot be opened
-    /// ends the wait at once, since waiting cannot fix it. Logs one line when the wait begins, and the outcome.
+    /// Brings forward the window of the app the pid file names now, then fails on a pipe this process may not use, or waits for the
+    /// lock or for an app that is not the one <paramref name="pid"/> named, which gets the request instead. A fresh read re-checks
+    /// the process's start time, so a pid reused while the request waited is never brought forward.
     /// </summary>
-    private async Task<SecondLaunchOutcome> WaitForLockAsync()
+    private async Task<(SecondLaunchResult? Ended, int? NewPid)> AfterNoAnswerAsync(
+        InstanceRequestOutcome outcome,
+        int? pid,
+        long start,
+        TimeSpan overallCap
+    )
     {
-        for (TimeSpan waited = TimeSpan.Zero; ; waited += LockRetryInterval)
+        int? fresh = actions.ReadPid();
+        if (fresh is { } running)
         {
-            MainLockAttempt attempt = actions.RetryLock();
-            if (attempt == MainLockAttempt.Acquired)
-            {
-                log.LogInfo("Second launch: the main instance has exited; starting as the main instance.");
-                return SecondLaunchOutcome.BecameMain;
-            }
-
-            if (attempt == MainLockAttempt.CannotOpen || waited >= LockWaitTimeout)
-            {
-                break;
-            }
-
-            if (waited == TimeSpan.Zero)
-            {
-                log.LogInfo($"Second launch: waiting up to {LockWaitTimeout.TotalSeconds:0} s for the main instance to exit.");
-            }
-
-            await actions.Delay(LockRetryInterval).ConfigureAwait(false);
+            await BringForwardBoundedAsync(running, start, overallCap).ConfigureAwait(false);
         }
 
-        log.LogWarning("Second launch: the main instance did not answer and its pid is unknown; giving up.");
-        return SecondLaunchOutcome.Failed;
+        return outcome == InstanceRequestOutcome.Denied
+            ? (SecondLaunchResult.Failed(SecondLaunchFailure.Denied), null)
+            : await WaitForLockOrNewAppAsync(pid, start, overallCap, closing: false).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs the bring-forward on the pool and waits for it within <see cref="BringForwardBound"/> and what is left of the cap, so a
+    /// hung app cannot hold the launch; with no time left it skips the raise.
+    /// </summary>
+    private async Task BringForwardBoundedAsync(int pid, long start, TimeSpan overallCap)
+    {
+        TimeSpan left = overallCap - actions.Time.GetElapsedTime(start);
+        if (left <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            bool raised = await Task.Run(() => actions.BringForward(pid)).WaitAsync(Min(BringForwardBound, left), actions.Time).ConfigureAwait(false);
+            string result = raised ? "did not answer; brought its window forward" : "did not answer and its window could not be brought forward";
+            log.LogWarning($"Second launch: the app (pid {pid}) {result}.");
+        }
+        catch (TimeoutException)
+        {
+            log.LogWarning($"Second launch: bringing the app (pid {pid}) forward did not finish; going on.");
+        }
     }
 
     /// <summary>
@@ -131,10 +169,10 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
     /// </summary>
     /// <param name="files">The full paths to open.</param>
     /// <param name="openDeadline">
-    /// The budget of one request; the app passes <see cref="OpenDeadline"/>. Keep it below the server's 10 s reply bound, or a
+    /// The budget of one request; the app passes <see cref="RequestDeadline"/>. Keep it below the server's 10 s reply bound, or a
     /// request the app has begun may close with no reply and the files be sent twice.
     /// </param>
-    /// <param name="overallCap">The bound on the whole launch; the app passes <see cref="OpenOverallCap"/>.</param>
+    /// <param name="overallCap">The bound on the whole launch; the app passes <see cref="OverallCap"/>.</param>
     /// <exception cref="ArgumentNullException"><paramref name="files"/> is null; nothing is read, sent or waited for.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Either time is not positive and finite, or is over <see cref="int.MaxValue"/> ms, which a timer or a cancellation delay
@@ -237,19 +275,19 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
             MainLockAttempt attempt = actions.RetryLock();
             if (attempt == MainLockAttempt.Acquired)
             {
-                log.LogInfo("Second launch: the app has exited; starting as the app with the files.");
+                log.LogInfo("Second launch: the app has exited; starting as the app.");
                 return (SecondLaunchResult.BecameMain, null);
             }
 
             if (attempt == MainLockAttempt.CannotOpen)
             {
-                log.LogWarning("Second launch: the lock file cannot be opened; the files were not opened.");
+                log.LogWarning("Second launch: the lock file cannot be opened; giving up.");
                 return (SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding), null);
             }
 
             if (actions.ReadPid() is { } fresh && fresh != closingPid)
             {
-                log.LogInfo($"Second launch: a new app (pid {fresh}) holds the lock; sending the files to it.");
+                log.LogInfo($"Second launch: a new app (pid {fresh}) holds the lock; sending the request to it.");
                 return (null, fresh);
             }
 
@@ -273,7 +311,7 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
 
     private SecondLaunchResult GaveUp(TimeSpan overallCap)
     {
-        log.LogWarning($"Second launch: no app took the files within {overallCap.TotalSeconds:0} s or the lock wait; giving up.");
+        log.LogWarning($"Second launch: no app answered within {overallCap.TotalSeconds:0} s or the lock wait; giving up.");
         return SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding);
     }
 
@@ -305,7 +343,6 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
 /// <summary>The platform actions a <see cref="SecondLaunch"/> runs through.</summary>
 /// <param name="ReadPid">Reads the running main instance's pid, or null when it is unknown.</param>
 /// <param name="AllowForeground">Lets the process with this pid take the foreground.</param>
-/// <param name="Signal">Sends <c>activate</c> to the main instance within the timeout; true once it was delivered.</param>
 /// <param name="Request">
 /// Sends this message to the running app and waits for its reply within the budget; the app passes
 /// <see cref="InstanceCoordinator.RequestAsync(string, string, TimeSpan, IAppLog, CancellationToken)"/>.
@@ -315,11 +352,10 @@ public sealed class SecondLaunch(SecondLaunchActions actions, IAppLog log)
 /// Tries once more to take the main-instance lock without logging a lock another process holds; reports what it found.
 /// </param>
 /// <param name="Delay">Waits the given time between lock retries; the app passes <see cref="Task.Delay(TimeSpan)"/>.</param>
-/// <param name="Time">The clock the open launch's overall cap is measured on; the app passes <see cref="TimeProvider.System"/>.</param>
+/// <param name="Time">The clock a launch's overall cap is measured on; the app passes <see cref="TimeProvider.System"/>.</param>
 public sealed record SecondLaunchActions(
     Func<int?> ReadPid,
     Action<int> AllowForeground,
-    Func<TimeSpan, Task<bool>> Signal,
     Func<string, TimeSpan, Task<InstanceRequestOutcome>> Request,
     Func<int, bool> BringForward,
     Func<MainLockAttempt> RetryLock,
@@ -327,22 +363,25 @@ public sealed record SecondLaunchActions(
     TimeProvider Time
 );
 
-/// <summary>How an open launch (<see cref="SecondLaunch.OpenAsync"/>) ended, and why when it failed.</summary>
-/// <param name="Outcome">Opened, BecameMain or Failed.</param>
+/// <summary>How a <see cref="SecondLaunch"/> ended, and why when it failed.</summary>
+/// <param name="Outcome">Activated, Opened, BecameMain or Failed.</param>
 /// <param name="Failure">Why it failed; null unless <paramref name="Outcome"/> is <see cref="SecondLaunchOutcome.Failed"/>.</param>
 public sealed record SecondLaunchResult(SecondLaunchOutcome Outcome, SecondLaunchFailure? Failure)
 {
+    /// <summary>The app brought a window forward; exit 0.</summary>
+    public static SecondLaunchResult Activated { get; } = new(SecondLaunchOutcome.Activated, null);
+
     /// <summary>The app took the files and is opening them; exit 0.</summary>
     public static SecondLaunchResult Opened { get; } = new(SecondLaunchOutcome.Opened, null);
 
-    /// <summary>The app had exited and this process now holds the lock; start as the app with the files.</summary>
+    /// <summary>The app had exited and this process now holds the lock; start as the app, with the launch's files if any.</summary>
     public static SecondLaunchResult BecameMain { get; } = new(SecondLaunchOutcome.BecameMain, null);
 
-    /// <summary>The files were not opened, for <paramref name="failure"/>; show the error and exit 1.</summary>
+    /// <summary>The launch failed, for <paramref name="failure"/>; exit 1.</summary>
     public static SecondLaunchResult Failed(SecondLaunchFailure failure) => new(SecondLaunchOutcome.Failed, failure);
 }
 
-/// <summary>Why an open launch failed. Each shows the same error to the user; the reason is for the log and the caller.</summary>
+/// <summary>Why a launch failed. Each shows the same error to the user; the reason is for the log and the caller.</summary>
 public enum SecondLaunchFailure
 {
     /// <summary>
@@ -350,10 +389,10 @@ public enum SecondLaunchFailure
     /// </summary>
     Unsendable,
 
-    /// <summary>The app answered that it will not open them.</summary>
+    /// <summary>The app answered that it will not carry the request out.</summary>
     Refused,
 
-    /// <summary>The app did not confirm in time, is running without answering, or no app took the files before the wait ran out.</summary>
+    /// <summary>The app did not confirm in time, is running without answering, or no app answered before the wait ran out.</summary>
     NotResponding,
 
     /// <summary>The app's pipe belongs to another user or refused the connection for good.</summary>
@@ -363,7 +402,7 @@ public enum SecondLaunchFailure
 /// <summary>How a <see cref="SecondLaunch"/> ended.</summary>
 public enum SecondLaunchOutcome
 {
-    /// <summary>The main instance got the <c>activate</c> message; exit 0.</summary>
+    /// <summary>The app brought a window forward; exit 0.</summary>
     Activated,
 
     /// <summary>The app took the files of an open launch and is opening them; exit 0.</summary>
@@ -372,6 +411,6 @@ public enum SecondLaunchOutcome
     /// <summary>The main instance had exited and this process now holds the lock; go on as the main instance.</summary>
     BecameMain,
 
-    /// <summary>The main instance did not answer; exit 1.</summary>
+    /// <summary>The launch did not get what it asked for; exit 1.</summary>
     Failed,
 }

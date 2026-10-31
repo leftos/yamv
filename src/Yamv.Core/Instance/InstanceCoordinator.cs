@@ -11,8 +11,8 @@ namespace Yamv.Core.Instance;
 
 /// <summary>
 /// Keeps YAMV to one main instance per user: the main instance holds an exclusive lock on <paramref name="lockFilePath"/>
-/// and listens on the pipe <see cref="Endpoint"/> derived from that path; a later no-arg launch fails to take the lock and signals
-/// it. On Unix the lock is an advisory <c>flock</c>, which .NET turns off silently when <c>System.IO.DisableFileLocking</c> is set
+/// and listens on the pipe <see cref="Endpoint"/> derived from that path; a later launch fails to take the lock and sends it a
+/// request. On Unix the lock is an advisory <c>flock</c>, which .NET turns off silently when <c>System.IO.DisableFileLocking</c> is set
 /// or the file system does not support it (NFS, SMB). The main instance also writes its pid and start time to a pid file beside the
 /// lock, named after the lock file with the extension <c>.pid</c> (a second launch cannot read the locked file itself), and deletes it
 /// before releasing the lock.
@@ -109,8 +109,8 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
 
     /// <summary>
     /// How long a connection waits for its request's reply before abandoning the request and closing without one; 10 s by
-    /// default. A launcher's open deadline (<see cref="Launch.SecondLaunch.OpenDeadline"/>) stays below it, or a request the app
-    /// has begun may close with no reply and its files be sent twice.
+    /// default. A launcher's request deadline (<see cref="Launch.SecondLaunch.RequestDeadline"/>) stays below it, or a request the
+    /// app has begun may close with no reply and be sent twice.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is not positive or is longer than <see cref="int.MaxValue"/> ms.</exception>
     public TimeSpan ReplyBound
@@ -175,8 +175,8 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     internal Action<bool>? ListenerCreating { get; set; }
 
     /// <summary>
-    /// Called before each connect attempt <see cref="SignalAsync"/> makes, with the connect timeout in milliseconds, in the async
-    /// flow that set it. Lets tests check how a signal paces its attempts without measuring CPU time.
+    /// Called before each connect attempt a request makes, with the connect timeout in milliseconds, in the async flow that set
+    /// it. Lets tests check how a request paces its attempts without measuring CPU time.
     /// </summary>
     internal static AsyncLocal<Action<int>?> ConnectAttempted { get; } = new();
 
@@ -281,7 +281,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     /// is read and queued as an <see cref="InstanceRequest"/>; <paramref name="onRequest"/> drains the queue on a thread-pool
     /// thread, one request at a time, and an exception it throws is logged (a request not yet begun is then answered
     /// <c>refused</c>) while the server keeps serving.
-    /// A request that expects a reply keeps its connection open until it is completed, its launcher hangs up (it is then
+    /// A request keeps its connection open until it is completed, its launcher hangs up (it is then
     /// abandoned), <see cref="ReplyBound"/> passes (abandoned, closed without a reply) or the server stops (abandoned and answered
     /// <c>closing</c>); the reply is written within <see cref="ReplyWriteBound"/>.
     /// <see cref="Dispose"/> waits for a running <paramref name="onRequest"/>, so it must post work to the thread that disposes this
@@ -319,76 +319,6 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
             _handlerLoop = Task.Run(() => RunHandlerLoopAsync(onRequest, token), CancellationToken.None);
             LogIfFaulted(_acceptLoop, "accept loop", "it accepts no more messages");
             LogIfFaulted(_handlerLoop, "handler loop", "queued messages are no longer handled");
-        }
-    }
-
-    /// <summary>
-    /// Sends <paramref name="message"/> to the main instance holding the lock at <paramref name="lockFilePath"/>, on the pipe
-    /// derived from that path (see <see cref="Endpoint"/>), retrying the connect every 50 ms so a main instance that is still
-    /// starting gets it; <paramref name="timeout"/> bounds the whole wait, the write included, and
-    /// <see cref="Timeout.InfiniteTimeSpan"/> waits without a bound.
-    /// On Unix a file at the endpoint that is not a socket is retried the same way, since the main instance's server replaces
-    /// whatever it finds there when it starts; one that is never replaced makes the signal wait out its timeout.
-    /// Returns true once the frame was delivered: on Windows the server has read it; on Unix it is in the connected socket's send
-    /// buffer, so a main instance that exits before reading it loses it. Either way it may not have been handled yet. False (logged
-    /// as a warning) when no server answered in time, the server did not read the frame in time, the pipe belongs to another user,
-    /// or opening or connecting the pipe failed in a way a retry cannot fix.
-    /// </summary>
-    /// <exception cref="ArgumentException">
-    /// <paramref name="lockFilePath"/> is empty or not a valid path, or the message encodes to more than 64 KiB.
-    /// </exception>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// <paramref name="timeout"/> is neither <see cref="Timeout.InfiniteTimeSpan"/> nor positive and at most <see cref="int.MaxValue"/> ms.
-    /// </exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    public static async Task<bool> SignalAsync(
-        string lockFilePath,
-        string message,
-        TimeSpan timeout,
-        IAppLog log,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ValidateTimeout(timeout, nameof(timeout), "signal timeout");
-        ArgumentNullException.ThrowIfNull(message);
-        ArgumentNullException.ThrowIfNull(log);
-        byte[] frame = InstanceFrame.Encode(message);
-        string pipeName = InstanceEndpoint.Resolve(lockFilePath, EndpointEnvironment.ForCurrentProcess(), log);
-
-        long start = Stopwatch.GetTimestamp();
-        Exception? lastFailure = null;
-        while (true)
-        {
-            TimeSpan remaining = Remaining(timeout, start);
-            if (remaining <= TimeSpan.Zero && remaining != Timeout.InfiniteTimeSpan)
-            {
-                log.LogWarning($"No main instance answered on pipe '{pipeName}' within {timeout.TotalMilliseconds:0} ms.", lastFailure);
-                return false;
-            }
-
-            try
-            {
-                return await SendOnceAsync(pipeName, frame, remaining, log, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-            {
-                log.LogWarning(
-                    $"The main instance on pipe '{pipeName}' did not read the message within {timeout.TotalMilliseconds:0} ms; "
-                        + "it may be busy reading another client.",
-                    ex
-                );
-                return false;
-            }
-            catch (Exception ex) when (IsRetryableConnectFailure(ex))
-            {
-                lastFailure = ex;
-                await PauseBeforeRetryAsync(Remaining(timeout, start), cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or SocketException)
-            {
-                log.LogWarning(DescribeFinalConnectFailure(pipeName, ex), ex);
-                return false;
-            }
         }
     }
 
@@ -474,8 +404,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         {
             try
             {
-                NamedPipeClientStream? client = await ConnectClientAsync(context.PipeName, PipeDirection.InOut, context.Log, context.Deadline)
-                    .ConfigureAwait(false);
+                NamedPipeClientStream? client = await ConnectClientAsync(context.PipeName, context.Log, context.Deadline).ConfigureAwait(false);
                 return (client, InstanceRequestOutcome.NoServer);
             }
             catch (Exception ex) when (IsRetryableConnectFailure(ex))
@@ -555,8 +484,8 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
 
     /// <summary>
     /// Stops answering second launches while keeping the lock: deletes the pid file first, then stops the server as
-    /// <see cref="Dispose"/> does, waiting the same bounded way. A launch from then on fails its signal, finds no pid and retries
-    /// the lock for a bounded time, so it becomes the main instance once this one has released the lock. The main instance calls
+    /// <see cref="Dispose"/> does, waiting the same bounded way. A launch from then on finds no server and no pid and retries the
+    /// lock for a bounded time, so it becomes the main instance once this one has released the lock. The main instance calls
     /// this as it starts to shut down, before it saves its session; <see cref="Dispose"/> then only waits for the server and
     /// releases the lock. Safe to call more than once, before <see cref="StartServer"/> or without it, and after
     /// <see cref="Dispose"/>, where it does nothing.
@@ -970,73 +899,19 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         }
     }
 
-    /// <summary>What is left of <paramref name="timeout"/> since <paramref name="start"/>; an infinite timeout stays infinite.</summary>
-    private static TimeSpan Remaining(TimeSpan timeout, long start) =>
-        timeout == Timeout.InfiniteTimeSpan ? Timeout.InfiniteTimeSpan : timeout - Stopwatch.GetElapsedTime(start);
-
     /// <summary>
-    /// The pause before the next connect attempt: <see cref="ConnectRetryDelay"/>, or what is left of the timeout when that is
-    /// shorter, rounded up to whole milliseconds and at least 1 ms, so every retry waits on a timer and a launch with no server to
-    /// reach never spins. <see cref="Task.Delay(TimeSpan)"/> counts whole milliseconds, so a shorter pause would not wait at all.
-    /// </summary>
-    internal static TimeSpan ConnectRetryPause(TimeSpan remaining)
-    {
-        if (remaining == Timeout.InfiniteTimeSpan || remaining >= ConnectRetryDelay)
-        {
-            return ConnectRetryDelay;
-        }
-
-        return TimeSpan.FromMilliseconds(Math.Max(1, Math.Ceiling(remaining.TotalMilliseconds)));
-    }
-
-    private static Task PauseBeforeRetryAsync(TimeSpan remaining, CancellationToken cancellationToken) =>
-        Task.Delay(ConnectRetryPause(remaining), cancellationToken);
-
-    /// <summary>
-    /// Makes one connect attempt and writes <paramref name="frame"/> within <paramref name="remaining"/>. False (logged) when the
-    /// pipe cannot be opened at all; an <see cref="OperationCanceledException"/> while <paramref name="cancellationToken"/> is not
-    /// cancelled means the write ran out of time.
-    /// </summary>
-    private static async Task<bool> SendOnceAsync(string pipeName, byte[] frame, TimeSpan remaining, IAppLog log, CancellationToken cancellationToken)
-    {
-        long attemptStart = Stopwatch.GetTimestamp();
-        NamedPipeClientStream? client = await ConnectClientAsync(pipeName, PipeDirection.Out, log, cancellationToken).ConfigureAwait(false);
-        if (client is null)
-        {
-            return false;
-        }
-
-        await using (client.ConfigureAwait(false))
-        {
-            // On Windows the write waits until the server reads it, which a server busy with another client may not do in time.
-            using var writeDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            TimeSpan writeBudget = Remaining(remaining, attemptStart);
-            writeDeadline.CancelAfter(writeBudget > TimeSpan.Zero || writeBudget == Timeout.InfiniteTimeSpan ? writeBudget : TimeSpan.Zero);
-            await client.WriteAsync(frame, writeDeadline.Token).ConfigureAwait(false);
-            await client.FlushAsync(writeDeadline.Token).ConfigureAwait(false);
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// Opens the pipe in <paramref name="direction"/> (write-only for <c>activate</c>, so it also reaches an older server that only
-    /// reads; both ways for a request) and makes one connect attempt that does not wait for a server to appear: a timeout of 0 tries once, where a
-    /// longer one makes the runtime retry in a spin while the pipe does not exist, on Windows as on Unix. Null (logged) when the
+    /// Opens the pipe both ways and makes one connect attempt that does not wait for a server to appear: a timeout of 0 tries once,
+    /// where a longer one makes the runtime retry in a spin while the pipe does not exist, on Windows as on Unix. Null (logged) when the
     /// pipe cannot be opened at all: on Unix, a socket path longer than the platform allows; .NET reports both that and a reserved
     /// name as <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
-    private static async Task<NamedPipeClientStream?> ConnectClientAsync(
-        string pipeName,
-        PipeDirection direction,
-        IAppLog log,
-        CancellationToken cancellationToken
-    )
+    private static async Task<NamedPipeClientStream?> ConnectClientAsync(string pipeName, IAppLog log, CancellationToken cancellationToken)
     {
         NamedPipeClientStream? client = null;
         bool connected = false;
         try
         {
-            client = new NamedPipeClientStream(".", pipeName, direction, SharedPipeOptions);
+            client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, SharedPipeOptions);
             int attemptTimeoutMilliseconds = ConnectAttemptTimeoutMilliseconds;
             ConnectAttempted.Value?.Invoke(attemptTimeoutMilliseconds);
             await client.ConnectAsync(attemptTimeoutMilliseconds, cancellationToken).ConfigureAwait(false);
@@ -1070,7 +945,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
     private static string DescribeFinalConnectFailure(string pipeName, Exception exception) =>
         exception is SocketException socketException
             ? $"Could not connect to pipe '{pipeName}' ({socketException.SocketErrorCode}); a retry cannot fix this."
-            : $"Pipe '{pipeName}' belongs to another user; not signalling it.";
+            : $"Pipe '{pipeName}' belongs to another user; not sending to it.";
 
     private static bool IsShareViolation(IOException exception)
     {
@@ -1258,13 +1133,13 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         );
     }
 
-    /// <summary>Reads the client's request, queues it, and for a request that expects one, writes its reply.</summary>
+    /// <summary>Reads the client's request, queues it, and writes its reply.</summary>
     private async Task ServeConnectionAsync(NamedPipeServerStream connected, CancellationToken cancellationToken)
     {
         await using (connected.ConfigureAwait(false))
         {
             InstanceRequest? request = await ReadIntoQueueAsync(connected, cancellationToken).ConfigureAwait(false);
-            if (request is null || !request.ExpectsReply)
+            if (request is null)
             {
                 return;
             }
@@ -1475,7 +1350,7 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
             return null;
         }
 
-        InstanceRequest request = new(message, expectsReply: message != InstanceMessages.Activate);
+        InstanceRequest request = new(message);
         TrackRequest(request);
         bool queued = _queue.Writer.TryWrite(request);
         Debug.Assert(queued, "An unbounded channel that is never completed accepts every write.");
@@ -1483,14 +1358,9 @@ public sealed class InstanceCoordinator(string lockFilePath, IAppLog log) : IDis
         return request;
     }
 
-    /// <summary>Records a request that expects a reply, abandoning it at once when the server has begun stopping.</summary>
+    /// <summary>Records a request, abandoning it at once when the server has begun stopping.</summary>
     private void TrackRequest(InstanceRequest request)
     {
-        if (!request.ExpectsReply)
-        {
-            return;
-        }
-
         bool stopping;
         lock (_gate)
         {

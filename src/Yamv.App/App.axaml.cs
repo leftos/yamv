@@ -362,21 +362,58 @@ public partial class App : Application
     /// Brings the app forward for an activate, on the UI thread: builds the main window when the arbiter asks for it, else brings
     /// the main window forward, or with no main window the most recently active viewer. A stopping app builds nothing.
     /// </summary>
-    internal void ActivateRequested()
+    /// <returns>True when a window was raised or built.</returns>
+    internal bool BringAppForward()
     {
         if (!_policy.MayOpenWindows)
         {
             Log.LogInfo("Activate ignored: the app is stopping.");
-            return;
+            return false;
         }
 
         if (_arbiter.ActivateRequested() is OpenMainWindow && ShowMain(beforeShow: null) is not null)
         {
             Log.LogInfo("Activate: main window opened.");
-            return;
+            return true;
         }
 
-        BringWindowForward();
+        return BringWindowForward();
+    }
+
+    /// <summary>
+    /// Brings the app forward for a launch's <paramref name="request"/>, on the UI thread, and answers it as one job. A stopping app
+    /// answers <c>closing</c>; a request the server already abandoned raises nothing; otherwise the answer comes after the window
+    /// is forward: <c>opened</c> when one was raised or built, <c>refused</c> when none was or raising it threw.
+    /// </summary>
+    /// <returns>True when a window was raised or built for the request.</returns>
+    internal bool ActivateRequested(InstanceRequest request)
+    {
+        if (!_policy.MayOpenWindows)
+        {
+            request.Complete(InstanceReply.Closing);
+            Log.LogInfo("Activate: the app is closing; answered closing.");
+            return false;
+        }
+
+        if (!request.TryBegin())
+        {
+            Log.LogInfo("Activate: abandoned before the app took it; bringing nothing forward.");
+            return false;
+        }
+
+        bool forward = false;
+        try
+        {
+            forward = BringAppForward();
+        }
+        // A job on the UI thread must not end the loop, and the launcher waits for this answer.
+        catch (Exception exception)
+        {
+            Log.LogError("Activate: could not bring a window forward.", exception);
+        }
+
+        request.Complete(forward ? InstanceReply.Opened : InstanceReply.Refused);
+        return forward;
     }
 
     /// <summary>
@@ -736,23 +773,28 @@ public partial class App : Application
         stop?.Invoke();
     }
 
-    /// <summary>Brings the main window forward, or with no main window open the most recently active viewer window.</summary>
-    private void BringWindowForward()
+    /// <summary>
+    /// Brings the main window forward, or with no main window open the most recently active viewer window; false when there is
+    /// neither.
+    /// </summary>
+    private bool BringWindowForward()
     {
         if (_main is { } main)
         {
             Raise(main.Composition.Window);
             Log.LogInfo("Activate: main window brought forward.");
+            return true;
         }
-        else if (_viewers.Count > 0)
+
+        if (_viewers.Count > 0)
         {
             Raise(_viewers.MaxBy(viewer => viewer.ActivatedAt)!.Composition.Window);
             Log.LogInfo("Activate: viewer window brought forward.");
+            return true;
         }
-        else
-        {
-            Log.LogInfo("Activate: no main window to bring forward.");
-        }
+
+        Log.LogInfo("Activate: no main window to bring forward.");
+        return false;
     }
 
     private static void Raise(Window window)

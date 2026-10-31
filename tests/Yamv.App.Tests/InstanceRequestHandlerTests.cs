@@ -20,7 +20,11 @@ public sealed class InstanceRequestHandlerTests : IDisposable
         _post = _posted.Enqueue;
         var handler = new InstanceRequestHandler(
             job => _post(job),
-            () => Interlocked.Increment(ref _activated),
+            request =>
+            {
+                Interlocked.Increment(ref _activated);
+                return _take(request);
+            },
             (files, request) =>
             {
                 _opened.Enqueue((files, request));
@@ -40,7 +44,7 @@ public sealed class InstanceRequestHandlerTests : IDisposable
     public void Dispose() => _server.Dispose();
 
     [Fact]
-    public async Task ReadinessLine_IsWrittenOnceForTheFirstOpenRequestTheAppTakes()
+    public async Task ReadinessLine_IsWrittenOnceForTheFirstRequestTheAppTakes()
     {
         _post = job => job();
         _take = request =>
@@ -49,7 +53,7 @@ public sealed class InstanceRequestHandlerTests : IDisposable
             return false;
         };
         Assert.Equal(InstanceRequestOutcome.Closing, await _server.SendOpenAsync([Path.Combine(Path.GetTempPath(), "yamv-closing.md")]));
-        Assert.DoesNotContain(_log.Entries, entry => entry.Message.Contains("first open request", StringComparison.Ordinal));
+        Assert.DoesNotContain(_log.Entries, entry => entry.Message.Contains("first request", StringComparison.Ordinal));
 
         // Each take sets the uptime its own readiness line would read: the handler runs one request at a time, so the second
         // take comes after the first request's line, whenever the launch hears its reply.
@@ -66,8 +70,8 @@ public sealed class InstanceRequestHandlerTests : IDisposable
         Assert.Equal(InstanceRequestOutcome.Confirmed, await _server.SendOpenAsync([Path.Combine(Path.GetTempPath(), "yamv-second.md")]));
 
         Assert.Equal(3, _opened.Count);
-        LogEntry line = Assert.Single(_log.Entries, entry => entry.Message.Contains("first open request", StringComparison.Ordinal));
-        Assert.Equal("Instance server: the UI thread took its first open request 2345 ms after the process started.", line.Message);
+        LogEntry line = Assert.Single(_log.Entries, entry => entry.Message.Contains("first request", StringComparison.Ordinal));
+        Assert.Equal("Instance server: the UI thread took its first request 2345 ms after the process started.", line.Message);
     }
 
     [Fact]
@@ -84,7 +88,7 @@ public sealed class InstanceRequestHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task UnknownMessageWithReply_IsRefused()
+    public async Task UnknownMessage_IsRefused()
     {
         InstanceRequestOutcome outcome = await _server.SendAsync("frobnicate");
 
@@ -94,7 +98,7 @@ public sealed class InstanceRequestHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task Activate_NeedsNoReplyAndPostsOneJob()
+    public async Task Activate_PostsOneJobAndTheUiThreadAnswersIt()
     {
         var posted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _post = job =>
@@ -102,25 +106,60 @@ public sealed class InstanceRequestHandlerTests : IDisposable
             _posted.Enqueue(job);
             posted.TrySetResult();
         };
+        _take = TakeAndConfirm;
 
-        bool delivered = await InstanceCoordinator.SignalAsync(
-            _server.LockPath,
-            InstanceMessages.Activate,
-            TestInstanceServer.HangGuard,
-            _log,
-            TestContext.Current.CancellationToken
-        );
-
-        Assert.True(delivered);
+        Task<InstanceRequestOutcome> activate = _server.SendAsync(InstanceMessages.Activate);
         await posted.Task.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken);
 
         // The activate runs only when the UI thread runs its job, never on the server's pool thread.
         Assert.Equal(0, Volatile.Read(ref _activated));
+        Assert.False(activate.IsCompleted);
         Assert.True(_posted.TryDequeue(out Action? job));
         job!();
         Assert.Equal(1, Volatile.Read(ref _activated));
         Assert.Empty(_posted);
+        Assert.Equal(InstanceRequestOutcome.Confirmed, await activate.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken));
         Assert.DoesNotContain(_log.Entries, entry => entry.Message.StartsWith("Instance server: refusing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_failed_post_of_an_activate_answers_refused()
+    {
+        _post = _ => throw new InvalidOperationException("The dispatcher has shut down.");
+
+        InstanceRequestOutcome outcome = await _server.SendAsync(InstanceMessages.Activate);
+
+        Assert.Equal(InstanceRequestOutcome.Refused, outcome);
+        Assert.Equal(0, Volatile.Read(ref _activated));
+        LogEntry error = Assert.Single(_log.Entries, entry => entry.Level == "error");
+        Assert.Equal("Instance server: could not hand an activate to the UI thread; refusing it.", error.Message);
+        Assert.IsType<InvalidOperationException>(error.Exception);
+    }
+
+    [Fact]
+    public async Task The_readiness_line_counts_a_first_activate()
+    {
+        _post = job => job();
+        int taken = 0;
+        _take = request =>
+        {
+            _uptimeMs = ++taken == 1 ? 4567 : 9999;
+            return TakeAndConfirm(request);
+        };
+
+        Assert.Equal(InstanceRequestOutcome.Confirmed, await _server.SendAsync(InstanceMessages.Activate));
+        // The handler runs one request at a time, so the second comes after the first request's line, whenever the launch heard its reply.
+        Assert.Equal(InstanceRequestOutcome.Confirmed, await _server.SendOpenAsync([Path.Combine(Path.GetTempPath(), "yamv-next.md")]));
+
+        LogEntry line = Assert.Single(_log.Entries, entry => entry.Message.Contains("first request", StringComparison.Ordinal));
+        Assert.Equal("Instance server: the UI thread took its first request 4567 ms after the process started.", line.Message);
+    }
+
+    private static bool TakeAndConfirm(InstanceRequest request)
+    {
+        Assert.True(request.TryBegin());
+        request.Complete(InstanceReply.Opened);
+        return true;
     }
 
     [Fact]

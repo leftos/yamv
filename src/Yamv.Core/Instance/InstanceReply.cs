@@ -1,12 +1,17 @@
 namespace Yamv.Core.Instance;
 
-/// <summary>The server's one reply to a request that expects one, written on the request's own connection.</summary>
+/// <summary>The server's one reply to a request, written on the request's own connection.</summary>
 public enum InstanceReply
 {
-    /// <summary>The app took the request and is opening it; it never means the window has shown. The launcher exits 0.</summary>
+    /// <summary>
+    /// The launcher exits 0. For an <c>open</c>, the app took the request and is opening it, which never means the window has shown;
+    /// for an <c>activate</c>, the app carried it out: a window came forward.
+    /// </summary>
     Opened,
 
-    /// <summary>The app will not carry the request out (a malformed payload, or it could not start opening it); exit 1.</summary>
+    /// <summary>
+    /// The app will not carry the request out (a malformed payload, it could not start opening it, or no window came forward); exit 1.
+    /// </summary>
     Refused,
 
     /// <summary>The app is stopping and abandoned the request, which it will never carry out; the launcher may send it again.</summary>

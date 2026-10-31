@@ -16,23 +16,34 @@ public sealed class ProgramLaunchTests
     [InlineData(SecondLaunchOutcome.Failed, 1)]
     public void NoFiles_AsksTheAppToComeForward(SecondLaunchOutcome outcome, int? exitCode)
     {
-        int? result = Run([], outcome, SecondLaunchResult.Opened);
+        SecondLaunchFailure? failure = outcome == SecondLaunchOutcome.Failed ? SecondLaunchFailure.NotResponding : null;
+
+        int? result = Run([], new SecondLaunchResult(outcome, failure), SecondLaunchResult.Opened);
 
         Assert.Equal(exitCode, result);
         Assert.Equal(["activate"], _calls);
     }
 
     [Fact]
+    public void NoFiles_NothingBroughtForward_LogTheReasonAndExit1()
+    {
+        int? result = Run([], SecondLaunchResult.Failed(SecondLaunchFailure.Refused), SecondLaunchResult.Opened);
+
+        Assert.Equal(1, result);
+        Assert.Contains(_log.Entries, entry => entry.Message == "Second launch: the app did not bring a window forward (Refused); exiting 1.");
+    }
+
+    [Fact]
     public void Files_OpenedByTheApp_Exit0()
     {
-        Assert.Equal(0, Run([@"C:\docs\a.md"], SecondLaunchOutcome.Activated, SecondLaunchResult.Opened));
+        Assert.Equal(0, Run([@"C:\docs\a.md"], SecondLaunchResult.Activated, SecondLaunchResult.Opened));
         Assert.Equal(["open"], _calls);
     }
 
     [Fact]
     public void Files_WhenTheAppHasExited_RunAsTheApp()
     {
-        Assert.Null(Run([@"C:\docs\a.md"], SecondLaunchOutcome.Activated, SecondLaunchResult.BecameMain));
+        Assert.Null(Run([@"C:\docs\a.md"], SecondLaunchResult.Activated, SecondLaunchResult.BecameMain));
         Assert.Equal(["open"], _calls);
     }
 
@@ -41,7 +52,7 @@ public sealed class ProgramLaunchTests
     {
         int? result = Run(
             [@"C:\docs\a.md", @"C:\docs\b.md"],
-            SecondLaunchOutcome.Activated,
+            SecondLaunchResult.Activated,
             SecondLaunchResult.Failed(SecondLaunchFailure.NotResponding)
         );
 
@@ -117,7 +128,7 @@ public sealed class ProgramLaunchTests
         Assert.Equal("Instance server: finishing the stop failed.", error.Message);
     }
 
-    private int? Run(IReadOnlyList<string> files, SecondLaunchOutcome activated, SecondLaunchResult opened) =>
+    private int? Run(IReadOnlyList<string> files, SecondLaunchResult activated, SecondLaunchResult opened) =>
         Program.RunSecondLaunch(
             files,
             () =>
