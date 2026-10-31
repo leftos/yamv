@@ -8,14 +8,10 @@
 - [ ] YAMV-100 Window placement: fit the saved window by its frame, not its client size
 - [ ] YAMV-91 Log an exception that escapes a UI handler instead of ending the app silently
 
-### Features (12/28 done)
-- [ ] YAMV-50 Content width step: scrollbar in the pane measure, other instances, steps during a render
-- [ ] YAMV-79 Content-width popover follows a window resize while open
-- [ ] YAMV-93 Content-width popover: a store exception on a read, Reset or Clear all gets the save's recovery
+### Features (17/28 done)
+- [/] YAMV-50 Content width step: scrollbar in the pane measure, other instances, steps during a render
 - [ ] YAMV-56 Width popover: preview an unreachable width on an example document, with a toast
-- [ ] YAMV-94 Content-width popover: re-show the segment when a save finds another window already changed it
 - [ ] YAMV-81 Tail switch: the view follows text appended to a document
-- [ ] YAMV-98 Strip control and format characters from document text in log lines
 - [ ] YAMV-103 Open a clicked web or mail link off the UI thread
 - [ ] YAMV-99 macOS: pin the default-app handler by the checked type when a link opens a file
 - [ ] YAMV-104 A link to the shown document under another path spelling scrolls it instead of adding a row
@@ -24,7 +20,6 @@
 - [ ] YAMV-109 Check file drops on a real desktop and on the Mac
 - [ ] YAMV-110 File drops: area and svg links, toast cards, a dead drag source, screen edges
 - [ ] YAMV-111 Reveal starts explorer.exe by a bare name; confirm card title and macOS launch wording
-- [ ] YAMV-112 Confirm card: a program twin behind an extension with a space; Esc with focus in the page
 
 ### Document read and panes (3/13 done)
 - [ ] YAMV-38 Missing and can't-read panes: keep the old page hidden until a recovered document's page is shown
@@ -59,17 +54,17 @@
 - [ ] YAMV-83 Settings writer: write only the changed field; close the watcher's stale-read window
 - [ ] YAMV-59 Width and settings stores: cross-process lock; settings store id and appearance checks
 
+### No milestone
+- [ ] YAMV-117 Content width: chain a failed send's restore; a reconcile spares a live drag preview
+
 ## Single instance
 
 - [/] YAMV-54 Single instance: every window in one process; file launches open viewer windows in it
   - [ ] YAMV-66 Merge feat/single-instance to main (#2)
   - [ ] YAMV-96 Instance channel: TimeProvider seam in SignalAsync; tests wait on events, not wall clock
   - [ ] YAMV-102 Check the theme window's native owner change on a real desktop (Windows hidden desktop, macOS)
-  - [ ] YAMV-108 A window raised from minimized keeps its maximized state
-
-## Ship v1
-
-- [ ] YAMV-14 Docs: CHANGELOG Unreleased for v1
+  - [ ] YAMV-115 Check 54-C on the Mac and with a real UAC launch
+- [ ] YAMV-113 Elevated instance pipe: check reach when admin objects are owned by their creator
 
 ## Backlog
 
@@ -86,3 +81,4 @@
 - [ ] YAMV-57 Core: one shared atomic-file helper for the five temp-then-replace stores
 - [ ] YAMV-61 Make the format command and the hook agree on .axaml
 - [ ] YAMV-87 Boil settled mocks down to a decision record and a rebuild recipe
+- [ ] YAMV-114 Split DocumentWindowViewModel.Sync and the page keydown handler under the complexity limit
