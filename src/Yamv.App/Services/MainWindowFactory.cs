@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Yamv.App.Controls;
+using Yamv.App.Platform;
 using Yamv.App.ViewModels;
 using Yamv.App.Views;
 using Yamv.Core;
@@ -134,7 +135,7 @@ public static class MainWindowFactory
                 DropOverlayWhenShown = DevDropOverlayAsked(),
                 ConfirmCardWhenShown = DevConfirmCardAsked(),
             };
-            RestoreLayout(window, session);
+            RestoreLayout(window, session, log);
             var saver = new MainWindowSession(window, viewModel, store, TimeProvider.System, log);
             return new MainWindowComposition(window, viewModel, bridge, view, saver);
         }
@@ -233,8 +234,12 @@ public static class MainWindowFactory
     /// the screens' working areas in physical pixels, the primary screen first. With no saved bounds, or no screens known, the
     /// window keeps Avalonia's default placement.
     /// </summary>
-    internal static void RestoreLayout(MainWindow window, SessionState session)
+    /// <param name="window">The window to place.</param>
+    /// <param name="session">The saved session.</param>
+    /// <param name="log">Where a failed frame measurement is reported.</param>
+    internal static void RestoreLayout(MainWindow window, SessionState session, IAppLog log)
     {
+        ArgumentNullException.ThrowIfNull(log);
         window.SidebarWidth = session.SidebarWidth;
         if (session.Window is not { } saved || window.Screens is not { } screens)
         {
@@ -255,7 +260,31 @@ public static class MainWindowFactory
         ];
         if (areas.Count > 0)
         {
-            window.RestoreBounds(WindowPlacement.Fit(saved, areas));
+            bool warned = false;
+            window.RestoreBounds(WindowPlacement.Fit(saved, areas, FrameAt));
+
+            // On Windows the client starts just right of and level with the outer rectangle's corner, with a 1 px visible
+            // outline along its left, right and bottom; on macOS under the full-size content view it starts at the corner.
+            WindowFrame FrameAt(double scaling)
+            {
+                if (!OperatingSystem.IsWindows())
+                {
+                    return WindowFrame.None;
+                }
+
+                if (WindowsFrame.At(scaling, out int error) is { } frame)
+                {
+                    return frame;
+                }
+
+                if (!warned)
+                {
+                    log.LogWarning($"Window placement: AdjustWindowRectExForDpi failed (error {error}); using an 8 px border.");
+                    warned = true;
+                }
+
+                return new WindowFrame(ClientLeft: Math.Round(8 * scaling), ClientTop: 0, Outline: 1);
+            }
         }
     }
 

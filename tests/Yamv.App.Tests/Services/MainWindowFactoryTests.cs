@@ -21,7 +21,7 @@ public sealed class MainWindowFactoryTests
         {
             var window = new MainWindow();
 
-            MainWindowFactory.RestoreLayout(window, new SessionState { SidebarWidth = 360 });
+            MainWindowFactory.RestoreLayout(window, new SessionState { SidebarWidth = 360 }, new RecordingAppLog());
 
             Assert.Equal(360, window.SidebarWidth);
         });

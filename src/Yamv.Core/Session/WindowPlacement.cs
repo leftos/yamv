@@ -15,14 +15,19 @@ public static class WindowPlacement
     /// The rectangle to restore <paramref name="saved"/> as. Its physical pixels (its device-independent pixels times its
     /// <see cref="WindowBounds.Scaling"/>) are shrunk when larger than, then moved inside, the working area they overlap most
     /// (ties and no overlap go to the first area given); the result is in that screen's device-independent pixels, with its
-    /// scaling. <see cref="WindowBounds.IsMaximized"/> is kept.
+    /// scaling. The client and the visible outline drawn along its left, right and bottom edges are what move inside the
+    /// area: <paramref name="frameAt"/> says where the client begins inside the outer rectangle and how wide that outline is,
+    /// and it is read at <see cref="WindowBounds.Scaling"/> for the rectangle as it was saved and at the area's scaling for
+    /// where it lands. <see cref="WindowBounds.IsMaximized"/> is kept.
     /// </summary>
     /// <param name="saved">The saved rectangle.</param>
     /// <param name="workingAreas">The screens' working areas, the primary screen first; with none, <paramref name="saved"/> is returned.</param>
-    public static WindowBounds Fit(WindowBounds saved, IReadOnlyList<ScreenArea> workingAreas)
+    /// <param name="frameAt">The window's frame at a scaling, in physical pixels; <see cref="WindowFrame.None"/> for none.</param>
+    public static WindowBounds Fit(WindowBounds saved, IReadOnlyList<ScreenArea> workingAreas, Func<double, WindowFrame> frameAt)
     {
         ArgumentNullException.ThrowIfNull(saved);
         ArgumentNullException.ThrowIfNull(workingAreas);
+        ArgumentNullException.ThrowIfNull(frameAt);
         if (workingAreas.Count == 0)
         {
             return saved;
@@ -30,14 +35,18 @@ public static class WindowPlacement
 
         var pixels = new ScreenArea(saved.X * saved.Scaling, saved.Y * saved.Scaling, saved.Width * saved.Scaling, saved.Height * saved.Scaling, 1);
         ScreenArea area = workingAreas[TargetArea(pixels, workingAreas)];
-        double width = Math.Min(pixels.Width, area.Width);
-        double height = Math.Min(pixels.Height, area.Height);
-        double x = Math.Clamp(pixels.X, area.X, area.X + area.Width - width);
-        double y = Math.Clamp(pixels.Y, area.Y, area.Y + area.Height - height);
+        WindowFrame savedFrame = frameAt(saved.Scaling);
+        WindowFrame areaFrame = frameAt(area.Scaling);
+        double width = Math.Min(pixels.Width, area.Width - (2 * areaFrame.Outline));
+        double height = Math.Min(pixels.Height, area.Height - areaFrame.Outline);
+        double visibleWidth = width + (2 * areaFrame.Outline);
+        double visibleHeight = height + areaFrame.Outline;
+        double visibleX = Math.Clamp(pixels.X + savedFrame.ClientLeft - savedFrame.Outline, area.X, area.X + area.Width - visibleWidth);
+        double visibleY = Math.Clamp(pixels.Y + savedFrame.ClientTop, area.Y, area.Y + area.Height - visibleHeight);
         return saved with
         {
-            X = x / area.Scaling,
-            Y = y / area.Scaling,
+            X = (visibleX + areaFrame.Outline - areaFrame.ClientLeft) / area.Scaling,
+            Y = (visibleY - areaFrame.ClientTop) / area.Scaling,
             Width = width / area.Scaling,
             Height = height / area.Scaling,
             Scaling = area.Scaling,

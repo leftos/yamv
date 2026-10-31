@@ -14,6 +14,14 @@ What unit each Avalonia window and screen value is in, on Windows and on macOS, 
 | `RenderScaling` | Monitor DPI / 96, updated on `WM_DPICHANGED` and on every `Position` set. `WindowImpl.cs#L254` | The backing scale factor: 2 on a Retina screen. `TopLevelImpl.cs#L99`, `#L136` |
 | `DesktopScaling` | Equal to `RenderScaling`. `WindowImpl.cs#L256` | Always 1. `TopLevelImpl.cs#L116` |
 
+Before the first show, Windows' `FrameSize` is the window's default frame with its caption (16 × 39 DIPs more than `ClientSize` at 96 dpi), so it is no measure of YAMV's frame there. After the show, YAMV's extended client area leaves 8 / 0 / 8 / 8 px (left, top, right, bottom) between the outer rectangle and the client at 96 dpi, of which 7 px each on the left, right and bottom is an invisible resize border and 1 px the visible outline; there is none on top. The borders are `AdjustWindowRectExForDpi`'s for the window style, which Avalonia's `WM_NCCALCSIZE` uses with the top zeroed, and do not scale linearly:
+
+| Scaling | 1.0 | 1.25 | 1.5 | 1.75 | 2.0 |
+|---|---|---|---|---|---|
+| Left, right and bottom border (px) | 8 | 9 | 11 | 12 | 13 |
+
+Only the 96 dpi outline of 1 px is measured on a shown window; the other columns are the API's numbers.
+
 `Window.DesktopScaling` is `DesktopScalingOverride ?? PlatformImpl.DesktopScaling ?? 1` (`AV/src/Avalonia.Controls/WindowBase.cs#L135`). Before the first show with `WindowStartupLocation.Manual`, the override is the scaling of the screen under `Position` (`AV/src/Avalonia.Controls/Window.cs#L1271-L1272`); it is cleared after the show (`#L1058`).
 
 ## Converting
@@ -34,7 +42,7 @@ What unit each Avalonia window and screen value is in, on Windows and on macOS, 
 
 - `src/Yamv.Core/Session/WindowBounds.cs` holds `X`, `Y`, `Width`, `Height` in DIPs of the screen it was measured on, and that screen's `Scaling`: `X * Scaling` is the physical position.
 - Save: `MainWindow.UpdateBounds` (`src/Yamv.App/Views/MainWindow.axaml.cs`), on a position, size or state change, only in the normal state: the scaling is `Screens.ScreenFromWindow(this)?.Scaling`, falling back to `DesktopScaling` (the same unit); `X` and `Y` are `Position` divided by it, `Width` and `Height` are `ClientSize`.
-- Restore: `MainWindowFactory.RestoreLayout` builds one `ScreenArea` per screen from `WorkingArea` and `Scaling`, and `WindowPlacement.Fit` (`src/Yamv.Core/Session/WindowPlacement.cs`) turns the saved DIPs into physical pixels with the saved scaling, clamps the rectangle into the working area it overlaps most, and divides by that area's scaling.
-- Apply: `MainWindow.RestoreBounds` sets `WindowStartupLocation.Manual`, then `Position` (DIPs × scaling, rounded), then `Width` and `Height`, then maximizes when the saved state was maximized.
+- Restore: `MainWindowFactory.RestoreLayout` builds one `ScreenArea` per screen from `WorkingArea` and `Scaling`, and `WindowPlacement.Fit` (`src/Yamv.Core/Session/WindowPlacement.cs`) turns the saved DIPs into physical pixels with the saved scaling, clamps the rectangle into the working area it overlaps most, and divides by that area's scaling. The clamp is on the client plus its visible outline, by the window's frame (`WindowFrame`: `ClientLeft`, `ClientTop`, `Outline`, in physical pixels at one scaling) that `Fit` asks for per scaling: the saved rectangle is read with the frame at its saved scaling and placed with the frame at the area's. On Windows `MainWindowFactory.RestoreLayout` gets it from `src/Yamv.App/Platform/WindowsFrame.cs`, because `FrameSize` is the default frame before the show; on macOS it passes `WindowFrame.None`, unmeasured there.
+- Apply: `MainWindow.RestoreBounds` sets `WindowStartupLocation.Manual`, then `Position` (DIPs × scaling, rounded), then `Width` and `Height` (which take effect only at the show), then maximizes when the saved state was maximized.
 
-The fit clamps the client size, while `Position` is the outer frame's corner, so a window saved against the right or bottom edge can come back overhanging the working area by its frame (YAMV-100).
+A window pushed back on screen lands with its 1 px outline flush with the working area's edges and the taskbar, as Windows' own snap places it: pushed to the left, its client sits 1 px in from the edge (the invisible resize border is off screen); pushed to the bottom right, its outline ends on the last row and column. One larger than the area is shrunk to leave room for the outline. A window already inside the area keeps its place, so a window the user left flush round-trips unchanged.
