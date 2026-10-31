@@ -8,6 +8,8 @@ public sealed class ThemeCatalogTests : IDisposable
 {
     private const string ValidTheme = """{ "name": "Mine", "light": { "tokens": { "accent": "#123456" } } }""";
 
+    private const string InvalidTheme = """{ "light": { "tokens": { "accent": "#12" } } }""";
+
     private const string SizeError = "The file is larger than 1 MB; a theme file is a few KB.";
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "yamv-themes-" + Guid.NewGuid().ToString("N"));
@@ -93,6 +95,76 @@ public sealed class ThemeCatalogTests : IDisposable
         Assert.Null(broken.Result.Theme);
         Assert.Equal("Token 'accent' in light: '#12' is not a colour (#rgb, #rrggbb or #rrggbbaa).", Assert.Single(broken.Result.Errors));
         Assert.Contains(_log.Entries, entry => entry.Level == "warning" && entry.Message.Contains("broken", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void An_invalid_file_is_reported_once_across_reloads()
+    {
+        WriteUserFile("broken", InvalidTheme);
+        ThemeCatalog catalog = CreateCatalog();
+
+        catalog.LoadAll();
+        catalog.LoadAll();
+
+        Assert.Equal(1, InvalidReports());
+        Assert.Single(_log.Entries);
+    }
+
+    [Fact]
+    public void An_invalid_file_is_reported_again_when_its_content_changes()
+    {
+        WriteUserFile("broken", InvalidTheme);
+        ThemeCatalog catalog = CreateCatalog();
+        catalog.LoadAll();
+
+        WriteUserFile("broken", """{ "name": "Broken", "light": { "tokens": { "accent": "#12" } } }""");
+        catalog.LoadAll();
+
+        Assert.Equal(2, InvalidReports());
+    }
+
+    [Fact]
+    public void A_file_that_turns_valid_then_invalid_again_is_reported_again()
+    {
+        WriteUserFile("mine", InvalidTheme);
+        ThemeCatalog catalog = CreateCatalog();
+        catalog.LoadAll();
+
+        WriteUserFile("mine", ValidTheme);
+        catalog.LoadAll();
+
+        WriteUserFile("mine", InvalidTheme);
+        catalog.LoadAll();
+
+        Assert.Equal(2, InvalidReports());
+    }
+
+    [Fact]
+    public void Warnings_of_an_unchanged_file_are_logged_once()
+    {
+        WriteUserFile("mine", """{ "name": "Mine", "extra": 1, "light": {} }""");
+        ThemeCatalog catalog = CreateCatalog();
+
+        catalog.LoadAll();
+        catalog.LoadAll();
+
+        Assert.Single(_log.Entries, entry => entry.Level == "warning" && entry.Message.Contains("Unknown field 'extra'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_deleted_then_restored_invalid_file_is_reported_again()
+    {
+        string path = WriteUserFile("broken", InvalidTheme);
+        ThemeCatalog catalog = CreateCatalog();
+        catalog.LoadAll();
+
+        File.Delete(path);
+        catalog.LoadAll();
+
+        WriteUserFile("broken", InvalidTheme);
+        catalog.LoadAll();
+
+        Assert.Equal(2, InvalidReports());
     }
 
     [Fact]
@@ -1002,6 +1074,9 @@ public sealed class ThemeCatalogTests : IDisposable
 
         public void MoveToTrash(string path) => Paths.Add(path);
     }
+
+    private int InvalidReports() =>
+        _log.Entries.Count(entry => entry.Level == "warning" && entry.Message.Contains(" is invalid: ", StringComparison.Ordinal));
 
     private string[] UserFileNames() => [.. Directory.GetFiles(UserFolder).Select(path => Path.GetFileName(path)).Order(StringComparer.Ordinal)];
 }

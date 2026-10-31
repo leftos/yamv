@@ -51,6 +51,12 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
 
     public string UserFolder { get; } = userFolder;
 
+    /// <summary>The text a user theme file was last reported invalid or warning with, by full path, so a bad streak logs once.</summary>
+    private readonly Dictionary<string, string> reportedBadText = new(StringComparer.Ordinal);
+
+    /// <summary>Guards <see cref="reportedBadText"/>.</summary>
+    private readonly Lock reportedBadTextGate = new();
+
     /// <summary>
     /// The built-in themes, then the user themes sorted by name. A valid user theme whose id matches a built-in one replaces it;
     /// an invalid one is listed beside the built-in. Invalid themes are listed with their errors. Ids can repeat: an invalid user
@@ -597,8 +603,10 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
     private List<ThemeEntry> LoadUserThemes()
     {
         var entries = new List<ThemeEntry>();
+        var present = new HashSet<string>(StringComparer.Ordinal);
         if (!Directory.Exists(UserFolder))
         {
+            ForgetReportedFilesExcept(present);
             return entries;
         }
 
@@ -618,31 +626,37 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
             return entries;
         }
 
+        present.UnionWith(paths);
         foreach (string path in paths)
         {
             string id = ThemeIds.FromFileName(path);
-            ThemeLoadResult? result = LoadUserFile(id, path);
+            (ThemeLoadResult? result, string? text) = LoadUserFile(id, path);
             if (result is null)
             {
                 continue;
             }
 
-            Report(id, path, result);
+            ReportUserFile(id, path, result, text);
             entries.Add(new ThemeEntry(id, ThemeSource.User, path, result));
         }
 
+        ForgetReportedFilesExcept(present);
         return entries;
     }
 
-    /// <summary>The outcome of reading the user file at <paramref name="path"/>, or null when it went away before it could be read.</summary>
-    private ThemeLoadResult? LoadUserFile(string id, string path)
+    /// <summary>
+    /// The outcome of reading the user file at <paramref name="path"/>, or null when it went away before it could be read, with the
+    /// text it was read from for <see cref="ReportUserFile"/>, null when it was not read.
+    /// </summary>
+    private (ThemeLoadResult? Result, string? Text) LoadUserFile(string id, string path)
     {
         if (ThemeIds.IsDeviceName(id))
         {
-            return new ThemeLoadResult(null, [$"\"{Path.GetFileName(path)}\" uses a name Windows reserves for a device; rename the file."], []);
+            var device = new ThemeLoadResult(null, [$"\"{Path.GetFileName(path)}\" uses a name Windows reserves for a device; rename the file."], []);
+            return (device, null);
         }
 
-        return ThemeIds.IsValid(id) ? ReadUserTheme(id, path) : new ThemeLoadResult(null, [NoUsableIdError(path)], []);
+        return ThemeIds.IsValid(id) ? ReadUserTheme(id, path) : (new ThemeLoadResult(null, [NoUsableIdError(path)], []), null);
     }
 
     /// <summary>Deletes the temporary files in the user folder that are older than <see cref="StaleTemporaryAge"/>.</summary>
@@ -698,32 +712,36 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         }
     }
 
-    /// <summary>The parsed user file at <paramref name="path"/>, or null when it went away before it could be read.</summary>
-    private ThemeLoadResult? ReadUserTheme(string id, string path)
+    /// <summary>
+    /// The parsed user file at <paramref name="path"/>, or null when it went away before it could be read, with the text it was
+    /// read from, null when it could not be read at all.
+    /// </summary>
+    private (ThemeLoadResult? Result, string? Text) ReadUserTheme(string id, string path)
     {
         try
         {
-            return ThemeParser.Parse(ReadShared(path).Text, id, ThemeSource.User, path);
+            string text = ReadShared(path).Text;
+            return (ThemeParser.Parse(text, id, ThemeSource.User, path), text);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             log.LogInfo($"The theme file {path} went away while it was being read; skipping it.");
-            return null;
+            return (null, null);
         }
         catch (ThemeFileTooLargeException exception)
         {
             log.LogWarning($"Cannot read the theme file {path}: it is larger than {MaxFileSizeText}.", exception);
-            return new ThemeLoadResult(null, [$"The file cannot be read: {exception.Message}"], []);
+            return (new ThemeLoadResult(null, [$"The file cannot be read: {exception.Message}"], []), null);
         }
         catch (IOException exception)
         {
             log.LogError($"Cannot read the theme file {path}.", exception);
-            return new ThemeLoadResult(null, [$"The file cannot be read: {exception.Message}"], []);
+            return (new ThemeLoadResult(null, [$"The file cannot be read: {exception.Message}"], []), null);
         }
         catch (UnauthorizedAccessException exception)
         {
             log.LogError($"Cannot read the theme file {path}.", exception);
-            return new ThemeLoadResult(null, [$"The file cannot be read: {exception.Message}"], []);
+            return (new ThemeLoadResult(null, [$"The file cannot be read: {exception.Message}"], []), null);
         }
     }
 
@@ -737,6 +755,55 @@ public sealed partial class ThemeCatalog(string userFolder, IAppLog log)
         if (result.Theme is null)
         {
             log.LogWarning($"Theme '{id}' ({where}) is invalid: {string.Join(" ", result.Errors)}");
+        }
+    }
+
+    /// <summary>
+    /// Reports the load of the user file at <paramref name="path"/>, unless it was already reported with the same text: a file that
+    /// stays invalid, or keeps warning, is logged once until its content changes or it loads clean again. <paramref name="text"/> is
+    /// null when the file could not be read, which is reported every time.
+    /// </summary>
+    private void ReportUserFile(string id, string path, ThemeLoadResult result, string? text)
+    {
+        bool bad = result.Theme is null || result.Warnings.Count > 0;
+        if (text is null || !bad)
+        {
+            ForgetReportedFile(path);
+            Report(id, path, result);
+            return;
+        }
+
+        lock (reportedBadTextGate)
+        {
+            if (reportedBadText.TryGetValue(path, out string? reported) && string.Equals(reported, text, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            reportedBadText[path] = text;
+        }
+
+        Report(id, path, result);
+    }
+
+    /// <summary>Forgets what <paramref name="path"/> was last reported bad with, so its next bad load is reported again.</summary>
+    private void ForgetReportedFile(string path)
+    {
+        lock (reportedBadTextGate)
+        {
+            reportedBadText.Remove(path);
+        }
+    }
+
+    /// <summary>Forgets every reported file not in <paramref name="present"/>, so one that comes back is reported again.</summary>
+    private void ForgetReportedFilesExcept(HashSet<string> present)
+    {
+        lock (reportedBadTextGate)
+        {
+            foreach (string path in reportedBadText.Keys.Where(path => !present.Contains(path)).ToList())
+            {
+                reportedBadText.Remove(path);
+            }
         }
     }
 
