@@ -44,6 +44,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Change an app-wide setting (theme, Appearance) or where it is saved | `src/Yamv.Core/Settings/SettingsStore.cs` (pattern: `src/Yamv.Core/Widths/WidthStore.cs`) → `SettingsWriter.cs` → `SettingsWatcher.cs` → `src/Yamv.App/Services/ThemeBridge.cs` (`RequestChanged`) → `src/Yamv.App/App.axaml.cs` (`CreateStartWindow`, `ApplySettingsFile`) → `Services/MainWindowFactory.cs` → `tests/Yamv.Core.Tests/Settings/` + `tests/Yamv.App.Tests/Services/ThemeBridgeTests.cs` + `AppStartupTests.cs` | |
 | Add a JSON file format | `src/Yamv.Core/Session/SessionJsonContext.cs` → `SessionStore.cs` (its `Normalize`) → `tests/Yamv.Core.Tests/Session/SessionStoreTests.cs`; `src/Yamv.Core/Widths/WidthsFile.cs` is the multi-writer example | |
 | Show a failure of a user-started action (a toast) | `src/Yamv.App/Services/IToasts.cs` → `ViewModels/ToastCenter.cs` → `ToastItem.cs` → `Views/ToastHost.axaml` + `.axaml.cs` → `Views/MainWindow.axaml` (`ToastPopup`) + `.axaml.cs` → `Platform/ToastClickThrough.cs` → `ViewModels/DocumentWindowViewModel.cs` (`Toasts`) → `Services/FileActions.cs` → `Services/MainWindowFactory.cs` → `tests/Yamv.App.Tests/Fakes/RecordingToasts.cs` + `ViewModels/ToastCenterTests.cs` + `Views/ToastHostTests.cs` | [look.md](design/look.md) |
+| Change the format command or the commit hooks | `prek.toml` → `tools/hooks/csharpier-wrapper.ps1`, `tools/hooks/dotnet-format-wrapper.ps1` → `.csharpierignore` → `CLAUDE.md` Commands |
 | Change the app log or how a log line is written | `src/Yamv.Core/Diagnostics/FileAppLog.cs` → `IAppLog.cs` (no test file covers `FileAppLog` yet; `tests/Yamv.Core.Tests/` has none under `Diagnostics/`) | |
 
 ## Layers
@@ -302,6 +303,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 
   Avalonia makes a new popup window on each open, so the subclass is detached when the popup closes (`OnToastPopupClosed`) and attached again on the next open.
 - `ThemeCatalog.LoadAll` can list two entries with one id (an invalid user file beside the built-in it shadows): look a theme up by id preferring the valid entry.
+- The title bar's ⋯ menu shares one fill for hover and `:focus-visible`, and each open focuses its first item. That holds with one entry; a second entry needs the focus to follow the pointer or a distinct focus look, or two rows highlight at once.
 
 ## Test locations
 

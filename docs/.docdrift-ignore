@@ -1,0 +1,6 @@
+# Files the app writes to its data folder at run time, never tracked in the repo
+session.json
+settings.json
+widths.json
+# An example of a reserved theme file name, in docs/design/themes.md
+con.yamv-theme.json
