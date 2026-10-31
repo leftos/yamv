@@ -7,6 +7,63 @@ public sealed class LaunchArbiterTests
     private static readonly string[] First = ["/notes/a.md"];
 
     [Fact]
+    public void Start_with_files_opens_a_viewer()
+    {
+        LaunchArbiter arbiter = new();
+
+        OpenViewerWindow viewer = Assert.IsType<OpenViewerWindow>(arbiter.Start(First));
+
+        Assert.Equal(First, viewer.Files);
+        Assert.False(arbiter.MainWindowOpen);
+        Assert.IsType<OpenMainWindow>(arbiter.ActivateRequested());
+    }
+
+    [Fact]
+    public void Start_without_files_opens_the_main_window()
+    {
+        LaunchArbiter arbiter = new();
+
+        Assert.IsType<OpenMainWindow>(arbiter.Start([]));
+
+        Assert.True(arbiter.MainWindowOpen);
+        Assert.IsType<ActivateMainWindow>(arbiter.ActivateRequested());
+    }
+
+    [Fact]
+    public void Start_never_starts_a_grace_timer()
+    {
+        LaunchArbiter withFiles = new();
+        LaunchArbiter withoutFiles = new();
+
+        Assert.IsNotType<StartGraceTimer>(withFiles.Start(First));
+        Assert.IsNotType<StartGraceTimer>(withoutFiles.Start([]));
+
+        Assert.IsType<None>(withFiles.Start(First));
+        Assert.IsType<None>(withoutFiles.FrameworkReady());
+        Assert.IsType<None>(withoutFiles.GraceElapsed());
+    }
+
+    [Fact]
+    public void MainWindowOpen_follows_open_and_close()
+    {
+        LaunchArbiter arbiter = new();
+        Assert.False(arbiter.MainWindowOpen);
+
+        arbiter.Start([]);
+        Assert.True(arbiter.MainWindowOpen);
+
+        arbiter.MainWindowClosed();
+        Assert.False(arbiter.MainWindowOpen);
+
+        Assert.IsType<OpenMainWindow>(arbiter.ActivateRequested());
+        Assert.True(arbiter.MainWindowOpen);
+
+        arbiter.MainWindowClosed();
+        arbiter.MainWindowOpened();
+        Assert.True(arbiter.MainWindowOpen);
+    }
+
+    [Fact]
     public void FrameworkReady_FreshArbiter_ReturnsStartGraceTimer()
     {
         LaunchArbiter arbiter = new();

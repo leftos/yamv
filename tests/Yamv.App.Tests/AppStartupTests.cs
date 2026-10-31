@@ -62,9 +62,10 @@ public sealed class AppStartupTests
             Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, dataFolder);
             Environment.SetEnvironmentVariable(App.HarnessVariable, null);
             App app = Assert.IsType<App>(Application.Current);
+            using var opened = new OpenedMainWindows();
             try
             {
-                Window window = app.CreateStartWindow();
+                Window? window = app.CreateStartWindow();
 
                 MainWindow main = Assert.IsType<MainWindow>(window);
                 DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(main.DataContext);
@@ -95,9 +96,10 @@ public sealed class AppStartupTests
             Environment.SetEnvironmentVariable(App.HarnessVariable, "1");
             Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, "1");
             App app = Assert.IsType<App>(Application.Current);
+            using var opened = new OpenedMainWindows();
             try
             {
-                Window window = app.CreateStartWindow();
+                Window? window = app.CreateStartWindow();
 
                 ThemeSettingsWindow settings = Assert.IsType<ThemeSettingsWindow>(window);
                 ThemeSettingsViewModel viewModel = Assert.IsType<ThemeSettingsViewModel>(settings.DataContext);
@@ -130,6 +132,7 @@ public sealed class AppStartupTests
             Environment.SetEnvironmentVariable(App.HarnessVariable, "1");
             Environment.SetEnvironmentVariable(App.ThemeSettingsHarnessVariable, "1");
             App app = Assert.IsType<App>(Application.Current);
+            using var opened = new OpenedMainWindows();
             try
             {
                 InvalidOperationException refused = Assert.Throws<InvalidOperationException>(() => app.CreateStartWindow());
@@ -158,9 +161,10 @@ public sealed class AppStartupTests
             Environment.SetEnvironmentVariable(App.HarnessVariable, null);
             App.ViewerFiles = [missing];
             App app = Assert.IsType<App>(Application.Current);
+            using var opened = new OpenedMainWindows();
             try
             {
-                Window window = app.CreateStartWindow();
+                Window? window = app.CreateStartWindow();
 
                 MainWindow main = Assert.IsType<MainWindow>(window);
                 DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(main.DataContext);
@@ -202,11 +206,12 @@ public sealed class AppStartupTests
             Environment.SetEnvironmentVariable(App.WidthPopoverVariable, "bogus");
             App.ViewerFiles = [Path.Combine(Path.GetTempPath(), "yamv-gone-" + Guid.NewGuid().ToString("N") + ".md")];
             App app = Assert.IsType<App>(Application.Current);
+            using var opened = new OpenedMainWindows();
             App.ProcessLog = new RecordingAppLog();
             app.ResetLog();
             try
             {
-                Window window = app.CreateStartWindow();
+                Window? window = app.CreateStartWindow();
 
                 MainWindow main = Assert.IsType<MainWindow>(window);
                 Assert.Equal(DevWidthPopover.None, main.WidthPopoverWhenShown);
@@ -234,6 +239,7 @@ public sealed class AppStartupTests
             Environment.SetEnvironmentVariable(App.HarnessVariable, null);
             App.ViewerFiles = [];
             App app = Assert.IsType<App>(Application.Current);
+            using var opened = new OpenedMainWindows();
             ThemeBridge? bridge = null;
             try
             {
@@ -351,24 +357,33 @@ public sealed class AppStartupTests
         });
 
     [Fact]
-    public Task MainStart_MarksTheGateReadyOnFirstOpened() =>
+    public Task No_job_reaches_the_UI_thread_before_framework_ready() =>
         Headless.Run(() =>
         {
-            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
-            Window window = start.Window;
+            var latch = new UiReadyLatch();
+            App.ReadyLatch = latch;
+            try
+            {
+                List<string> ran = [];
+                latch.Post(() => ran.Add("open"));
+                latch.Post(() => ran.Add("activate"));
+                Dispatcher.UIThread.RunJobs();
+                Assert.Empty(ran);
 
-            start.Gate.Request();
-            Dispatcher.UIThread.RunJobs();
-            Assert.Equal(0, start.BroughtForwardCount);
+                // What OnFrameworkInitializationCompleted does last: the queued jobs go to the UI thread's queue, in order.
+                App.OpenReadyLatch();
+                Assert.Empty(ran);
+                Dispatcher.UIThread.RunJobs();
+                Assert.Equal(["open", "activate"], ran);
 
-            window.Show();
-            Dispatcher.UIThread.RunJobs();
-            Assert.Equal(1, start.BroughtForwardCount);
-
-            window.Hide();
-            window.Show();
-            Dispatcher.UIThread.RunJobs();
-            Assert.Equal(1, start.BroughtForwardCount);
+                latch.Post(() => ran.Add("later"));
+                Dispatcher.UIThread.RunJobs();
+                Assert.Equal(["open", "activate", "later"], ran);
+            }
+            finally
+            {
+                App.ReadyLatch = null;
+            }
         });
 
     [Fact]
@@ -377,50 +392,179 @@ public sealed class AppStartupTests
         {
             using var start = new GateStart(viewerFiles: [], stopAnswering: null);
             Window window = start.Window;
-            window.Show();
             Dispatcher.UIThread.RunJobs();
             window.WindowState = WindowState.Minimized;
 
-            start.Gate.Request();
-            Dispatcher.UIThread.RunJobs();
+            start.App.ActivateRequested();
 
             Assert.Equal(WindowState.Normal, window.WindowState);
             Assert.Equal(1, start.BroughtForwardCount);
         });
 
     [Fact]
-    public Task Activate_WithOnlyViewersOpen_BringsTheLatestViewerForward() =>
+    public Task A_main_built_on_demand_reads_the_saved_session() =>
+        Headless.Run(() =>
+        {
+            // A missing document: the session restores it as the selection, and no web view is attached in the headless session.
+            string document = MissingFile();
+            using var start = new GateStart(viewerFiles: [MissingFile()], stopAnswering: null);
+            Window viewer = start.Window;
+            new SessionStore(start.SessionFile, start.Log).Save(
+                new SessionState
+                {
+                    OpenFiles = [document],
+                    SelectedFile = document,
+                    SidebarWidth = 333,
+                }
+            );
+            using var opened = new OpenedMainWindows();
+
+            start.App.ActivateRequested();
+
+            MainWindow main = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
+            Assert.Equal([main], opened.Windows);
+            Assert.NotSame(viewer, main);
+            Assert.True(main.IsVisible);
+            Assert.Equal(333, main.SidebarWidth);
+            DocumentWindowViewModel viewModel = Assert.IsType<DocumentWindowViewModel>(main.DataContext);
+            Assert.False(viewModel.IsEmpty);
+            Assert.True(viewModel.SelectedIsMissing);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: main window opened.");
+            Assert.Same(viewer, Assert.Single(start.App.ViewerWindows));
+        });
+
+    [Fact]
+    public Task A_start_whose_window_factory_throws_stops_and_quits() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var syncs = new ThemesSyncRecorder();
+            using var watchers = new FailingSettingsWatchers(failures: 1);
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.Quit);
+
+            Assert.Null(start.StartWindow);
+            Assert.Equal(["stop"], calls);
+            Assert.Contains(start.Log.Entries, entry => entry.Level == "error" && entry.Message == "The main window could not open.");
+
+            // Nothing the failed build made is kept: the themes sync it made is disposed, before the bridge it served.
+            Assert.Null(start.App.Bridge);
+            Assert.Null(start.App.ThemesSync);
+            Assert.Null(start.App.ThemeSettingsHost);
+            Assert.Null(start.App.SettingsWriter);
+            Assert.Null(start.App.SettingsWatcher);
+            Assert.Equal(1, syncs.Created);
+            Assert.Equal([false], syncs.BridgeDisposedAtEachDispose);
+
+            Assert.Equal(0, start.Quits);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, start.Quits);
+            Assert.Equal(["stop"], calls);
+        });
+
+    [Fact]
+    public Task A_failed_start_under_KeepRunning_lets_a_later_activate_build_the_main_window() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var watchers = new FailingSettingsWatchers(failures: 1);
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.KeepRunning);
+            Assert.Null(start.StartWindow);
+
+            start.App.ActivateRequested();
+
+            // Had the arbiter still counted the failed main as open, the activate would only have looked for a window to bring forward.
+            MainWindow main = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
+            Assert.True(main.IsVisible);
+            Assert.NotNull(start.App.SettingsWatcher);
+            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: main window opened.");
+            Assert.Empty(calls);
+            Assert.Equal(0, start.Quits);
+        });
+
+    [Fact]
+    public Task The_quit_job_does_nothing_after_the_app_exited() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.Quit);
+
+            start.Window.Close();
+            start.App.ReleaseMainWindow();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(["stop"], calls);
+            Assert.Equal(0, start.Quits);
+        });
+
+    [Fact]
+    public Task A_second_main_is_never_built_over_a_live_one() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            using var opened = new OpenedMainWindows();
+
+            Assert.Null(start.App.OpenMain());
+            start.App.ActivateRequested();
+
+            Assert.Empty(opened.Windows);
+            Assert.Same(start.Window, start.App.MainDocumentWindow);
+            Assert.Equal(1, start.BroughtForwardCount);
+        });
+
+    [Fact]
+    public Task A_main_that_fails_to_show_is_reported_closed_to_the_arbiter() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [MissingFile()], stopAnswering: null);
+            Window? failed = null;
+            using (FailingOpens(window => failed = window))
+            {
+                start.App.ActivateRequested();
+            }
+
+            Assert.NotNull(failed);
+            Assert.False(failed.IsVisible);
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Contains(start.Log.Entries, entry => entry.Level == "error" && entry.Message == "The main window could not open.");
+
+            // Had the arbiter still counted the failed main as open, this activate would only bring a window forward.
+            start.App.ActivateRequested();
+
+            MainWindow main = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
+            Assert.NotSame(failed, main);
+            Assert.True(main.IsVisible);
+        });
+
+    [Fact]
+    public Task An_activate_whose_main_fails_to_build_brings_the_most_recently_active_viewer_forward() =>
         Headless.Run(() =>
         {
             using var start = new GateStart(viewerFiles: [MissingFile()], stopAnswering: null);
             Window first = start.Window;
-            first.Show();
-            Dispatcher.UIThread.RunJobs();
             Window second = ShowViewer(start.App);
-
-            second.WindowState = WindowState.Minimized;
-            start.Gate.Request();
-            Dispatcher.UIThread.RunJobs();
-            Assert.Equal(WindowState.Normal, second.WindowState);
-
             first.Activate();
             Dispatcher.UIThread.RunJobs();
             Assert.True(first.IsActive);
             first.WindowState = WindowState.Minimized;
-            start.Gate.Request();
-            Dispatcher.UIThread.RunJobs();
+            second.WindowState = WindowState.Minimized;
+
+            using (FailingOpens(_ => { }))
+            {
+                start.App.ActivateRequested();
+            }
 
             Assert.Equal(WindowState.Normal, first.WindowState);
-            Assert.Equal(2, start.Log.Entries.Count(entry => entry.Message == "Activate: viewer window brought forward."));
-            Assert.Equal(0, start.BroughtForwardCount);
+            Assert.Equal(WindowState.Minimized, second.WindowState);
+            Assert.Contains(start.Log.Entries, entry => entry.Level == "error" && entry.Message == "The main window could not open.");
+            Assert.Single(start.Log.Entries, entry => entry.Message == "Activate: viewer window brought forward.");
+            Assert.Null(start.App.MainDocumentWindow);
         });
 
     [Fact]
-    public Task OpenViewer_TwiceMakesTwoWindowsAndOneBridge() =>
+    public Task ShowNewViewer_TwiceMakesTwoWindowsAndOneBridge() =>
         Headless.Run(() =>
         {
             using var start = new GateStart(viewerFiles: [], stopAnswering: null);
-            start.Window.Show();
             ThemeBridge bridge = start.App.Bridge!;
             int surfaces = SurfaceCount(bridge);
 
@@ -441,7 +585,6 @@ public sealed class AppStartupTests
         {
             using var requests = new OpenRequests();
             using var start = new GateStart(viewerFiles: [], stopAnswering: null);
-            start.Window.Show();
             (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([MissingFile()]);
             int shown = 0;
 
@@ -469,7 +612,6 @@ public sealed class AppStartupTests
         {
             using var requests = new OpenRequests();
             using var start = new GateStart(viewerFiles: [], stopAnswering: null);
-            start.Window.Show();
             (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([MissingFile()]);
             await Task.Run(requests.Server.Coordinator.StopAnswering, TestContext.Current.CancellationToken);
 
@@ -491,7 +633,6 @@ public sealed class AppStartupTests
         Headless.Run(() =>
         {
             using var start = new GateStart(viewerFiles: [], stopAnswering: null);
-            start.Window.Show();
             ThemeBridge bridge = start.App.Bridge!;
             int surfaces = SurfaceCount(bridge);
             Window? failed = null;
@@ -505,15 +646,7 @@ public sealed class AppStartupTests
                     }
                 }
             );
-            using (
-                Window.WindowOpenedEvent.AddClassHandler<MainWindow>(
-                    (window, _) =>
-                    {
-                        failed = window;
-                        throw new InvalidOperationException("The native window failed after it appeared.");
-                    }
-                )
-            )
+            using (FailingOpens(window => failed = window))
             {
                 start.App.ShowNewViewer([MissingFile()]);
             }
@@ -531,12 +664,125 @@ public sealed class AppStartupTests
         });
 
     [Fact]
+    public Task A_viewer_that_fails_to_show_as_the_last_window_stops_and_quits() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            Window? failed = null;
+            GateStart start;
+            using (FailingOpens(window => failed = window))
+            {
+                start = new GateStart(viewerFiles: [MissingFile()], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.Quit);
+            }
+
+            using (start)
+            {
+                Assert.Null(start.StartWindow);
+                Assert.NotNull(failed);
+                Assert.False(failed.IsVisible);
+                Assert.Empty(start.App.ViewerWindows);
+                Assert.Equal(["stop"], calls);
+                Assert.Equal(0, start.Quits);
+
+                Dispatcher.UIThread.RunJobs();
+
+                Assert.Equal(1, start.Quits);
+            }
+        });
+
+    [Fact]
+    public Task Each_window_removal_applies_the_policy_once() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.Quit);
+            Window viewer = ShowViewer(start.App);
+            using (FailingOpens(_ => { }))
+            {
+                start.App.ShowNewViewer([MissingFile()]);
+            }
+
+            viewer.Close();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(calls);
+            Assert.Equal(0, start.Quits);
+
+            start.Window.Close();
+            Assert.Equal(["stop"], calls);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, start.Quits);
+
+            start.App.ReleaseMainWindow();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(["stop"], calls);
+            Assert.Equal(1, start.Quits);
+        });
+
+    [Fact]
+    public Task On_Windows_the_last_window_stops_then_posts_one_quit() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.Quit);
+            start.Window.Closed += (_, _) => calls.Add($"closed, quits {start.Quits}");
+
+            start.Window.Close();
+
+            // The quit never runs inside the close: it is a later job on the UI thread.
+            Assert.Equal(["stop", "closed, quits 0"], calls);
+            Assert.Equal(0, start.Quits);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, start.Quits);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, start.Quits);
+            Assert.Single(start.Log.Entries, entry => entry.Message == "Quit: no document window is left; shutting the app down.");
+        });
+
+    [Fact]
+    public Task On_macOS_the_last_window_keeps_the_app_and_exit_stops_once() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.KeepRunning);
+
+            start.Window.Close();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(calls);
+            Assert.Equal(0, start.Quits);
+            start.App.ActivateRequested();
+            MainWindow reopened = Assert.IsType<MainWindow>(start.App.MainDocumentWindow);
+            Assert.True(reopened.IsVisible);
+
+            start.App.ReleaseMainWindow();
+            start.App.ReleaseMainWindow();
+
+            Assert.Equal(["stop"], calls);
+            Assert.Equal(0, start.Quits);
+            reopened.Close();
+        });
+
+    [Fact]
+    public Task The_quit_job_does_nothing_if_a_window_opened_meanwhile() =>
+        Headless.Run(() =>
+        {
+            List<string> calls = [];
+            using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"), LastWindowBehavior.Quit);
+
+            start.Window.Close();
+            ShowViewer(start.App);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(["stop"], calls);
+            Assert.Equal(0, start.Quits);
+        });
+
+    [Fact]
     public Task ViewerWindowClosed_DisposesItsCompositionAndUnregistersItsSurface() =>
         Headless.Run(() =>
         {
             List<string> calls = [];
             using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"));
-            start.Window.Show();
             Window viewer = ShowViewer(start.App);
             ThemeBridge bridge = start.App.Bridge!;
             int surfaces = SurfaceCount(bridge);
@@ -555,7 +801,6 @@ public sealed class AppStartupTests
         Headless.Run(() =>
         {
             using var start = new GateStart(viewerFiles: [MissingFile()], stopAnswering: null);
-            start.Window.Show();
             Window viewer = ShowViewer(start.App);
             Assert.IsType<DocumentWindowViewModel>(viewer.DataContext).ToggleSidebar();
 
@@ -575,7 +820,6 @@ public sealed class AppStartupTests
             using var requests = new OpenRequests();
             using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"));
             Window main = start.Window;
-            main.Show();
             Window viewer = ShowViewer(start.App);
             Assert.IsType<DocumentWindowViewModel>(main.DataContext).ToggleSidebar();
 
@@ -604,7 +848,6 @@ public sealed class AppStartupTests
             Window? main = null;
             using var start = new GateStart(viewerFiles: [], stopAnswering: () => StopAnsweringAndHideSidebar(main!, order));
             main = start.Window;
-            main.Show();
             Dispatcher.UIThread.RunJobs();
 
             main.Close();
@@ -625,7 +868,6 @@ public sealed class AppStartupTests
             Window? main = null;
             using var start = new GateStart(viewerFiles: [], stopAnswering: () => StopAnsweringAndHideSidebar(main!, order));
             main = start.Window;
-            main.Show();
             ShowViewer(start.App);
             Dispatcher.UIThread.RunJobs();
 
@@ -642,7 +884,6 @@ public sealed class AppStartupTests
         {
             List<string> calls = [];
             using var start = new GateStart(viewerFiles: [], stopAnswering: () => calls.Add("stop"));
-            start.Window.Show();
             Window viewer = ShowViewer(start.App);
 
             start.Window.Close();
@@ -658,23 +899,41 @@ public sealed class AppStartupTests
         });
 
     [Fact]
-    public Task OpenViewer_AfterTheLastWindowClosed_AnswersClosing() =>
+    public Task An_open_while_stopping_answers_closing_and_builds_nothing() =>
         Headless.RunAsync(async () =>
         {
             using var requests = new OpenRequests();
             using var start = new GateStart(viewerFiles: [], stopAnswering: null);
-            start.Window.Show();
             start.Window.Close();
             Dispatcher.UIThread.RunJobs();
             (InstanceRequest request, Task<InstanceRequestOutcome> outcome) = await requests.SendAsync([MissingFile()]);
+            using var opened = new OpenedMainWindows();
 
             Assert.False(start.App.OpenViewer([MissingFile()], request));
 
             Assert.Empty(start.App.ViewerWindows);
+            Assert.Empty(opened.Windows);
             Assert.Equal(
                 InstanceRequestOutcome.Closing,
                 await outcome.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken)
             );
+        });
+
+    [Fact]
+    public Task An_activate_while_stopping_builds_nothing_and_logs() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            start.Window.Close();
+            using var opened = new OpenedMainWindows();
+
+            start.App.ActivateRequested();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(opened.Windows);
+            Assert.Null(start.App.MainDocumentWindow);
+            Assert.Empty(start.App.ViewerWindows);
+            Assert.Contains(start.Log.Entries, entry => entry.Level == "info" && entry.Message == "Activate ignored: the app is stopping.");
         });
 
     [Fact]
@@ -694,7 +953,6 @@ public sealed class AppStartupTests
             File.Delete(server.PidFile);
             Directory.CreateDirectory(server.PidFile);
             Window main = start.Window;
-            main.Show();
             Assert.IsType<DocumentWindowViewModel>(main.DataContext).ToggleSidebar();
 
             main.Close();
@@ -716,19 +974,36 @@ public sealed class AppStartupTests
         });
 
     [Fact]
-    public Task Activate_AfterTheMainWindowClosed_LogsNoMainWindow() =>
+    public Task A_viewer_that_cannot_open_theme_settings_shows_the_toast_in_that_viewer() =>
         Headless.Run(() =>
         {
             using var start = new GateStart(viewerFiles: [], stopAnswering: null);
-            start.Window.Show();
-            Dispatcher.UIThread.RunJobs();
+            MainWindow viewer = Assert.IsType<MainWindow>(ShowViewer(start.App));
+            ToastCenter viewerToasts = ToastsOf(viewer);
+            ToastCenter mainToasts = ToastsOf(start.Window);
 
-            start.Gate.Request();
-            start.Window.Close();
-            Dispatcher.UIThread.RunJobs();
+            // A hidden owner cannot own the settings window, so its Show throws.
+            viewer.Hide();
+            viewer.RequestThemeSettings();
 
-            Assert.Equal(0, start.BroughtForwardCount);
-            Assert.Contains(start.Log.Entries, entry => entry.Message == "Activate: no main window to bring forward.");
+            Assert.Single(start.Log.Entries, entry => entry.Level == "error" && entry.Message == "Theme settings: could not open the window.");
+            ToastItem toast = Assert.Single(viewerToasts.Items);
+            Assert.Equal((ToastKind.Warning, "Couldn't open the theme settings"), (toast.Kind, toast.Text));
+            Assert.Empty(mainToasts.Items);
+        });
+
+    [Fact]
+    public Task A_closed_viewer_no_longer_opens_theme_settings() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            MainWindow viewer = Assert.IsType<MainWindow>(ShowViewer(start.App));
+
+            viewer.Close();
+            viewer.RequestThemeSettings();
+
+            Assert.Null(start.App.ThemeSettingsHost?.Window);
+            Assert.DoesNotContain(start.Log.Entries, entry => entry.Message.StartsWith("Theme settings:", StringComparison.Ordinal));
         });
 
     /// <summary>Shows a viewer window over a missing file as an open request does once the app took it, and returns it.</summary>
@@ -737,6 +1012,22 @@ public sealed class AppStartupTests
         app.ShowNewViewer([MissingFile()]);
         return app.ViewerWindows[^1];
     }
+
+    /// <summary>
+    /// Makes every <see cref="MainWindow"/> shown until disposed throw from its Opened handler, after telling
+    /// <paramref name="failed"/> which window it was, as a native window that fails after it appeared does.
+    /// </summary>
+    private static IDisposable FailingOpens(Action<Window> failed) =>
+        Window.WindowOpenedEvent.AddClassHandler<MainWindow>(
+            (window, _) =>
+            {
+                failed(window);
+                throw new InvalidOperationException("The native window failed after it appeared.");
+            }
+        );
+
+    private static ToastCenter ToastsOf(Window window) =>
+        Assert.IsType<ToastCenter>(Assert.IsType<DocumentWindowViewModel>(window.DataContext).Toasts);
 
     private static int PidDeleteWarnings(TestInstanceServer server) =>
         server.Log.Entries.Count(entry =>
@@ -962,8 +1253,9 @@ public sealed class AppStartupTests
         Headless.Run(() =>
         {
             using var start = new SettingsStart();
-            // The window is never shown, so the settings window cannot take it as its owner and its Show throws.
+            // The window is hidden, so the settings window cannot take it as its owner and its Show throws.
             MainWindow main = Assert.IsType<MainWindow>(start.App.CreateStartWindow());
+            main.Hide();
             ToastCenter toasts = Assert.IsType<ToastCenter>(Assert.IsType<DocumentWindowViewModel>(main.DataContext).Toasts);
 
             main.RequestThemeSettings();
@@ -986,6 +1278,7 @@ public sealed class AppStartupTests
             Environment.SetEnvironmentVariable(App.ThemeSettingsEntryVariable, "bogus");
             App.ViewerFiles = [Path.Combine(Path.GetTempPath(), "yamv-gone-" + Guid.NewGuid().ToString("N") + ".md")];
             App app = Assert.IsType<App>(Application.Current);
+            using var opened = new OpenedMainWindows();
             App.ProcessLog = new RecordingAppLog();
             app.ResetLog();
             try
@@ -1394,6 +1687,33 @@ public sealed class AppStartupTests
     }
 
     /// <summary>
+    /// Makes the app's settings watcher seam throw for its next calls, as many as asked, then build real watchers, as a
+    /// window build that fails before any window exists; disposing it restores <see cref="App.CreateSettingsWatcher"/>.
+    /// </summary>
+    private sealed class FailingSettingsWatchers : IDisposable
+    {
+        private readonly Func<SettingsStore, SettingsWriter, IAppLog, SettingsWatcher> _before = App.CreateSettingsWatcher;
+        private int _failuresLeft;
+
+        public FailingSettingsWatchers(int failures)
+        {
+            _failuresLeft = failures;
+            App.CreateSettingsWatcher = (store, writer, log) =>
+            {
+                if (_failuresLeft > 0)
+                {
+                    _failuresLeft--;
+                    throw new IOException("The settings folder cannot be watched.");
+                }
+
+                return _before(store, writer, log);
+            };
+        }
+
+        public void Dispose() => App.CreateSettingsWatcher = _before;
+    }
+
+    /// <summary>
     /// A main start with the user theme Mine in use and the theme settings window open over the shown main window, with unsaved
     /// edits when asked; it counts the shutdowns the app asks for again. Disposing it releases the start, then closes the main
     /// window, so a failed assert leaves no window in the shared headless session.
@@ -1412,8 +1732,7 @@ public sealed class AppStartupTests
                     Path.Combine(AppPaths.ThemesDirectory, "mine" + ThemeCatalog.FileSuffix),
                     """{ "name": "Mine", "light": { "tokens": { "accent": "#112233" } } }"""
                 );
-                Main = App.CreateStartWindow();
-                Main.Show();
+                Main = App.CreateStartWindow() ?? throw new InvalidOperationException("The main start window did not open.");
                 App.ShowThemeSettings(Main);
                 Settings = App.ThemeSettingsHost!.Window!;
                 ViewModel = Assert.IsType<ThemeSettingsViewModel>(Settings.DataContext);
@@ -1501,9 +1820,10 @@ public sealed class AppStartupTests
             App.CreateSettingsWatcher = (store, writer, log) =>
             {
                 Created++;
-                ThemeBridge bridge = app.Bridge!;
+
+                // The app sets its bridge only once the whole shared set is built, so it is read when the watcher stops.
                 var clock = new DisposeRecordingClock(() =>
-                    WriterAndBridgeDisposedAtEachDispose.Add((IsWriterDisposed(writer), IsBridgeDisposed(bridge)))
+                    WriterAndBridgeDisposedAtEachDispose.Add((IsWriterDisposed(writer), app.Bridge is not { } bridge || IsBridgeDisposed(bridge)))
                 );
                 return new SettingsWatcher(store, writer, clock, log);
             };
@@ -1583,14 +1903,18 @@ public sealed class AppStartupTests
             File.WriteAllText(SettingsFile, json);
         }
 
+        private readonly OpenedMainWindows _opened = new();
+
         public void Dispose()
         {
             try
             {
                 App.ReleaseMainWindow();
+                _opened.CloseVisible();
             }
             finally
             {
+                _opened.Dispose();
                 App.ResetLog();
                 App.ViewerFiles = [];
                 App.ProcessLog = null;
@@ -1601,6 +1925,37 @@ public sealed class AppStartupTests
                     Directory.Delete(_dataFolder, recursive: true);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Records every <see cref="MainWindow"/> that opens until disposed, so a test can count the windows the app built and a
+    /// fixture can close what a released start left shown in the shared headless session.
+    /// </summary>
+    private sealed class OpenedMainWindows : IDisposable
+    {
+        private readonly List<MainWindow> _windows = [];
+        private readonly IDisposable _subscription;
+
+        public OpenedMainWindows() => _subscription = Window.WindowOpenedEvent.AddClassHandler<MainWindow>((window, _) => _windows.Add(window));
+
+        /// <summary>The main and viewer windows that opened, in order.</summary>
+        public IReadOnlyList<MainWindow> Windows => _windows;
+
+        /// <summary>Closes every recorded window still shown.</summary>
+        public void CloseVisible()
+        {
+            foreach (MainWindow window in _windows.Where(window => window.IsVisible).ToList())
+            {
+                window.Close();
+            }
+        }
+
+        /// <summary>Stops recording, then closes every recorded window still shown.</summary>
+        public void Dispose()
+        {
+            _subscription.Dispose();
+            CloseVisible();
         }
     }
 
@@ -1639,7 +1994,12 @@ public sealed class AppStartupTests
         private readonly string? _dataBefore = Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable);
         private readonly string? _harnessBefore = Environment.GetEnvironmentVariable(App.HarnessVariable);
 
+        private readonly OpenedMainWindows _opened = new();
+
         public GateStart(IReadOnlyList<string> viewerFiles, Action? stopAnswering)
+            : this(viewerFiles, stopAnswering, LastWindowBehavior.Quit) { }
+
+        public GateStart(IReadOnlyList<string> viewerFiles, Action? stopAnswering, LastWindowBehavior lastWindow)
         {
             App = Assert.IsType<App>(Application.Current);
             try
@@ -1648,10 +2008,11 @@ public sealed class AppStartupTests
                 Environment.SetEnvironmentVariable(App.HarnessVariable, null);
                 App.ViewerFiles = viewerFiles;
                 App.ProcessLog = Log;
-                App.Activation = Gate;
+                App.Lifetime = new AppLifetimePolicy(lastWindow);
+                App.QuitForTests = () => Quits++;
                 App.StopAnswering = stopAnswering;
                 App.ResetLog();
-                Window = App.CreateStartWindow();
+                StartWindow = App.CreateStartWindow();
             }
             catch
             {
@@ -1670,9 +2031,15 @@ public sealed class AppStartupTests
 
         public App App { get; }
 
-        public Window Window { get; }
+        /// <summary>The window the start showed, or null when it failed to open.</summary>
+        public Window? StartWindow { get; }
 
-        public ActivationGate Gate { get; } = new();
+        /// <summary>The window the start showed.</summary>
+        /// <exception cref="InvalidOperationException">The start window failed to open.</exception>
+        public Window Window => StartWindow ?? throw new InvalidOperationException("The start window failed to open.");
+
+        /// <summary>How many times the app asked to quit.</summary>
+        public int Quits { get; private set; }
 
         public RecordingAppLog Log { get; } = new();
 
@@ -1693,12 +2060,13 @@ public sealed class AppStartupTests
                     viewer.Close();
                 }
 
-                if (Window.IsVisible)
+                if (App.MainDocumentWindow is { IsVisible: true } main)
                 {
-                    Window.Close();
+                    main.Close();
                 }
 
                 App.ReleaseMainWindow();
+                _opened.CloseVisible();
             }
             finally
             {
@@ -1708,10 +2076,12 @@ public sealed class AppStartupTests
 
         private void Restore()
         {
+            _opened.Dispose();
             App.ResetLog();
             App.ViewerFiles = [];
             App.ProcessLog = null;
-            App.Activation = null;
+            App.Lifetime = null;
+            App.QuitForTests = null;
             App.StopAnswering = null;
             Environment.SetEnvironmentVariable(AppPaths.DataDirectoryVariable, _dataBefore);
             Environment.SetEnvironmentVariable(App.HarnessVariable, _harnessBefore);

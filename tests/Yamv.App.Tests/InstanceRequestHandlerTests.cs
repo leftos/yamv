@@ -8,8 +8,8 @@ namespace Yamv.App.Tests;
 /// <summary>The instance server's handler, reached through a real coordinator on a private lock path.</summary>
 public sealed class InstanceRequestHandlerTests : IDisposable
 {
-    private readonly ActivationGate _gate = new();
     private readonly RecordingAppLog _log = new();
+    private int _activated;
     private readonly ConcurrentQueue<Action> _posted = new();
     private readonly ConcurrentQueue<(IReadOnlyList<string> Files, InstanceRequest Request)> _opened = new();
     private readonly TestInstanceServer _server;
@@ -19,8 +19,8 @@ public sealed class InstanceRequestHandlerTests : IDisposable
     {
         _post = _posted.Enqueue;
         var handler = new InstanceRequestHandler(
-            _gate,
             job => _post(job),
+            () => Interlocked.Increment(ref _activated),
             (files, request) =>
             {
                 _opened.Enqueue((files, request));
@@ -94,11 +94,14 @@ public sealed class InstanceRequestHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task Activate_NeedsNoReply()
+    public async Task Activate_NeedsNoReplyAndPostsOneJob()
     {
-        var raised = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _gate.Activate += (_, _) => raised.TrySetResult();
-        _gate.MarkReady();
+        var posted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _post = job =>
+        {
+            _posted.Enqueue(job);
+            posted.TrySetResult();
+        };
 
         bool delivered = await InstanceCoordinator.SignalAsync(
             _server.LockPath,
@@ -109,7 +112,13 @@ public sealed class InstanceRequestHandlerTests : IDisposable
         );
 
         Assert.True(delivered);
-        await raised.Task.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken);
+        await posted.Task.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken);
+
+        // The activate runs only when the UI thread runs its job, never on the server's pool thread.
+        Assert.Equal(0, Volatile.Read(ref _activated));
+        Assert.True(_posted.TryDequeue(out Action? job));
+        job!();
+        Assert.Equal(1, Volatile.Read(ref _activated));
         Assert.Empty(_posted);
         Assert.DoesNotContain(_log.Entries, entry => entry.Message.StartsWith("Instance server: refusing", StringComparison.Ordinal));
     }
@@ -136,12 +145,9 @@ public sealed class InstanceRequestHandlerTests : IDisposable
         job!();
         (IReadOnlyList<string> files, InstanceRequest request) = Assert.Single(_opened);
         Assert.Equal([file], files);
-        bool began = request.TryBegin();
-        if (began)
-        {
-            request.Complete(InstanceReply.Opened);
-            Assert.Equal(InstanceRequestOutcome.Confirmed, await open.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken));
-        }
+        Assert.True(request.TryBegin());
+        request.Complete(InstanceReply.Opened);
+        Assert.Equal(InstanceRequestOutcome.Confirmed, await open.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken));
     }
 
     [Fact]

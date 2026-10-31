@@ -66,7 +66,8 @@ public sealed class ProgramLaunchTests
             {
                 server.Coordinator.StopAnswering();
                 order.Add("stopped");
-            }
+            },
+            _log
         );
 
         // The pid is gone before RunAsApp returns, so before the caller's dispose releases the lock.
@@ -81,10 +82,39 @@ public sealed class ProgramLaunchTests
         List<string> order = [];
 
         Assert.Throws<InvalidOperationException>(() =>
-            Program.RunAsApp(() => throw new InvalidOperationException("The UI loop failed."), () => order.Add("stopped"))
+            Program.RunAsApp(() => throw new InvalidOperationException("The UI loop failed."), () => order.Add("stopped"), _log)
         );
 
         Assert.Equal(["stopped"], order);
+    }
+
+    [Fact]
+    public void A_throw_from_the_stop_keeps_the_loop_exception()
+    {
+        var stopFailure = new UnauthorizedAccessException("The stop failed.");
+
+        InvalidOperationException thrown = Assert.Throws<InvalidOperationException>(() =>
+            Program.RunAsApp(() => throw new InvalidOperationException("The UI loop failed."), () => throw stopFailure, _log)
+        );
+
+        Assert.Equal("The UI loop failed.", thrown.Message);
+        LogEntry error = Assert.Single(_log.Entries, entry => entry.Level == "error");
+        Assert.Equal("Instance server: finishing the stop failed after the UI loop failed; the loop's exception is kept.", error.Message);
+        Assert.Same(stopFailure, error.Exception);
+    }
+
+    [Fact]
+    public void A_throw_from_the_stop_after_a_clean_loop_is_logged_and_rethrown()
+    {
+        var stopFailure = new UnauthorizedAccessException("The stop failed.");
+
+        UnauthorizedAccessException thrown = Assert.Throws<UnauthorizedAccessException>(() =>
+            Program.RunAsApp(() => 0, () => throw stopFailure, _log)
+        );
+
+        Assert.Same(stopFailure, thrown);
+        LogEntry error = Assert.Single(_log.Entries, entry => entry.Level == "error");
+        Assert.Equal("Instance server: finishing the stop failed.", error.Message);
     }
 
     private int? Run(IReadOnlyList<string> files, SecondLaunchOutcome activated, SecondLaunchResult opened) =>

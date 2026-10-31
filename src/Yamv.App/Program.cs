@@ -2,7 +2,6 @@
 using System.Runtime.Versioning;
 using System.Security;
 using Avalonia;
-using Avalonia.Threading;
 using Yamv.App.Platform;
 using Yamv.Core;
 using Yamv.Core.Diagnostics;
@@ -97,41 +96,67 @@ internal static class Program
         }
     }
 
-    /// <summary>Starts the instance server at once, then Avalonia; the coordinator holds the lock until the caller disposes it.</summary>
+    /// <summary>
+    /// Starts the instance server at once, then Avalonia; the coordinator holds the lock until the caller disposes it. Every
+    /// request reaches the UI thread through the ready latch, which the app opens once its framework is initialized and its start
+    /// window shown, so no pool thread posts to the dispatcher before then.
+    /// </summary>
     private static int RunMain(InstanceCoordinator coordinator, IAppLog log, string[] args)
     {
-        var gate = new ActivationGate();
-
-        // Made here, on the thread Avalonia runs on: the first dispatcher made becomes the UI thread's, so the server's pool
-        // thread must never be the first to ask for it. A request posted before the UI loop runs waits in its queue.
-        Dispatcher ui = Dispatcher.UIThread;
+        var latch = new UiReadyLatch();
         var handler = new InstanceRequestHandler(
-            gate,
-            job => ui.Post(job),
+            latch.Post,
+            () => ActivateInApp(log),
             (files, request) => OpenInApp(files, request, log),
             SinceProcessStart,
             log
         );
         coordinator.StartServer(handler.Handle);
-        App.Activation = gate;
+        App.ReadyLatch = latch;
+        App.Lifetime = new AppLifetimePolicy(OperatingSystem.IsMacOS() ? LastWindowBehavior.KeepRunning : LastWindowBehavior.Quit);
         App.StopAnswering = () => StopAnsweringInBackground(coordinator, log);
-        return RunAsApp(() => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args), coordinator.StopAnswering);
+        return RunAsApp(() => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args), coordinator.StopAnswering, log);
     }
 
     /// <summary>
     /// Runs the app's UI loop, then finishes stopping on this thread once the loop is over: the pid file is deleted and the server
     /// stopped before this returns and the caller releases the lock, even when the app began the stop in the background and the
-    /// pool has not run it yet, or the loop threw.
+    /// pool has not run it yet, or the loop threw. A throw from the stop is logged; when the loop threw too, the loop's exception
+    /// is the one that propagates.
     /// </summary>
-    internal static int RunAsApp(Func<int> runLoop, Action finishStopping)
+    internal static int RunAsApp(Func<int> runLoop, Action finishStopping, IAppLog log)
+    {
+        int exitCode;
+        try
+        {
+            exitCode = runLoop();
+        }
+        catch
+        {
+            FinishStoppingLogged(finishStopping, log, rethrow: false);
+            throw;
+        }
+
+        FinishStoppingLogged(finishStopping, log, rethrow: true);
+        return exitCode;
+    }
+
+    /// <summary>Runs the stop, logging a throw; rethrows it only when no exception from the UI loop is already on its way out.</summary>
+    private static void FinishStoppingLogged(Action finishStopping, IAppLog log, bool rethrow)
     {
         try
         {
-            return runLoop();
-        }
-        finally
-        {
             finishStopping();
+        }
+        // Logged so it is never lost; when the loop threw, the loop's exception is the one the caller sees.
+        catch (Exception exception) when (!rethrow)
+        {
+            log.LogError("Instance server: finishing the stop failed after the UI loop failed; the loop's exception is kept.", exception);
+        }
+        catch (Exception exception)
+        {
+            log.LogError("Instance server: finishing the stop failed.", exception);
+            throw;
         }
     }
 
@@ -161,6 +186,18 @@ internal static class Program
         log.LogError($"Instance server: no app to open {files.Count} file(s) in; refusing the request.");
         request.Complete(InstanceReply.Refused);
         return false;
+    }
+
+    /// <summary>Hands an activate to the running app on the UI thread; logs it when no app is there to take it.</summary>
+    private static void ActivateInApp(IAppLog log)
+    {
+        if (Application.Current is App app)
+        {
+            app.ActivateRequested();
+            return;
+        }
+
+        log.LogError("Instance server: no app to bring forward; dropping an activate.");
     }
 
     /// <summary>The platform actions a launch that did not get the lock runs through.</summary>

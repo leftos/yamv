@@ -1,24 +1,25 @@
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Instance;
-using Yamv.Core.Launch;
 
 namespace Yamv.App;
 
 /// <summary>
 /// Answers the instance server's requests on its pool thread, one at a time, and never blocks that thread on the UI thread:
-/// <c>activate</c> goes through the activation gate, a well-formed <c>open</c> is posted to the UI thread to open a viewer
+/// <c>activate</c> is posted to the UI thread as one job, a well-formed <c>open</c> is posted to the UI thread to open a viewer
 /// window, and every other request that expects a reply is refused.
 /// </summary>
-/// <param name="gate">The gate <c>activate</c> passes through.</param>
-/// <param name="postToUi">Queues a job on the UI thread and returns at once; a throw refuses the request it carried.</param>
+/// <param name="postToUi">
+/// Queues a job on the UI thread and returns at once (the app's ready latch); a throw refuses the open request it carried.
+/// </param>
+/// <param name="activate">Brings the app forward, on the UI thread.</param>
 /// <param name="openViewer">
 /// Opens a viewer window over the files for the request, on the UI thread; true when the app took the request.
 /// </param>
 /// <param name="sinceProcessStart">How long ago the process started, for the one line that says when the UI took its first request.</param>
 /// <param name="log">The process's log.</param>
 internal sealed class InstanceRequestHandler(
-    ActivationGate gate,
     Action<Action> postToUi,
+    Action activate,
     Func<IReadOnlyList<string>, InstanceRequest, bool> openViewer,
     Func<TimeSpan> sinceProcessStart,
     IAppLog log
@@ -34,7 +35,7 @@ internal sealed class InstanceRequestHandler(
         ArgumentNullException.ThrowIfNull(request);
         if (request.Message == InstanceMessages.Activate)
         {
-            gate.Request();
+            PostActivate();
             return;
         }
 
@@ -49,6 +50,19 @@ internal sealed class InstanceRequestHandler(
         if (request.ExpectsReply)
         {
             request.Complete(InstanceReply.Refused);
+        }
+    }
+
+    private void PostActivate()
+    {
+        try
+        {
+            postToUi(activate);
+        }
+        // An activate expects no reply, so a post that fails is only logged; the launcher already exited.
+        catch (Exception exception)
+        {
+            log.LogError("Instance server: could not hand an activate to the UI thread; dropping it.", exception);
         }
     }
 

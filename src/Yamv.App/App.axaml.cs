@@ -66,16 +66,27 @@ public partial class App : Application
     /// <summary>The shutdown check a held shutdown waits on, or null; a request while it runs starts no second one.</summary>
     private Task? _shutdownCheck;
     private IAppLog? _log;
-    private ActivationGate? _connectedGate;
 
     /// <summary>The current start's stop action, until it has run; it runs at most once per start.</summary>
     private Action? _pendingStop;
 
     /// <summary>
-    /// Set once the last document window has closed or the app is exiting: from then on an open request is answered
-    /// <c>closing</c>, never carried out. A start clears it.
+    /// The current start's last-window rule: once it says the app is stopping, an open request is answered <c>closing</c> and an
+    /// activate builds nothing. A start replaces it.
     /// </summary>
-    private bool _stopping;
+    private AppLifetimePolicy _policy = new(LastWindowBehavior.Quit);
+
+    /// <summary>The current start's launch state machine: it decides the start window and whether an activate builds the main window.</summary>
+    private LaunchArbiter _arbiter = new();
+
+    /// <summary>The desktop lifetime the quit shuts down; null in a headless test.</summary>
+    private IClassicDesktopStyleApplicationLifetime? _desktop;
+
+    /// <summary>Set once the app's exit began, so a quit job still queued does nothing.</summary>
+    private bool _exited;
+
+    /// <summary>The last stamp given to a document window's activation; a higher stamp is a more recent activation.</summary>
+    private long _activationStamp;
 
     /// <summary>The files the first window opens: empty for a main launch. Set before Avalonia starts.</summary>
     internal static IReadOnlyList<string> ViewerFiles { get; set; } = [];
@@ -84,9 +95,19 @@ public partial class App : Application
     internal static IAppLog? ProcessLog { get; set; }
 
     /// <summary>
-    /// The gate the instance server's <c>activate</c> messages pass through; null for harness launches. Set before Avalonia starts.
+    /// The latch every instance-server request reaches the UI thread through; the app opens it once its framework is initialized
+    /// and its start window shown. Null for harness launches. Set before Avalonia starts.
     /// </summary>
-    internal static ActivationGate? Activation { get; set; }
+    internal static UiReadyLatch? ReadyLatch { get; set; }
+
+    /// <summary>
+    /// The start's last-window rule, from the platform: quit at the last document window on Windows, keep running on macOS. Null
+    /// for harness launches, where a start uses a fresh quit rule. Set before Avalonia starts.
+    /// </summary>
+    internal static AppLifetimePolicy? Lifetime { get; set; }
+
+    /// <summary>When set, what the quit job calls instead of shutting the desktop lifetime down; a test records the quit with it.</summary>
+    internal static Action? QuitForTests { get; set; }
 
     /// <summary>
     /// Starts stopping the app answering launches while it keeps the lock, and returns at once: it must never wait on the
@@ -129,8 +150,14 @@ public partial class App : Application
     /// </summary>
     internal SettingsWriter? SettingsWriter => _settingsWriter;
 
-    /// <summary>The open viewer windows, the most recently active last.</summary>
+    /// <summary>The open viewer windows, in the order they opened.</summary>
     internal IReadOnlyList<Window> ViewerWindows => [.. _viewers.Select(viewer => (Window)viewer.Composition.Window)];
+
+    /// <summary>The main window, or null while none is open.</summary>
+    internal Window? MainDocumentWindow => _main?.Composition.Window;
+
+    /// <summary>The open document windows, main and viewers; read on the UI thread only.</summary>
+    private int DocumentWindowCount => (_main is null ? 0 : 1) + _viewers.Count;
 
     /// <summary>The process's one log: <see cref="ProcessLog"/> when set, else one made when the first window is built.</summary>
     private IAppLog Log => _log ??= ProcessLog ?? new FileAppLog(AppPaths.LogFile);
@@ -147,13 +174,26 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = CreateStartWindow();
             desktop.ShutdownRequested += (_, e) => OnShutdownRequested(e, () => desktop.TryShutdown());
             desktop.Exit += (_, _) => ReleaseMainWindow();
+            if (IsHarnessStart)
+            {
+                desktop.MainWindow = CreateStartWindow();
+            }
+            else
+            {
+                _desktop = desktop;
+                desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                CreateStartWindow();
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
+        OpenReadyLatch();
     }
+
+    /// <summary>Opens the ready latch, if this launch has one: its queued jobs, and every later one, are posted to the UI thread.</summary>
+    internal static void OpenReadyLatch() => ReadyLatch?.Open(job => Dispatcher.UIThread.Post(job));
 
     /// <summary>
     /// Shows the theme settings window owned by <paramref name="owner"/>, or activates the open one, which keeps its first owner.
@@ -252,27 +292,31 @@ public partial class App : Application
     /// <summary>
     /// The window a start shows: with <c>YAMV_DEV_HARNESS</c> at <c>1</c>, the theme settings window when
     /// <c>YAMV_DEV_THEME_SETTINGS</c> is <c>1</c> too, else the dev harness; otherwise the main window, or a viewer window
-    /// over <see cref="ViewerFiles"/> when the launch named files. The gate is marked ready when that window first shows.
+    /// over <see cref="ViewerFiles"/> when the launch named files, as the launch arbiter's start entry decides. A harness window is
+    /// returned unshown, for the lifetime to show as its main window; a main or viewer start window is shown here, through the
+    /// same guarded path as any later window, and a start window that fails to show is removed like any other.
     /// </summary>
-    internal Window CreateStartWindow()
+    /// <returns>The start window, or null when the main or viewer start window failed to open.</returns>
+    internal Window? CreateStartWindow()
     {
-        if (Environment.GetEnvironmentVariable(HarnessVariable) == "1")
+        if (IsHarnessStart)
         {
             return Environment.GetEnvironmentVariable(ThemeSettingsHarnessVariable) == "1" ? CreateThemeSettingsHarness() : new HarnessWindow();
         }
 
-        _stopping = false;
         _pendingStop = StopAnswering;
-        MainWindow window = ViewerFiles.Count == 0 ? AddMain().Window : AddViewer(ViewerFiles).Window;
-        ApplyDevWidthPopover(window);
-        ApplyDevThemeSettingsEntry(window);
-        if (Activation is { } gate)
+        _policy = Lifetime ?? new AppLifetimePolicy(LastWindowBehavior.Quit);
+        _arbiter = new LaunchArbiter();
+        _exited = false;
+        return _arbiter.Start(ViewerFiles) switch
         {
-            ConnectGate(gate, window);
-        }
-
-        return window;
+            OpenViewerWindow viewer => ShowViewer(viewer.Files, ApplyDevStartHooks),
+            OpenMainWindow => ShowMain(ApplyDevStartHooks),
+            _ => null,
+        };
     }
+
+    private static bool IsHarnessStart => Environment.GetEnvironmentVariable(HarnessVariable) == "1";
 
     /// <summary>
     /// Opens a viewer window over <paramref name="files"/> for a launch's <paramref name="request"/>, on the UI thread. A stopping
@@ -282,7 +326,7 @@ public partial class App : Application
     /// <returns>True when the app took the request, whether or not its window then opened.</returns>
     internal bool OpenViewer(IReadOnlyList<string> files, InstanceRequest request)
     {
-        if (_stopping)
+        if (!_policy.MayOpenWindows)
         {
             request.Complete(InstanceReply.Closing);
             Log.LogInfo($"Open: the app is closing; answered closing to an open of {files.Count} file(s).");
@@ -301,105 +345,221 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Builds, shows and activates a viewer window over <paramref name="files"/>. A window that fails to show is logged, forgotten
+    /// Builds, shows and activates a viewer window over <paramref name="files"/>. A window that fails to show is logged, removed
     /// and closed, so no window is left that the app does not follow.
     /// </summary>
-    internal void ShowNewViewer(IReadOnlyList<string> files)
+    internal void ShowNewViewer(IReadOnlyList<string> files) => ShowViewer(files, beforeShow: null);
+
+    /// <summary>
+    /// Builds, shows and activates the main window from the saved session, unless one is open or the app is stopping. A main
+    /// window that fails to show is logged, removed and closed, and the arbiter hears it closed.
+    /// </summary>
+    /// <returns>The main window it opened, or null when it opened none.</returns>
+    internal Window? OpenMain() => ShowMain(beforeShow: null);
+
+    /// <summary>
+    /// Brings the app forward for an activate, on the UI thread: builds the main window when the arbiter asks for it, else brings
+    /// the main window forward, or with no main window the most recently active viewer. A stopping app builds nothing.
+    /// </summary>
+    internal void ActivateRequested()
     {
-        MainWindowComposition? composition = null;
+        if (!_policy.MayOpenWindows)
+        {
+            Log.LogInfo("Activate ignored: the app is stopping.");
+            return;
+        }
+
+        if (_arbiter.ActivateRequested() is OpenMainWindow && ShowMain(beforeShow: null) is not null)
+        {
+            Log.LogInfo("Activate: main window opened.");
+            return;
+        }
+
+        BringWindowForward();
+    }
+
+    /// <summary>
+    /// Builds, shows and activates a viewer window, running <paramref name="beforeShow"/> on it first. A failure is logged, the
+    /// window removed through the one removal path and closed.
+    /// </summary>
+    private MainWindow? ShowViewer(IReadOnlyList<string> files, Action<MainWindow>? beforeShow)
+    {
+        DocumentWindow? tracked = null;
         try
         {
-            composition = AddViewer(files);
-            composition.Window.Show();
-            composition.Window.Activate();
+            (ThemeBridge bridge, WidthStore widths) = Shared();
+            tracked = Track(MainWindowFactory.CreateViewer(bridge, widths, files, Log));
+            _viewers.Add(tracked);
+            return ShowBuilt(tracked.Composition.Window, beforeShow);
         }
         // The launcher was already told opened, so the app itself reports a window that could not open.
         catch (Exception exception)
         {
             Log.LogError($"Open: the viewer window for {files.Count} file(s) could not open.", exception);
-            if (composition is not null)
-            {
-                Forget(composition);
-                CloseFailedWindow(composition.Window);
-            }
+            RemoveFailed(tracked);
+            return null;
         }
     }
 
-    /// <summary>Closes a viewer window that failed to show, so no window the app no longer follows keeps the process alive.</summary>
+    /// <summary>
+    /// Builds, shows and activates the main window, running <paramref name="beforeShow"/> on it first, unless one is open or the
+    /// app is stopping. A failure is logged, the window removed through the one removal path (which tells the arbiter) and closed.
+    /// </summary>
+    private MainWindow? ShowMain(Action<MainWindow>? beforeShow)
+    {
+        if (_main is not null || !_policy.MayOpenWindows)
+        {
+            return null;
+        }
+
+        DocumentWindow? tracked = null;
+        try
+        {
+            (ThemeBridge bridge, WidthStore widths) = Shared();
+            tracked = Track(MainWindowFactory.Create(bridge, widths, Log));
+            _main = tracked;
+            if (!_arbiter.MainWindowOpen)
+            {
+                _arbiter.MainWindowOpened();
+            }
+
+            return ShowBuilt(tracked.Composition.Window, beforeShow);
+        }
+        // An activate or a start that fails must not end the UI loop; the failure is logged and the window removed.
+        catch (Exception exception)
+        {
+            Log.LogError("The main window could not open.", exception);
+            if (tracked is null)
+            {
+                _arbiter.MainWindowClosed();
+            }
+
+            RemoveFailed(tracked);
+            return null;
+        }
+    }
+
+    private static MainWindow ShowBuilt(MainWindow window, Action<MainWindow>? beforeShow)
+    {
+        beforeShow?.Invoke(window);
+        window.Show();
+        window.Activate();
+        return window;
+    }
+
+    /// <summary>
+    /// Removes a document window that failed to open and closes it; when it failed before it was built, applies the last-window
+    /// rule to what is left.
+    /// </summary>
+    private void RemoveFailed(DocumentWindow? tracked)
+    {
+        if (tracked is null)
+        {
+            ApplyLastWindowRule(gone: null);
+            return;
+        }
+
+        RemoveDocumentWindow(tracked);
+        CloseFailedWindow(tracked.Composition.Window);
+    }
+
+    /// <summary>Closes a document window that failed to show, so no window the app no longer follows keeps the process alive.</summary>
     private void CloseFailedWindow(Window window)
     {
         try
         {
             window.Close();
         }
-        // The window is already forgotten; a close that fails too is logged, never rethrown into the UI job.
+        // The window is already removed; a close that fails too is logged, never rethrown into the UI job.
         catch (Exception exception)
         {
-            Log.LogError("Open: a viewer window that failed to show could not be closed either.", exception);
+            Log.LogError("A document window that failed to show could not be closed either.", exception);
         }
     }
 
-    private MainWindowComposition AddMain()
+    /// <summary>Runs the start's dev hooks on the start window before it shows.</summary>
+    private static void ApplyDevStartHooks(MainWindow window)
     {
-        (ThemeBridge bridge, WidthStore widths) = Shared();
-        MainWindowComposition composition = MainWindowFactory.Create(bridge, widths, Log);
-        _main = Track(composition);
-        return composition;
-    }
-
-    private MainWindowComposition AddViewer(IReadOnlyList<string> files)
-    {
-        (ThemeBridge bridge, WidthStore widths) = Shared();
-        MainWindowComposition composition = MainWindowFactory.CreateViewer(bridge, widths, files, Log);
-        _viewers.Add(Track(composition));
-        return composition;
+        ApplyDevWidthPopover(window);
+        ApplyDevThemeSettingsEntry(window);
     }
 
     /// <summary>
     /// The bridge, the settings writer and the width store every document window shares, made with the first window: the
-    /// bridge applies <c>settings.json</c> once, and the writer saves each theme pick back.
+    /// bridge applies <c>settings.json</c> once, and the writer saves each theme pick back. Every part is built before any field
+    /// is set: when a step throws, what this call built is disposed, newest first, and the exception rethrown, so a later window
+    /// builds the whole set again and nothing half-built is left behind.
     /// </summary>
     private (ThemeBridge Bridge, WidthStore Widths) Shared()
     {
-        if (_bridge is { } bridge && _widths is { } widths)
+        if (_bridge is { } existingBridge && _widths is { } existingWidths)
         {
-            return (bridge, widths);
+            return (existingBridge, existingWidths);
         }
 
         IAppLog log = Log;
-        bridge = MainWindowFactory.CreateBridge(this, log);
-        _bridge = bridge;
-        _themesSync = CreateThemesSync(bridge, log);
-        _themeSettingsHost = ThemeSettingsHost.Create(bridge, log);
-        var settings = new SettingsStore(AppPaths.SettingsFile, log);
-        AppSettings saved = settings.Load();
-        bridge.Apply(saved.ThemeId, saved.Appearance);
-        _settingsWriter = new SettingsWriter(settings, log);
-        _settingsWatcher = CreateSettingsWatcher(settings, _settingsWriter, log);
-        _settingsWatcher.Changed += OnSettingsFileChanged;
-        bridge.RequestChanged += OnThemeRequestChanged;
-        widths = new WidthStore(AppPaths.WidthsFile, log);
-        _widths = widths;
-        return (bridge, widths);
+        Stack<IDisposable> built = new();
+        try
+        {
+            ThemeBridge bridge = MainWindowFactory.CreateBridge(this, log);
+            built.Push(bridge);
+            IDisposable themesSync = CreateThemesSync(bridge, log);
+            built.Push(themesSync);
+            var host = ThemeSettingsHost.Create(bridge, log);
+            built.Push(host);
+            var settings = new SettingsStore(AppPaths.SettingsFile, log);
+            AppSettings saved = settings.Load();
+            bridge.Apply(saved.ThemeId, saved.Appearance);
+            var writer = new SettingsWriter(settings, log);
+            built.Push(writer);
+            SettingsWatcher watcher = CreateSettingsWatcher(settings, writer, log);
+            built.Push(watcher);
+            var widths = new WidthStore(AppPaths.WidthsFile, log);
+            watcher.Changed += OnSettingsFileChanged;
+            bridge.RequestChanged += OnThemeRequestChanged;
+            _bridge = bridge;
+            _themesSync = themesSync;
+            _themeSettingsHost = host;
+            _settingsWriter = writer;
+            _settingsWatcher = watcher;
+            _widths = widths;
+            return (bridge, widths);
+        }
+        catch
+        {
+            DisposeBuilt(built, log);
+            throw;
+        }
+    }
+
+    /// <summary>Disposes what a failed <see cref="Shared"/> built, newest first; a dispose that throws is logged and the rest still run.</summary>
+    private static void DisposeBuilt(Stack<IDisposable> built, IAppLog log)
+    {
+        while (built.TryPop(out IDisposable? part))
+        {
+            try
+            {
+                part.Dispose();
+            }
+            // The build's own exception is the one the caller sees; a failed cleanup is logged so it is not lost.
+            catch (Exception exception)
+            {
+                log.LogError($"Could not dispose a {part.GetType().Name} after building the shared window parts failed.", exception);
+            }
+        }
     }
 
     /// <summary>
-    /// Follows a document window until it closes: its activations order the viewers, its theme settings requests open the theme
-    /// settings window, and its close forgets it.
+    /// Follows a document window until it closes: each activation stamps it as the most recently active, its theme settings
+    /// requests open the theme settings window, and its close removes it.
     /// </summary>
     private DocumentWindow Track(MainWindowComposition composition)
     {
         var tracked = new DocumentWindow(composition);
         MainWindow window = composition.Window;
-        void OnActivated(object? sender, EventArgs e)
-        {
-            if (_viewers.Remove(tracked))
-            {
-                _viewers.Add(tracked);
-            }
-        }
+        void OnActivated(object? sender, EventArgs e) => tracked.ActivatedAt = ++_activationStamp;
 
-        void OnClosed(object? sender, EventArgs e) => OnDocumentWindowClosed(tracked);
+        void OnClosed(object? sender, EventArgs e) => RemoveDocumentWindow(tracked);
 
         window.Activated += OnActivated;
         window.Closed += OnClosed;
@@ -414,24 +574,66 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Forgets the closed window. When it was the last document window, the app stops answering first; then the window's
-    /// composition is disposed, which saves the main window's session.
+    /// The one removal path of a document window, closed or failed to show: unhooks it, forgets it (a main window is reported
+    /// closed to the arbiter), then applies the last-window rule once. A window already removed is left alone.
     /// </summary>
-    private void OnDocumentWindowClosed(DocumentWindow tracked)
+    private void RemoveDocumentWindow(DocumentWindow tracked)
     {
         tracked.Unhook();
         if (ReferenceEquals(_main, tracked))
         {
             _main = null;
+            _arbiter.MainWindowClosed();
+        }
+        else if (!_viewers.Remove(tracked))
+        {
+            return;
         }
 
-        _viewers.Remove(tracked);
-        if (_main is null && _viewers.Count == 0)
+        ApplyLastWindowRule(tracked.Composition);
+    }
+
+    /// <summary>
+    /// Applies the last-window rule to the document windows left: when it says stop and quit, the app stops answering first, then
+    /// <paramref name="gone"/>'s composition is disposed (saving the main window's session), then one quit job is posted; never a
+    /// shutdown inside the close.
+    /// </summary>
+    private void ApplyLastWindowRule(MainWindowComposition? gone)
+    {
+        LastWindowStep step = _policy.DocumentWindowGone(DocumentWindowCount);
+        if (step == LastWindowStep.StopAndQuit)
         {
             RunStopOnce();
         }
 
-        tracked.Composition.Dispose();
+        gone?.Dispose();
+        if (step == LastWindowStep.StopAndQuit)
+        {
+            AppLifetimePolicy policy = _policy;
+            Dispatcher.UIThread.Post(() => QuitIfStillEmpty(policy));
+        }
+    }
+
+    /// <summary>
+    /// The quit job: shuts the app down unless the start that posted it was replaced, a document window opened meanwhile or the
+    /// app is already exiting.
+    /// </summary>
+    private void QuitIfStillEmpty(AppLifetimePolicy postedBy)
+    {
+        if (!ReferenceEquals(postedBy, _policy) || DocumentWindowCount > 0 || _exited)
+        {
+            return;
+        }
+
+        Log.LogInfo("Quit: no document window is left; shutting the app down.");
+        if (QuitForTests is { } quit)
+        {
+            quit();
+        }
+        else
+        {
+            _desktop?.Shutdown();
+        }
     }
 
     /// <summary>
@@ -510,44 +712,13 @@ public partial class App : Application
         return _viewers.Find(viewer => ReferenceEquals(viewer.Composition.Window, window))?.Composition;
     }
 
-    /// <summary>Forgets a viewer whose window failed to show, and disposes what it owns.</summary>
-    private void Forget(MainWindowComposition composition)
-    {
-        DocumentWindow? tracked = _viewers.Find(viewer => ReferenceEquals(viewer.Composition, composition));
-        if (tracked is not null)
-        {
-            _viewers.Remove(tracked);
-            tracked.Unhook();
-        }
-
-        composition.Dispose();
-    }
-
-    /// <summary>Marks the app stopping and runs this start's stop action, once.</summary>
+    /// <summary>Runs this start's stop action, once.</summary>
     private void RunStopOnce()
     {
-        _stopping = true;
         Action? stop = _pendingStop;
         _pendingStop = null;
         stop?.Invoke();
     }
-
-    /// <summary>Brings a window forward on each activate the gate raises, and marks the gate ready on the start window's first show.</summary>
-    private void ConnectGate(ActivationGate gate, Window window)
-    {
-        _connectedGate = gate;
-        gate.Activate += OnActivateRequested;
-        void MarkReadyOnce(object? sender, EventArgs e)
-        {
-            window.Opened -= MarkReadyOnce;
-            gate.MarkReady();
-        }
-
-        window.Opened += MarkReadyOnce;
-    }
-
-    /// <summary>Raised on whichever thread asked; the work moves to the UI thread and never blocks the asker.</summary>
-    private void OnActivateRequested(object? sender, EventArgs e) => Dispatcher.UIThread.Post(BringWindowForward);
 
     /// <summary>Brings the main window forward, or with no main window open the most recently active viewer window.</summary>
     private void BringWindowForward()
@@ -559,7 +730,7 @@ public partial class App : Application
         }
         else if (_viewers.Count > 0)
         {
-            Raise(_viewers[^1].Composition.Window);
+            Raise(_viewers.MaxBy(viewer => viewer.ActivatedAt)!.Composition.Window);
             Log.LogInfo("Activate: viewer window brought forward.");
         }
         else
@@ -581,17 +752,21 @@ public partial class App : Application
 
     /// <summary>
     /// Releases what the app owns when it exits: disposes the theme settings host, closing its window without the unsaved-edits
-    /// confirm, runs the stop action if no last window closed first, disposes every document window's composition (saving the
-    /// main session), then the themes folder watcher, then the settings file watcher, then the settings writer, waiting up to
-    /// 2 s for the theme picks still being saved, then the bridge. Safe to call more than once.
+    /// confirm, runs the stop action if the app had not begun stopping (the last-window rule's stop came first), disposes every
+    /// document window's composition (saving the main session), then the themes folder watcher, then the settings file watcher,
+    /// then the settings writer, waiting up to 2 s for the theme picks still being saved, then the bridge. A quit job still queued
+    /// does nothing once this ran. Safe to call more than once.
     /// </summary>
     internal void ReleaseMainWindow()
     {
+        _exited = true;
         _themeSettingsHost?.Dispose();
         _themeSettingsHost = null;
-        RunStopOnce();
-        _connectedGate?.Activate -= OnActivateRequested;
-        _connectedGate = null;
+        if (_policy.Exiting())
+        {
+            RunStopOnce();
+        }
+
         if (_main is { } main)
         {
             _main = null;
@@ -761,6 +936,9 @@ public partial class App : Application
         public MainWindowComposition Composition { get; } = composition;
 
         public Action Unhook { get; set; } = () => { };
+
+        /// <summary>The app's activation stamp at this window's last activation; 0 until it is first activated.</summary>
+        public long ActivatedAt { get; set; }
     }
 
     /// <summary>

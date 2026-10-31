@@ -47,6 +47,17 @@ public sealed class InstanceCoordinatorTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Default_reply_bound_exceeds_the_open_deadline()
+    {
+        using InstanceCoordinator coordinator = new(_lockPath, _log);
+
+        Assert.True(
+            coordinator.ReplyBound > Yamv.Core.Launch.SecondLaunch.OpenDeadline,
+            $"the default reply bound {coordinator.ReplyBound} must exceed the launcher's open deadline {Yamv.Core.Launch.SecondLaunch.OpenDeadline}"
+        );
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

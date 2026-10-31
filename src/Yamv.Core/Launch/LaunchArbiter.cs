@@ -21,10 +21,10 @@ public sealed record StartGraceTimer(TimeSpan Delay) : LaunchAction;
 public sealed record None : LaunchAction;
 
 /// <summary>
-/// The macOS launch state machine: turns framework, file-open and Dock/activate events into the windows to
-/// open. It keeps no timer of its own: <see cref="FrameworkReady"/> asks the caller to start one, and the
-/// caller reports its end back through <see cref="GraceElapsed"/>. Inputs that arrive in an order the machine
-/// does not cover return <see cref="None"/> and never throw.
+/// The launch state machine: turns framework, file-open and Dock/activate events into the windows to open. <see cref="Start"/>
+/// opens the start window at once; for the macOS grace period it keeps no timer of its own: <see cref="FrameworkReady"/> asks
+/// the caller to start one, and the caller reports its end back through <see cref="GraceElapsed"/>. Inputs that arrive in an
+/// order the machine does not cover return <see cref="None"/> and never throw.
 /// </summary>
 /// <remarks>
 /// The arbiter is driven from one thread, the UI thread. The main window counts as open from the moment
@@ -40,6 +40,35 @@ public sealed class LaunchArbiter
     private bool _filesSeen;
     private bool _mainRequested;
     private bool _mainOpen;
+
+    /// <summary>
+    /// Whether the arbiter counts the main window as open: from <see cref="OpenMainWindow"/> or <see cref="MainWindowOpened"/>
+    /// until <see cref="MainWindowClosed"/>.
+    /// </summary>
+    public bool MainWindowOpen => _mainOpen;
+
+    /// <summary>
+    /// Reports that the UI framework initialized for a start with no grace period: a viewer window over <paramref name="files"/>
+    /// when the launch named any, else the main window. A second call, or one after <see cref="FrameworkReady"/>, returns <see cref="None"/>.
+    /// </summary>
+    /// <param name="files">The full paths the launch named, possibly none.</param>
+    public LaunchAction Start(IReadOnlyList<string> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        if (_frameworkReady)
+        {
+            return new None();
+        }
+
+        _frameworkReady = true;
+        if (files.Count > 0)
+        {
+            _filesSeen = true;
+            return new OpenViewerWindow(files);
+        }
+
+        return OpenMain();
+    }
 
     /// <summary>Reports that the UI framework initialized; the caller starts the grace timer.</summary>
     public LaunchAction FrameworkReady()

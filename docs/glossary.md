@@ -1,7 +1,6 @@
 # Glossary
 
 - **Abandoned request**: an instance request nobody has begun that the server ended itself: its launcher hung up, the reply bound passed, the server is stopping, or the handler threw. `InstanceRequest.TryBegin` then returns false, so the app never carries it out; a late `Complete` is ignored.
-- **Activation gate**: holds an `activate` request that arrives before the main window exists and delivers it once the window is shown, coalescing duplicates.
 - **App default**: the content width a document uses when no folder at or above it has its own width; set from the popover's All documents segment ([content-width.md](design/content-width.md)).
 - **Appearance**: Match system, Light or Dark — which half of the current theme family is shown.
 - **Asset cache**: the versioned folder under the local app-data dir (`YAMV/web/{assembly version id}/`) that the document page's template, CSS, JS, fonts and vendored libraries are extracted to, so the page loads over `file://`.
@@ -12,6 +11,7 @@
 - **Debounce**: waiting for a burst of events to go quiet before acting once: `DocumentFileWatcher` reports a batch 150 ms after the last event naming an open document, at most 1 s after the first; the session saver and the theme folder watcher wait 500 ms and 300 ms the same way.
 - **Disk-change bar**: the bar under the theme settings window's title bar that says the selected theme's file changed on disk while unsaved edits are open, with Reload and Keep mine; it takes the warning colours when the file no longer parses ([look.md](design/look.md)).
 - **Document surface**: what the window logic sees of the document page (`IDocumentSurface`, implemented by `DocumentView`); tests substitute a fake.
+- **Document window**: a main window or a viewer window; the app counts these, and the last-window rule runs when none is left.
 - **Drag signal**: the page's `drag` message (`over: true|false`, raised as `IDocumentSurface.DragOverChanged`) saying files are being dragged over it; it raises the drop overlay and, for up to 2 s and only until the page reports the drag left or the drag ends, marks a `NewWindow` `file:` link as a dropped file. A drag begun inside the page sends none.
 - **Drop overlay**: the popup below the title bar that shows "Drop to open" or the grey refusal while files are dragged over a window (`DropOverlayViewModel`, `Views/DropOverlay`) ([look.md](design/look.md)).
 - **Edit as text**: opening a user theme's `.json` file in the app the system associates with it (`IFileActions.OpenWithDefaultApp`, built by `OpenFileCommand`).
@@ -28,11 +28,13 @@
 - **Import notice**: the modal an Import shows before copying a theme file, with a card for the file (name, author, halves, whether it has css, its path, its errors and warnings) and the warning about css that loads from the web; the card is read by `ThemeCatalog.Inspect` into a `ThemeInspection` ([themes.md](design/themes.md)).
 - **Inherited value**: a token's value in the token editor when the tab sets none: shown grey, taken from Shared or the defaults (on the Shared tab, from the defaults). Setting it, even to the same value, makes it set; ↺ removes a set value.
 - **Last good version**: the version of the theme in use that `ThemeBridge` keeps applying while its file is invalid or gone, even when a built-in has the same id.
+- **Last-window rule**: what the app does when its last document window goes (`AppLifetimePolicy`): on Windows it stops answering launches and quits, on macOS it keeps running with no window and stops answering only at exit.
 - **Launch arbiter**: the Core state machine that turns framework, file-open and Dock/activate events of a macOS launch into what it decides: a main window, a viewer window, or activating the main window.
 - **Link policy**: the Core rule (`LinkPolicy.Decide`) that turns a clicked link into a `LinkDecision`: open externally, open as a document, open with the default app, ask first, or ignore.
 - **Live reload**: re-reading and redrawing an open document when its file changes on disk; Core's `DocumentFileWatcher` reports which open documents may have changed, watching each folder once and polling a folder that cannot be watched, where only a changed length or write time counts.
 - **Main instance**: the one YAMV process per user, the one that holds the instance lock; it holds the main window, which remembers its open documents between runs, and every viewer window. A later launch brings it forward (no files) or sends it the files and exits.
-- **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted when the main instance stops answering, as its last document window closes, before the main session's final save.
+- **Main on demand**: building the main window from `session.json` when an `activate` finds none open (a no-argument launch while only viewer windows are open); if building fails, the most recently active viewer comes forward instead.
+- **Main-instance pid file**: `main.pid` beside `main.lock`, written by the main instance with its pid and process start time so a second launch can tell the recorded process is still the main instance; deleted when the main instance stops answering (on Windows as its last document window closes, on macOS at exit), before the main session's final save.
 - **Missing document**: an open document whose file no longer exists, or a path a viewer launch named that does not exist; it stays in the tree, greyed, until removed or until the file comes back.
 - **Missing row**: the greyed "Missing on disk" row the theme settings window keeps for the theme in use, and for a selected theme no longer in use, whose file was deleted or renamed outside the app, in its last loaded version; only Save (which writes the file again) and Revert are on ([look.md](design/look.md)).
 - **Open message**: what a launch with files sends the running app: `open`, a space, then a JSON array of full paths (`OpenMessage`); the app answers with one reply (`opened`, `refused` or `closing`) on the same connection.
@@ -42,6 +44,7 @@
 - **Popover**: the content-width control the title bar's ⟷ button opens: a native Avalonia Popup, which is a window of its own so it can sit over the web view ([content-width.md](design/content-width.md)).
 - **ProgID**: a Windows programmatic identifier, a registry key naming a file type and how to open it; YAMV's is `YAMV.Markdown`.
 - **Program twin**: a program of the same name beside a linked file (`notes.cmd` beside `notes`), which the Windows shell may run instead of the file when it reads the file's name as having no extension.
+- **Ready latch**: the Core `UiReadyLatch` that holds every UI job posted from a pool thread (an `open` or an `activate`, each its own job) until the App opens it at the end of framework initialization, then releases them in arrival order.
 - **Reply bound**: how long the instance server keeps a request's connection open for the app's reply, 10 s (`InstanceCoordinator.ReplyBound`); past it the request is abandoned and the connection closed with no reply. The launcher's open deadline stays below it.
 - **Reveal**: showing a path in the platform's file manager from a tree menu: a file is shown selected in Explorer or Finder, a folder or group root is opened, and a missing document opens its nearest folder that still exists (`RevealCommand`).
 - **Saved for**: the content-width popover's segmented control: the folders a width can be saved for, deepest first, then All documents (`WidthScopes`, [content-width.md](design/content-width.md)).
