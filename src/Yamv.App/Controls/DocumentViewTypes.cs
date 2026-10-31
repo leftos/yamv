@@ -21,8 +21,21 @@ public sealed record FindResult(int Current, int Total);
 /// </param>
 public sealed record ScrollPosition(double Fraction, ScrollAnchor? Anchor);
 
+/// <summary>Where an activated link came from.</summary>
+public enum LinkSource
+{
+    /// <summary>A primary or middle click on a link in the shown document.</summary>
+    Click,
+
+    /// <summary>The web view started a navigation away from the page, such as a file dropped on it.</summary>
+    Navigation,
+
+    /// <summary>The web view asked for a new window.</summary>
+    NewWindow,
+}
+
 /// <summary>A link the user activated in the page, which the page never follows itself.</summary>
-public sealed class LinkActivatedEventArgs(string href, Uri? resolvedUri, int button) : EventArgs
+public sealed class LinkActivatedEventArgs(string href, Uri? resolvedUri, int button, LinkSource source, string? documentPath) : EventArgs
 {
     /// <summary>The link target as written in the document.</summary>
     public string Href { get; } = href;
@@ -30,8 +43,14 @@ public sealed class LinkActivatedEventArgs(string href, Uri? resolvedUri, int bu
     /// <summary>The target made absolute against the document's path, or null when it can't be.</summary>
     public Uri? ResolvedUri { get; } = resolvedUri;
 
-    /// <summary>The DOM mouse button: 0 primary, 1 middle.</summary>
+    /// <summary>The DOM mouse button: 0 primary, 1 middle; 0 for a navigation or a new window.</summary>
     public int Button { get; } = button;
+
+    /// <summary>Whether a click, a navigation or a new-window request activated the link.</summary>
+    public LinkSource Source { get; } = source;
+
+    /// <summary>The full path of the document shown when the link was activated, as the show stored it; null when none is shown.</summary>
+    public string? DocumentPath { get; } = documentPath;
 }
 
 /// <summary>An app shortcut pressed while the page had focus, passed on because the host's key handling never sees it.</summary>
@@ -91,12 +110,13 @@ internal sealed class PageMessage
 
     public string? Message { get; init; }
 
-    /// <summary>The render a <c>rendered</c> or <c>scroll</c> message belongs to.</summary>
+    /// <summary>The render a <c>rendered</c>, <c>scroll</c> or <c>link</c> message belongs to.</summary>
     public int? Generation { get; init; }
 }
 
 /// <summary>
-/// The options object passed to the page's <c>yamv.render</c>. <c>ContentWidth</c> is the CSS value (<c>"760px"</c> or
+/// The options object passed to the page's <c>yamv.render</c>. <c>Fragment</c> is an element id, already decoded (by
+/// <c>LinkPolicy</c>). <c>ContentWidth</c> is the CSS value (<c>"760px"</c> or
 /// <c>"none"</c>) the page sets once the outgoing document is hidden. <c>DocumentPath</c> tells the page whether it is
 /// asked to show again the document it shows, in which case it keeps its own top block and find match and ignores
 /// <c>AnchorLine</c>; otherwise it scrolls <c>AnchorOffset</c> of the way down the block at <c>AnchorLine</c>, else to

@@ -380,7 +380,7 @@
   // Lands the view: on the fragment's element; else, on a reload of a page that was at its very top or bottom, there
   // again; else on the anchor; else at options.scroll.
   function restoreScroll(settings, marks, blocks) {
-    if (settings.fragment && scrollToFragment(settings.fragment)) {
+    if (settings.fragment && scrollToId(settings.fragment)) {
       return;
     }
     if (marks.pin) {
@@ -861,16 +861,18 @@
 
   // ---------- links and scroll ----------
 
-  // Scrolls the fragment's element to the top of the view; false when the page has no such element.
-  function scrollToFragment(fragment) {
-    const target = document.getElementById(decodeFragment(fragment));
+  // Scrolls the element whose id is the already decoded id to the top of the view; false when the page has no such
+  // element, which does nothing and posts nothing.
+  function scrollToId(id) {
+    const target = document.getElementById(id);
     if (target) {
       target.scrollIntoView({ block: "start" });
     }
     return target !== null;
   }
 
-  // A primary click (click) or a middle click (auxclick, button 1) on a document link; other buttons do nothing.
+  // A primary click (click) or a middle click (auxclick, button 1) on a document link; other buttons do nothing. The
+  // second click of a double click is swallowed, so a link posts once.
   function onLinkClick(event) {
     if (event.type === "auxclick" && event.button !== 1) {
       return;
@@ -880,14 +882,17 @@
       return;
     }
     event.preventDefault();
+    if (event.detail > 1) {
+      return;
+    }
     const href = anchor.getAttribute("href");
     if (href.startsWith("#")) {
       if (event.button === 0) {
-        scrollToFragment(href.slice(1));
+        scrollToId(decodeFragment(href.slice(1)));
       }
       return;
     }
-    post({ type: "link", href, button: event.button });
+    post({ type: "link", href, button: event.button, generation: renderGeneration });
   }
 
   document.addEventListener("click", onLinkClick);
@@ -905,6 +910,6 @@
     post({ type: "error", where: "csp", message: `${event.effectiveDirective} blocked ${event.blockedURI || "inline code"}` });
   });
 
-  window.yamv = { render, setTheme, setContentWidth, find, clearFind, openFind };
+  window.yamv = { render, setTheme, setContentWidth, find, clearFind, openFind, scrollToId };
   post({ type: "ready" });
 })();

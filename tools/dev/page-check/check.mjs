@@ -147,7 +147,7 @@ try {
   const links = (await messages()).filter((m) => m.type === "link");
   check("right-click on a link posts nothing", links.length === 2 && !links.some((m) => m.button === 2), links);
   check("middle then left click post buttons 1 and 0", links.length === 2 && links[0].button === 1 && links[1].button === 0 && links[1].href === "other.md", links);
-  // The host refuses a file: link with a host and raises one outside the group root; the page posts both as written.
+  // Core refuses a file: link with a host and one outside the group root; the page posts both as written.
   await clearMessages();
   await page.click("#host-link");
   await page.click("#outside-link");
@@ -175,11 +175,11 @@ try {
   });
   check("clearFind restores the text exactly", restored.text === original && restored.nodes === 1, restored);
 
-  // Step 11: the render's fragment is decoded, and scroll messages carry the generation.
+  // Step 11: the render's fragment arrives decoded (by the host's LinkPolicy), and scroll messages carry the generation.
   await clearMessages();
-  await render({ ...baseOptions, generation: 8, fragment: "caf%C3%A9" });
+  await render({ ...baseOptions, generation: 8, fragment: "café" });
   const scrolled = await page.evaluate(() => window.scrollY);
-  check("an encoded fragment scrolls to its element", scrolled > 0, scrolled);
+  check("a decoded fragment scrolls to its element", scrolled > 0, scrolled);
   // The render's own report arrives once it has settled, so the scroll below is the only source of a report after it.
   await waitForMessage((generation) => window.__messages.some((m) => m.type === "scroll" && m.generation === generation), 8);
   await page.evaluate(() => window.scrollTo(0, 10));
@@ -656,6 +656,53 @@ try {
   }, [diagramMoved, { ...diagramOptions, generation: 56 }]);
   check("a theme change during a staged reload reaches its diagrams", themed.changedWhileStaged && themed.newTheme, themed);
   await page.evaluate(() => window.yamv.setTheme(""));
+
+  // Scroll to a fragment without a render: scrollToId takes the id decoded once (by the host's Core), so an id holding
+  // "%25" and a '"' is found as written; a render's fragment arrives decoded and is used as written.
+  {
+    const hostileId = 'frag%25"id';
+    const fragmentHtml = `${blocksHtml(40, 0, "Before")}\n<h2 id="frag%25&quot;id" data-line="80">Target</h2>\n${blocksHtml(40, 82, "After")}`;
+    const fragmentOptions = { ...anchorOptions, documentPath: "C:\\docs\\fragment.md" };
+    const targetTop = () => page.evaluate((id) => Math.round(document.getElementById(id).getBoundingClientRect().top), hostileId);
+    await show(fragmentHtml, { ...fragmentOptions, generation: 60 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForFunction(() => window.scrollY === 0);
+    await clearMessages();
+    const found = await page.evaluate((id) => window.yamv.scrollToId(id), hostileId);
+    await page.waitForFunction((id) => Math.abs(document.getElementById(id).getBoundingClientRect().top) <= 1, hostileId);
+    check("scrollToId scrolls to an id holding %25 and a quote, decoded once", found === true && Math.abs(await targetTop()) <= 1, await targetTop());
+    await clearMessages();
+    const missing = await page.evaluate(() => {
+      const before = window.scrollY;
+      return { found: window.yamv.scrollToId("no-such-id"), moved: window.scrollY !== before };
+    });
+    // A scroll report the earlier scroll left pending may still arrive; scrollToId itself posts nothing.
+    const afterMissing = (await messages()).filter((message) => message.type !== "scroll");
+    const missingOk = missing.found === false && !missing.moved && afterMissing.length === 0;
+    check("scrollToId of a missing id does nothing and posts nothing", missingOk, { missing, afterMissing });
+    // The host passes a render's fragment already decoded (by LinkPolicy); the page decodes it no further.
+    const againOptions = { ...fragmentOptions, documentPath: "C:\\docs\\fragment-again.md", fragment: hostileId, generation: 61 };
+    await show(fragmentHtml, againOptions);
+    await page.waitForFunction((id) => Math.abs(document.getElementById(id).getBoundingClientRect().top) <= 1, hostileId);
+    check("a render with the decoded fragment lands on the same element", Math.abs(await targetTop()) <= 1, await targetTop());
+    await clearMessages();
+    await show(fragmentHtml, { ...fragmentOptions, documentPath: "C:\\docs\\fragment-percent.md", fragment: "100%", generation: 62 });
+    const percentErrors = (await messages()).filter((message) => message.type === "error");
+    check("a render whose fragment holds a bare % posts no error", percentErrors.length === 0, percentErrors);
+  }
+
+  // A double click on a link posts it once: a single click elsewhere afterwards is the sentinel that the clicks are done.
+  {
+    await show(fixture, { ...baseOptions, generation: 70 });
+    await clearMessages();
+    await page.dblclick("#link");
+    await page.click("#outside-link");
+    await page.waitForFunction(() => window.__messages.some((message) => message.type === "link" && message.href === "../../../outside.md"));
+    const posted = (await messages()).filter((message) => message.type === "link").map((message) => message.href);
+    const sentinel = posted.indexOf("../../../outside.md");
+    const beforeSentinel = posted.slice(0, sentinel);
+    check("a double click on a link posts it once", beforeSentinel.length === 1 && beforeSentinel[0] === "other.md", posted);
+  }
 } finally {
   await browser.close();
 }

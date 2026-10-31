@@ -1,6 +1,8 @@
 using System.Text.Json;
+using Avalonia.Threading;
 using Yamv.App.Controls;
 using Yamv.App.Tests.Fakes;
+using Yamv.Core.Rendering;
 using Yamv.Core.Session;
 
 namespace Yamv.App.Tests.Controls;
@@ -9,6 +11,9 @@ public sealed class DocumentViewScrollMessageTests
 {
     private static PageMessage Parse(string body) =>
         JsonSerializer.Deserialize(body, PageJsonContext.Default.PageMessage) ?? throw new InvalidOperationException("no message");
+
+    private static DocumentShow Show(string path) =>
+        new(new RenderedDocument("<p>x</p>", null, false, false), path, Path.GetDirectoryName(path) ?? path, 0, null, null, null);
 
     [Fact]
     public void A_scroll_message_carries_its_fraction_and_anchor_to_ScrollChanged()
@@ -67,6 +72,63 @@ public sealed class DocumentViewScrollMessageTests
             view.Handle(Parse("""{"type":"scroll","value":0.5,"line":8,"offset":0.4,"generation":0}"""));
 
             Assert.Equal([new ScrollPosition(0.25, null), new ScrollPosition(0.5, new ScrollAnchor(8, 0.4))], raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_click_link_carries_source_click_and_the_document_path() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            List<LinkActivatedEventArgs> raised = [];
+            view.LinkActivated += (_, link) => raised.Add(link);
+            string document = Path.Combine(Path.GetTempPath(), "yamv-link-doc", "a.md");
+            _ = view.ShowAsync(Show(document));
+
+            view.Handle(Parse("""{"type":"link","href":"other.md","button":1,"generation":1}"""));
+            Dispatcher.UIThread.RunJobs();
+
+            LinkActivatedEventArgs link = Assert.Single(raised);
+            Assert.Equal(LinkSource.Click, link.Source);
+            Assert.Equal(document, link.DocumentPath);
+            Assert.Equal("other.md", link.Href);
+            Assert.Equal(1, link.Button);
+            Assert.Equal(new Uri(Path.Combine(Path.GetTempPath(), "yamv-link-doc", "other.md")), link.ResolvedUri);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_link_from_an_older_render_is_dropped() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            List<LinkActivatedEventArgs> raised = [];
+            view.LinkActivated += (_, link) => raised.Add(link);
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-link-doc", "a.md")));
+
+            view.Handle(Parse("""{"type":"link","href":"other.md","button":0,"generation":0}"""));
+            view.Handle(Parse("""{"type":"link","href":"other.md","button":0}"""));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_file_link_with_a_host_is_raised_not_dropped() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            List<LinkActivatedEventArgs> raised = [];
+            view.LinkActivated += (_, link) => raised.Add(link);
+
+            view.Handle(Parse("""{"type":"link","href":"file://host/share/doc.md","button":0,"generation":0}"""));
+            Dispatcher.UIThread.RunJobs();
+
+            LinkActivatedEventArgs link = Assert.Single(raised);
+            Assert.Equal("host", link.ResolvedUri?.Host);
+            Assert.Equal(LinkSource.Click, link.Source);
+            Assert.Null(link.DocumentPath);
             return Task.CompletedTask;
         });
 

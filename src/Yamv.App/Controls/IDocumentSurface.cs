@@ -35,6 +35,12 @@ public interface IDocumentSurface
     /// </summary>
     Task SetContentWidthAsync(double? px);
 
+    /// <summary>
+    /// Scrolls the shown document to the element whose id is <paramref name="fragment"/>, without a render; the fragment is
+    /// already decoded (by <c>LinkPolicy</c>). A missing id does nothing.
+    /// </summary>
+    Task ScrollToFragmentAsync(string fragment);
+
     /// <summary>Opens the in-page find bar and focuses its field.</summary>
     Task OpenFindAsync();
 
@@ -56,7 +62,10 @@ public interface IDocumentSurface
 /// The block (the first at or after the anchor's line) whose point the anchor's offset down goes to the top of the view, or
 /// null for none. A page already showing this document keeps its own top block, or its pin to the top or bottom, instead.
 /// </param>
-/// <param name="Fragment">An element id to scroll to, which wins over <paramref name="Scroll"/> and <paramref name="Anchor"/>.</param>
+/// <param name="Fragment">
+/// An element id to scroll to, already decoded (by <c>LinkPolicy</c>), which wins over <paramref name="Scroll"/> and
+/// <paramref name="Anchor"/>; the page decodes it no further.
+/// </param>
 /// <param name="ContentWidth">The text measure in px, or null for full width.</param>
 public sealed record DocumentShow(
     RenderedDocument Document,

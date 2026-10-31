@@ -118,6 +118,29 @@ public static partial class RealPath
         && ((path.Length >= 2 && IsSeparator(path[0]) && IsSeparator(path[1])) || path.StartsWith(@"\??\", StringComparison.Ordinal));
 
     /// <summary>
+    /// Whether <paramref name="path"/>, which <see cref="IsUncOrDevice(string)"/> flags, names a network share: exactly two
+    /// separators and then a host name. Only an exact device prefix after the two separators, <c>?</c>, <c>.</c> or <c>??</c>
+    /// followed by a separator or the end of the path (<c>\\?\</c>, <c>\\.\</c>, <c>\\??\</c>, either slash), makes it a device path, so
+    /// <c>\\.host\s</c> and <c>\\?host\s</c> are shares; <c>\??\</c> starts with one separator and is no share.
+    /// </summary>
+    internal static bool IsNetworkShare(string path) =>
+        IsUncOrDevice(path)
+        && path.Length >= 3
+        && IsSeparator(path[0])
+        && IsSeparator(path[1])
+        && !IsSeparator(path[2])
+        && !IsDevicePrefixAfter(path, "?")
+        && !IsDevicePrefixAfter(path, ".")
+        && !IsDevicePrefixAfter(path, "??");
+
+    /// <summary>
+    /// Whether <paramref name="path"/>'s two leading separators are followed by <paramref name="marker"/> and a separator or
+    /// the end of the path.
+    /// </summary>
+    private static bool IsDevicePrefixAfter(string path, string marker) =>
+        path.AsSpan(2).StartsWith(marker, StringComparison.Ordinal) && (path.Length == 2 + marker.Length || IsSeparator(path[2 + marker.Length]));
+
+    /// <summary>
     /// Whether <paramref name="path"/> is fully qualified and, on Windows, rooted at a drive letter (<c>X:\</c>): the only paths
     /// that may be normalised, since normalising any other one reads the process's current folder.
     /// </summary>

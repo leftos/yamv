@@ -252,6 +252,33 @@ public sealed class RealPathTests : IDisposable
     }
 
     [Fact]
+    public void A_short_name_link_to_a_dot_ending_folder_is_refused()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows rewrites a name ending in a dot, and 8.3 short names exist only there.");
+        // Longer than an 8.3 name, so Windows gives it a short one ("dir." already fits 8.3 and gets none).
+        string folder = @"\\?\" + Path.Combine(tempRoot, "dot-ending-folder.");
+        string file = folder + @"\p.png";
+        Directory.CreateDirectory(folder);
+        try
+        {
+            File.WriteAllText(file, "png");
+            string shortName = Path.GetFileName(ShortPath(folder));
+            Assert.SkipWhen(shortName == "dot-ending-folder.", "This volume has 8.3 short names turned off.");
+            Uri link = new(Path.Combine(tempRoot, shortName, "p.png"));
+
+            Ignore decision = Assert.IsType<Ignore>(LinkPolicy.Decide(link, new LinkContext(tempRoot, RealPath.Resolve)));
+
+            // The resolver itself refuses the short name, before the policy's trailing-dot check: refused either way.
+            Assert.Equal(IgnoreKind.NotPlainPath, decision.Kind);
+        }
+        finally
+        {
+            File.Delete(file);
+            Directory.Delete(folder);
+        }
+    }
+
+    [Fact]
     public void FullPath_LeavesAShortNameUnexpanded()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "8.3 short names exist only on Windows.");

@@ -89,6 +89,15 @@ public sealed class FakeDocumentSurface : IDocumentSurface
         return hold.Task;
     }
 
+    /// <summary>Every fragment passed to <see cref="ScrollToFragmentAsync"/>, oldest first.</summary>
+    public List<string> ScrolledFragments { get; } = [];
+
+    public Task ScrollToFragmentAsync(string fragment)
+    {
+        ScrolledFragments.Add(fragment);
+        return Task.CompletedTask;
+    }
+
     public Task OpenFindAsync() => Task.CompletedTask;
 
     public Task<FindResult> FindAsync(string query, FindDirection direction) => Task.FromResult(new FindResult(0, 0));

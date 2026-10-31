@@ -48,7 +48,8 @@ public partial class HarnessWindow : Window
         string[] args = Environment.GetCommandLineArgs()[1..];
         _dark = HasOption(args, "--theme", "dark");
         _view = new DocumentView(_log);
-        _view.LinkActivated += (_, e) => _log.LogInfo($"Harness: LinkActivated href='{e.Href}' resolved='{e.ResolvedUri}' button={e.Button}");
+        _view.LinkActivated += (_, e) =>
+            _log.LogInfo($"Harness: LinkActivated href='{e.Href}' resolved='{e.ResolvedUri}' button={e.Button} source={e.Source}");
         _view.KeyForwarded += OnKeyForwarded;
         _view.ScrollChanged += (_, value) => _log.LogInfo($"Harness: ScrollChanged {DocumentView.Describe(value)}");
         Content = _view;

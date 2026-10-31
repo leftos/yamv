@@ -27,6 +27,9 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private bool _draining;
     private bool _templateNavigationAllowed = true;
     private Uri? _documentUri;
+
+    /// <summary>The full path of the shown document, as <see cref="ShowAsync"/> stored it; null before the first show.</summary>
+    private string? _documentPath;
     private ShowState? _lastShow;
     private ScrollPosition? _lastScroll;
 
@@ -75,6 +78,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         ArgumentNullException.ThrowIfNull(show.Document);
         string width = CssWidth(show.ContentWidth, nameof(show));
         string fullPath = Path.GetFullPath(show.DocumentPath);
+        _documentPath = fullPath;
         _documentUri = new Uri(fullPath);
         _lastScroll = null;
         int generation = ++_generation;
@@ -163,6 +167,17 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     {
         Dispatcher.UIThread.VerifyAccess();
         return FindCoreAsync($"window.yamv.find({Json(query)}, {Json(DirectionName(direction))})");
+    }
+
+    /// <summary>
+    /// Scrolls the shown document to the element whose id is <paramref name="fragment"/>, already decoded, without a render; a
+    /// missing id does nothing.
+    /// </summary>
+    public Task ScrollToFragmentAsync(string fragment)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        ArgumentNullException.ThrowIfNull(fragment);
+        return RunAsync(CallKind.Other, "scrollToId", $"window.yamv.scrollToId({Json(fragment)})");
     }
 
     /// <summary>Removes every find highlight, leaving the document text as it was.</summary>
@@ -405,7 +420,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         e.Cancel = true;
         if (e.Request is not null)
         {
-            RaiseLink(e.Request.OriginalString, e.Request, 0);
+            RaiseLink(e.Request.OriginalString, e.Request, 0, LinkSource.Navigation);
         }
     }
 
@@ -414,7 +429,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         e.Handled = true;
         if (e.Request is not null)
         {
-            RaiseLink(e.Request.OriginalString, e.Request, 0);
+            RaiseLink(e.Request.OriginalString, e.Request, 0, LinkSource.NewWindow);
         }
     }
 
@@ -467,8 +482,11 @@ public sealed class DocumentView : UserControl, IDocumentSurface
                 break;
             case "scroll":
                 break;
+            case "link" when message.Href is not null && message.Generation == _generation:
+                RaiseLink(message.Href, Resolve(message.Href), message.Button ?? 0, LinkSource.Click);
+                break;
             case "link" when message.Href is not null:
-                RaiseLink(message.Href, Resolve(message.Href), message.Button ?? 0);
+                _log.LogInfo($"A link from an older render dropped: '{message.Href}' (render {message.Generation}, now {_generation})");
                 break;
             case "key" when message.Key is not null:
                 KeyForwarded?.Invoke(this, new KeyForwardedEventArgs(message.Key, message.Ctrl, message.Meta, message.Shift, message.Alt));
@@ -518,16 +536,14 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         return Uri.TryCreate(text, UriKind.Absolute, out Uri? absolute) ? absolute : null;
     }
 
-    private void RaiseLink(string href, Uri? resolved, int button)
+    /// <summary>
+    /// Raises <see cref="LinkActivated"/> for every link as it came, with the shown document's path; <c>LinkPolicy</c> decides
+    /// what opens, a <c>file:</c> link with a host included.
+    /// </summary>
+    private void RaiseLink(string href, Uri? resolved, int button, LinkSource source)
     {
-        // A file: URL with a host names a network share; opening it would reach out over SMB.
-        if (resolved is not null && resolved.IsFile && !string.IsNullOrEmpty(resolved.Host))
-        {
-            _log.LogWarning($"Ignored a link to '{href}' in {_documentUri}: a file: link may not name a host");
-            return;
-        }
-
-        Dispatcher.UIThread.Post(() => LinkActivated?.Invoke(this, new LinkActivatedEventArgs(href, resolved, button)));
+        string? documentPath = _documentPath;
+        Dispatcher.UIThread.Post(() => LinkActivated?.Invoke(this, new LinkActivatedEventArgs(href, resolved, button, source, documentPath)));
     }
 
     private enum CallKind

@@ -45,6 +45,9 @@ public static class LinkPolicy
         ".log",
     ];
 
+    /// <summary>The <c>mailto</c> query fields a link keeps; any other, such as <c>attach</c>, is dropped.</summary>
+    private static readonly string[] MailtoFields = ["to", "cc", "bcc", "subject", "body"];
+
     /// <summary>The characters no file name may hold on this platform, apart from the folder separators.</summary>
     private static readonly SearchValues<char> ForbiddenNameCharacters = SearchValues.Create([
         .. Path.GetInvalidFileNameChars().Where(character => character != Path.DirectorySeparatorChar && character != Path.AltDirectorySeparatorChar),
@@ -63,19 +66,22 @@ public static class LinkPolicy
 
         if (uri is null || !uri.IsAbsoluteUri)
         {
-            return new Ignore("the link is not an absolute URI");
+            return new Ignore(IgnoreKind.NotPlainPath, "the link is not an absolute URI");
         }
 
         if (!uri.IsFile)
         {
-            return uri.Scheme.ToLowerInvariant() is "http" or "https" or "mailto"
-                ? new OpenExternal(uri)
-                : new Ignore($"the scheme '{uri.Scheme}' is not one YAMV opens");
+            return uri.Scheme.ToLowerInvariant() switch
+            {
+                "http" or "https" => new OpenExternal(uri, []),
+                "mailto" => MailtoDecision(uri),
+                _ => new Ignore(IgnoreKind.Scheme, $"the scheme '{uri.Scheme}' is not one YAMV opens"),
+            };
         }
 
         if (!string.IsNullOrEmpty(uri.Host))
         {
-            return new Ignore($"a file: link may not name a host, and '{uri.Host}' names one");
+            return new Ignore(IgnoreKind.NetworkShare, $"a file: link may not name a host, and '{uri.Host}' names one");
         }
 
         return DecideLocal(uri, context, normalising);
@@ -92,23 +98,31 @@ public static class LinkPolicy
         string? path = Normalise(uri.LocalPath, normalising);
         if (path is null)
         {
-            return new Ignore("the link's path is not one the platform accepts");
+            return new Ignore(IgnoreKind.NotPlainPath, "the link's path is not one the platform accepts");
         }
 
         if (RealPath.IsUncOrDevice(path))
         {
-            return new Ignore($"'{path}' names a network share or a device");
+            return new Ignore(ShareOrDeviceKind(path), $"'{path}' names a network share or a device");
         }
 
         if (path.AsSpan(Path.GetPathRoot(path)?.Length ?? 0).ContainsAny(ForbiddenNameCharacters))
         {
-            return new Ignore($"'{path}' holds a character no file name may hold, such as a ':' naming an alternate data stream");
+            return new Ignore(
+                IgnoreKind.NotPlainPath,
+                $"'{path}' holds a character no file name may hold, such as a ':' naming an alternate data stream"
+            );
         }
 
         ResolvedPath? real = context.Resolve(path);
-        if (real is null || RealPath.IsUncOrDevice(real.Path))
+        if (real is null || RealPath.IsUncOrDevice(real.Path) || !RealPath.IsLocalFullyQualified(real.Path))
         {
-            return new Ignore($"'{path}' does not resolve to a local path");
+            return new Ignore(IgnoreKind.NotPlainPath, $"'{path}' does not resolve to a local path");
+        }
+
+        if (OperatingSystem.IsWindows() && WindowsRewriteRefusal(path, real.Path, normalising) is { } rewrite)
+        {
+            return rewrite;
         }
 
         return OpensAsDocument(path, real) ? new OpenDocument(real.Path, path, Fragment(uri)) : DecideOtherFile(path, real, context);
@@ -123,13 +137,13 @@ public static class LinkPolicy
     {
         if (!real.Exists)
         {
-            return new Ignore($"'{path}' does not exist");
+            return new Ignore(IgnoreKind.Missing, $"'{path}' does not exist");
         }
 
         ResolvedPath? root = context.Resolve(context.GroupRoot);
         if (root is null || !IsInside(root.Path, real.Path))
         {
-            return new Ignore($"'{path}' is outside the document's group root");
+            return new Ignore(IgnoreKind.OutsideRoot, $"'{path}' is outside the document's group root");
         }
 
         bool viewable = !real.IsDirectory && IsViewable(path) && IsViewable(real.Path);
@@ -144,11 +158,84 @@ public static class LinkPolicy
     {
         if (RealPath.IsUncOrDevice(localPath))
         {
-            return new Ignore($"'{localPath}' names a network share or a device");
+            return new Ignore(ShareOrDeviceKind(localPath), $"'{localPath}' names a network share or a device");
         }
 
-        return RealPath.IsLocalFullyQualified(localPath) ? null : new Ignore("the link's path is not one the platform accepts");
+        return RealPath.IsLocalFullyQualified(localPath)
+            ? null
+            : new Ignore(IgnoreKind.NotPlainPath, "the link's path is not one the platform accepts");
     }
+
+    /// <summary>
+    /// The kind of a path <see cref="RealPath.IsUncOrDevice(string)"/> flags: a network share when it names a host, else not a
+    /// plain path (a device or an odd prefix).
+    /// </summary>
+    private static IgnoreKind ShareOrDeviceKind(string path) => RealPath.IsNetworkShare(path) ? IgnoreKind.NetworkShare : IgnoreKind.NotPlainPath;
+
+    /// <summary>
+    /// Why the real path <paramref name="realPath"/> of <paramref name="path"/> may not open on Windows, which would rewrite it
+    /// on the way to the file (dropping a trailing dot or space, or turning a device name into a device); null when it may.
+    /// </summary>
+    private static Ignore? WindowsRewriteRefusal(string path, string realPath, Action<string> normalising)
+    {
+        string[] segments = realPath[(Path.GetPathRoot(realPath)?.Length ?? 0)..]
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Any(segment => segment.EndsWith('.') || segment.EndsWith(' ')))
+        {
+            return new Ignore(IgnoreKind.TrailingDotOrSpace, $"'{path}' has a name ending in a dot or space, which Windows rewrites");
+        }
+
+        string? full = Normalise(realPath, normalising);
+        return full is not null && string.Equals(full, realPath, StringComparison.Ordinal)
+            ? null
+            : new Ignore(IgnoreKind.NotPlainPath, $"'{path}' is a path Windows would rewrite");
+    }
+
+    /// <summary>
+    /// <paramref name="uri"/>, a <c>mailto</c> link, with its address and only the <c>to</c>, <c>cc</c>, <c>bcc</c>,
+    /// <c>subject</c> and <c>body</c> fields, each copied as written and in order; every other field, such as an
+    /// <c>attach</c> naming a local file, is left out and named in the decision, and a fragment is dropped.
+    /// </summary>
+    private static LinkDecision MailtoDecision(Uri uri)
+    {
+        string text = uri.AbsoluteUri;
+        int hash = text.IndexOf('#', StringComparison.Ordinal);
+        if (hash >= 0)
+        {
+            text = text[..hash];
+        }
+
+        int question = text.IndexOf('?', StringComparison.Ordinal);
+        if (question < 0)
+        {
+            return Mailto(text, []);
+        }
+
+        List<string> kept = [];
+        List<string> dropped = [];
+        foreach (string field in text[(question + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int equals = field.IndexOf('=', StringComparison.Ordinal);
+            string name = equals < 0 ? field : field[..equals];
+            if (MailtoFields.Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                kept.Add(field);
+            }
+            else
+            {
+                dropped.Add(name);
+            }
+        }
+
+        string address = text[..question];
+        return Mailto(kept.Count == 0 ? address : address + "?" + string.Join('&', kept), dropped);
+    }
+
+    /// <summary>Opens the rebuilt <c>mailto</c> link <paramref name="rebuilt"/>, or ignores it when it is no URI.</summary>
+    private static LinkDecision Mailto(string rebuilt, IReadOnlyList<string> dropped) =>
+        Uri.TryCreate(rebuilt, UriKind.Absolute, out Uri? uri)
+            ? new OpenExternal(uri, dropped)
+            : new Ignore(IgnoreKind.Scheme, "the mailto link has nothing left to open once its unsafe fields are dropped");
 
     /// <summary>The full form of <paramref name="localPath"/>, or null when the platform rejects it (a NUL, for one).</summary>
     private static string? Normalise(string localPath, Action<string> normalising)
