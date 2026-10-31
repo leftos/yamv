@@ -40,14 +40,14 @@ public partial class App : Application
     public const string ImportFileVariable = "YAMV_DEV_IMPORT_FILE";
 
     /// <summary>
-    /// The environment variable that, set to <c>1</c>, has the main or viewer window open its content-width popover once it has
+    /// The environment variable that, set to <c>1</c>, has the start window (main or viewer) open its content-width popover once it has
     /// shown its first document, so a hidden-desktop capture shows the popover; <c>clearall</c> then also asks the Clear all
     /// question, and <c>folder</c> selects the document's own folder segment.
     /// </summary>
     public const string WidthPopoverVariable = "YAMV_DEV_WIDTH_POPOVER";
 
     /// <summary>
-    /// The environment variable that has the main or viewer window, once it has shown its first document, open its ⋯ menu
+    /// The environment variable that has the start window (main or viewer), once it has shown its first document, open its ⋯ menu
     /// (<c>menu</c>) or ask for the theme settings window as the menu's item does (<c>open</c>), so a hidden-desktop capture
     /// shows it.
     /// </summary>
