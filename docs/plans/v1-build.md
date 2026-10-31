@@ -1,5 +1,7 @@
 # YAMV (Yet Another Markdown Viewer) — build plan
 
+> Single instance superseded the steps below that make a viewer its own process (Context, the Interview table, Steps 3, 5 and 7, Verification 2): one process now holds the main window and every viewer window, and a launch with files opens a viewer window in the running app. The current behaviour is in [ARCHITECTURE.md](../ARCHITECTURE.md) and the README's "Command line"; this plan is kept as written.
+
 ## Context
 
 The user wants a cross-platform (Windows + macOS) C# markdown viewer:

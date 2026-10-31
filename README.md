@@ -3,7 +3,7 @@
 A quiet markdown viewer for Windows and macOS.
 
 - `yamv` opens the main window with the documents you had open last time, grouped on the right by git repo or folder.
-- `yamv a.md b.md` opens a separate viewer window with just those files; when YAMV is already running, the files open in a new viewer window of that process and the command exits 0 once it confirms (exit 1 if it does not).
+- `yamv a.md b.md` opens a viewer window with just those files; when YAMV is already running, the files open in a new viewer window of that process and the command exits 0 once it confirms (exit 1, with a message box, if it does not). With no YAMV running, it starts YAMV with only that viewer window.
 
   A file already open in a viewer or in the main window's tree is not opened again: that window comes forward with the file selected (the most recently active one when several hold it). Of several files, the window holding the first open one comes forward and only the files no window holds open in one new viewer.
 
@@ -28,9 +28,16 @@ A quiet markdown viewer for Windows and macOS.
 
 - `yamv --help`, `-h` or `/?` prints the usage to standard output and exits 0.
 - An unknown option, an option combined with other arguments, or an argument that names a folder (`yamv .`, `yamv docs\`) prints its message to standard error and exits 2. A folder prints `Not a file: <full path>`, one line per folder argument.
-- A second `yamv` with no arguments (Windows) asks the running app to bring its main window forward (un-minimised, shown, activated) and exits 0 once the app says it did. It exits 1 when the app has no window to raise or does not answer (then it raises that window itself); when the running one is closing or has just exited, it waits up to 5 s and starts as the main instance. It never takes longer than 8 s.
+- YAMV is one process: the main window and every viewer window live in it. A second `yamv` with no arguments asks the running app to bring its main window forward (un-minimised, shown, activated; a window raised from minimized keeps its maximized state) and exits 0 once the app says it did.
 
-  Closing the main window while viewer windows are open leaves them open, and a no-argument launch then opens the main window again with its documents (if it cannot open, the most recently active viewer comes forward). On Windows YAMV quits when its last document window closes; on macOS it keeps running with no window.
+  It exits 1 when the app has no window to raise or does not answer (then, on Windows, it raises that window itself); when the running one is closing or has just exited, it waits up to 5 s and starts as the main instance. It never takes longer than 8 s.
+
+  Closing the main window while viewer windows are open leaves them open, and a no-argument launch then opens the main window again with its documents (if it cannot open, the most recently active viewer comes forward). On Windows YAMV quits when its last document window closes; on macOS it keeps running with no window, a Dock click opens the main window again, and Cmd+Q quits.
+- When a launch with files cannot get the running app to take them (it does not answer within about 3 s, refuses, or their paths are too long to send in one message), it shows a message box, "YAMV is not responding; the file was not opened." (or "…; 3 files were not opened." for several) and exits 1. Only one such box is up at a time: a launch that fails while one is showing shows nothing. A launch with no files that fails shows no box.
+- On macOS a Finder open goes to the running app like a launch with files, with the same already-open rule: the window holding the file comes forward, else a new viewer window opens. At a cold start YAMV waits 300 ms for Finder's file opens, so a Finder-opened file starts only a viewer window and no main window; a Dock click or a no-argument launch in that time opens the main window.
+- Started as Administrator (UAC elevation, Windows), YAMV is a second app beside the normal one with its own windows: every window shows an Administrator chip in its title bar and " (Administrator)" in its window title, the main window shows the documents from the last session but never saves its own, and a launch from an elevated shell meets only the elevated instance (it starts one when none runs).
+
+  The card that asks before a link opens a file or shortcut adds "It will run as Administrator."; the card for a folder does not.
 - A path that does not exist is not an error: the viewer window shows it as a missing document.
 - `yamv --register` (Windows) adds YAMV to Explorer's Open with for `.md` and `.markdown`, for the `yamv.exe` you run it from, and never takes over the default handler. It prints `Registered YAMV for .md and .markdown in Open with (<path>).`, or `YAMV is already registered for .md and .markdown (<path>).` when nothing changed, and exits 0. Run from a program that is not `yamv.exe`, it prints `Not registering: <path> is not yamv.exe. Run --register from the installed yamv.exe.` and exits 1.
 - `yamv --unregister` removes the entries that point at the `yamv.exe` you run it from and leaves any that point at another program. It prints `Removed YAMV from Open with for .md and .markdown.`, or `Nothing to remove.`, and exits 0, with a note after the line when it left an entry in place. A registry failure prints `Could not register: <message>` or `Could not unregister: <message>` to standard error and exits 1.

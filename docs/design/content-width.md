@@ -17,7 +17,7 @@ How wide the document's text column is. It is a viewer setting and not part of t
 - Any folder can hold a width. A document uses the width of the nearest folder at or above its own folder that has one. If no folder has one, it uses the app default. The walk up ends at the file-system root; the group root does not bound it, and bounds only **Clear all overrides here**.
 - Folder paths are compared with the platform's path comparison (`AppPaths.PathComparison`).
 - The widths are saved in `<data dir>/widths.json` (beside `session.json`): `{ "default": 800 | "full", "folders": { "<full folder path>": 760 | "full" } }`, written atomically.
-- Main and viewer instances both read the file and write to it. Width is a preference, not session state. A change made in one instance reaches the other instances when they next render a document (each re-reads the file when it changes).
+- Every window (main or viewer; they share one process) reads the file and writes to it, and so does the elevated instance, a process of its own. Width is a preference, not session state. A change made in one window reaches the others when they next render a document (each re-reads the file when it changes).
 
 ## The control
 
