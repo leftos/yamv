@@ -115,7 +115,7 @@ public sealed class ConfirmTextTests
     [InlineData(true, "It's a .1 notes file. YAMV doesn't show this type; it will open with the app macOS uses for it.")]
     public void A_name_whose_extension_holds_a_space_follows_the_shell_on_Windows(bool isMac, string body)
     {
-        var text = ConfirmText.For(@"C:\yamv links\release.1 notes", "release.1 notes", isFolder: false, isMac);
+        var text = ConfirmText.For(@"C:\yamv links\release.1 notes", "release.1 notes", isFolder: false, isMac, elevated: false);
 
         Assert.Equal("Open release.1 notes?", text.Title);
         Assert.Equal(body, text.Body);

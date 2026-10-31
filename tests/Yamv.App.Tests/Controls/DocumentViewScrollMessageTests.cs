@@ -129,7 +129,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_viewport_report_for_the_shown_render_sets_its_width_and_raises_once_per_change() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             int raised = 0;
             view.ViewportWidthChanged += (_, _) => raised++;
             _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-viewport-doc", "a.md")));
@@ -147,7 +147,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_viewport_report_from_another_render_or_without_one_is_dropped() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             int raised = 0;
             view.ViewportWidthChanged += (_, _) => raised++;
             _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-viewport-doc", "a.md")));
@@ -165,7 +165,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_new_show_clears_the_viewport_width_and_drops_the_older_render_s_late_report() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             string folder = Path.Combine(Path.GetTempPath(), "yamv-viewport-doc");
             _ = view.ShowAsync(Show(Path.Combine(folder, "a.md")));
             view.Handle(Parse("""{"type":"viewport","value":995,"generation":1}"""));
@@ -186,7 +186,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_viewport_report_of_no_width_or_0_is_ignored() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             int raised = 0;
             view.ViewportWidthChanged += (_, _) => raised++;
             _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-viewport-doc", "a.md")));
@@ -222,7 +222,7 @@ public sealed class DocumentViewScrollMessageTests
         Headless.RunAsync(() =>
         {
             var log = new RecordingAppLog();
-            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-link-doc", "a.md")));
 
             view.Handle(Parse("""{"type":"link","href":"other\r\nFORGED.md","button":0,"generation":0}"""));
@@ -239,7 +239,7 @@ public sealed class DocumentViewScrollMessageTests
         Headless.RunAsync(() =>
         {
             var log = new RecordingAppLog();
-            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
 
             view.Handle(Parse("""{"type":"error","where":"render","message":"a\nFORGED"}"""));
 
@@ -279,7 +279,7 @@ public sealed class DocumentViewScrollMessageTests
         Headless.RunAsync(async () =>
         {
             var log = new RecordingAppLog();
-            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             view.Handle(Parse("""{"type":"ready"}"""));
             await view.SetCardOpenAsync(true);
             int Told() => log.Entries.Count(entry => entry.Message.Contains("window.yamv.setCardOpen(true)", StringComparison.Ordinal));

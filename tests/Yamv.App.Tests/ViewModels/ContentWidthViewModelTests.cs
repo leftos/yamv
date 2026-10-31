@@ -1689,7 +1689,7 @@ public sealed class ContentWidthViewModelTests
         var host = new ContentWidthHost(
             DocA,
             fixture.Surface,
-            new DocumentWindowServices(fixture.Widths, fixture.Reader, fixture.Timers, fixture.Log, fixture.Toasts),
+            new DocumentWindowServices(fixture.Widths, fixture.Reader, fixture.Timers, fixture.Log, fixture.Toasts) { Elevated = false },
             store,
             fixture.ViewModel,
             from => WidthScopes.For(DocA, Repo, groupIsRepo: true, from)
