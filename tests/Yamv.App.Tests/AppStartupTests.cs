@@ -1006,6 +1006,53 @@ public sealed class AppStartupTests
             Assert.DoesNotContain(start.Log.Entries, entry => entry.Message.StartsWith("Theme settings:", StringComparison.Ordinal));
         });
 
+    [Fact]
+    public Task A_theme_window_opened_from_a_viewer_stays_when_that_viewer_closes_and_the_main_window_remains() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            Window main = start.Window;
+            MainWindow viewer = Assert.IsType<MainWindow>(ShowViewer(start.App));
+            viewer.RequestThemeSettings();
+            ThemeSettingsWindow settings = Assert.IsType<ThemeSettingsWindow>(start.App.ThemeSettingsHost?.Window);
+            Assert.Same(viewer, settings.Owner);
+
+            viewer.Close();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(viewer.IsVisible);
+            Assert.True(settings.IsVisible);
+            Assert.Same(main, settings.Owner);
+            Assert.Same(settings, start.App.ThemeSettingsHost?.Window);
+        });
+
+    [Fact]
+    public Task The_successor_is_the_most_recently_active_other_window_not_minimised() =>
+        Headless.Run(() =>
+        {
+            using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+            Window main = start.Window;
+            Window a = ShowViewer(start.App);
+            Window b = ShowViewer(start.App);
+            Window c = ShowViewer(start.App);
+            Window minimised = ShowViewer(start.App);
+            foreach (Window window in new[] { a, c, b, minimised, main })
+            {
+                window.Activate();
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            minimised.WindowState = WindowState.Minimized;
+            start.App.ShowThemeSettings(main);
+            ThemeSettingsWindow settings = Assert.IsType<ThemeSettingsWindow>(start.App.ThemeSettingsHost?.Window);
+
+            main.Close();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(settings.IsVisible);
+            Assert.Same(b, settings.Owner);
+        });
+
     /// <summary>Shows a viewer window over a missing file as an open request does once the app took it, and returns it.</summary>
     private static Window ShowViewer(App app)
     {

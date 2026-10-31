@@ -16,6 +16,9 @@ internal sealed class ThemeSettingsHostSeams
 
     /// <summary>The Import and Export pickers, and the editor Edit as text opens a file in.</summary>
     public required IFileActions FileActions { get; init; }
+
+    /// <summary>Given the settings window's owner that is closing, the document window it moves to, or null when none remains.</summary>
+    public required Func<Window, Window?> OwnerSuccessor { get; init; }
 }
 
 /// <summary>What <see cref="ThemeSettingsHost.BuildWindow"/> builds a theme settings window from.</summary>
@@ -50,8 +53,9 @@ internal sealed class ThemeSettingsWindowParts
 }
 
 /// <summary>
-/// The app's one theme settings window: <see cref="Show"/> builds it over the bridge's requested theme and Appearance, owned by
-/// the window that asked and centred over it, or activates the open one, which keeps its first owner. While it is open, a reload
+/// The app's one theme settings window: <see cref="Show"/> builds it over the bridge's requested theme and Appearance, shown over
+/// the window that asked and centred over it, or activates the open one; when its owner closes while another document window
+/// stays open, it moves to that window (<see cref="ThemeSettingsHostSeams.OwnerSuccessor"/>). While it is open, a reload
 /// of the themes folder and a change of the requested theme the window did not make (an edit of the settings file) reach its
 /// view model. The owner's close and the app's shutdown wait on its unsaved-edits confirm: the window's own close check holds an
 /// owner's close, and <see cref="ConfirmShutdownAsync"/> is the shutdown's. Every member is called on the UI thread.
@@ -95,13 +99,18 @@ internal sealed class ThemeSettingsHost : IDisposable
     /// The app's host over the data folder's themes, with the platform's trash owned by the settings window, and the system's
     /// pickers and default editor.
     /// </summary>
-    public static ThemeSettingsHost Create(ThemeBridge bridge, IAppLog log)
+    /// <param name="bridge">The app's bridge: the theme in use, and where the window applies.</param>
+    /// <param name="log">Where the window reports failures.</param>
+    /// <param name="ownerSuccessor">Given the settings window's owner that is closing, the document window it moves to, or null.</param>
+    public static ThemeSettingsHost Create(ThemeBridge bridge, IAppLog log, Func<Window, Window?> ownerSuccessor)
     {
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(ownerSuccessor);
         var seams = new ThemeSettingsHostSeams
         {
             Trash = windowOf => new PlatformTrash(() => windowOf().TryGetPlatformHandle()?.Handle ?? 0),
             FileActions = new AvaloniaFileActions(log, null, AvaloniaFileActions.StartProcess, FileActionSeams.Default),
+            OwnerSuccessor = ownerSuccessor,
         };
         return new ThemeSettingsHost(bridge, new ThemeCatalog(AppPaths.ThemesDirectory, log), log, seams);
     }
@@ -132,8 +141,8 @@ internal sealed class ThemeSettingsHost : IDisposable
     }
 
     /// <summary>
-    /// Shows the settings window owned by <paramref name="owner"/> and centred over it; while one is open, restores it if
-    /// minimised and activates it instead, keeping its first owner.
+    /// Shows the settings window over <paramref name="owner"/>, centred over it; while one is open, restores it if minimised and
+    /// activates it instead. When its owner closes while another document window stays open, it moves to that window.
     /// </summary>
     /// <param name="owner">The window that asked.</param>
     /// <exception cref="ObjectDisposedException">The host is disposed.</exception>
@@ -168,6 +177,7 @@ internal sealed class ThemeSettingsHost : IDisposable
             }
         );
         window.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        window.OwnerSuccessor = _seams.OwnerSuccessor;
         window.Closed += OnWindowClosed;
         try
         {

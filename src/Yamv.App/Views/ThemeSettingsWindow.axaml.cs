@@ -20,14 +20,15 @@ namespace Yamv.App.Views;
 /// theme resources, so it keeps the saved theme until Save. It asks its confirms inside itself (<see cref="ConfirmUnsavedAsync"/>,
 /// <see cref="ConfirmDeleteAsync"/>), shows the Import notice inside itself (<see cref="ConfirmImportAsync"/>), cancels either
 /// when it closes, and holds a close while the theme has unsaved edits until the unsaved confirm is answered
-/// (<see cref="ConfirmCloseAsync"/>).
+/// (<see cref="ConfirmCloseAsync"/>). When its owner closes while another document window stays open, it moves to that window
+/// (<see cref="OwnerSuccessor"/>) instead of closing.
 /// </summary>
 public partial class ThemeSettingsWindow : Window
 {
     private readonly ThemeSettingsViewModel? _viewModel;
     private readonly IAppLog? _log;
     private bool _closeAllowed;
-    private bool _closeOwnerAfterCheck;
+    private WindowBase? _ownerToCloseAfterCheck;
     private Task<bool>? _closeCheck;
     private int _openModals;
 
@@ -58,6 +59,12 @@ public partial class ThemeSettingsWindow : Window
         UpdateShownAppearance();
     }
 
+    /// <summary>
+    /// Given the owner that is closing, the document window this window moves to, or null when none remains: while one does,
+    /// the owner's close moves this window instead of closing it.
+    /// </summary>
+    internal Func<Window, Window?>? OwnerSuccessor { get; set; }
+
     /// <summary>Asks Save, Discard or Cancel for the unsaved changes of the theme named <paramref name="name"/>.</summary>
     public async Task<UnsavedChoice> ConfirmUnsavedAsync(string name)
     {
@@ -79,14 +86,21 @@ public partial class ThemeSettingsWindow : Window
     }
 
     /// <summary>
-    /// Whatever the close's reason, cancels an open Import notice or confirm (its action is dropped); then, while the theme has
-    /// unsaved edits, holds the close and asks the unsaved confirm, closing again after Save or Discard: the owner, when the close
-    /// came from the owner's, so the owner's close goes ahead. A close while that confirm is open is held too.
+    /// When the owner closes while <see cref="OwnerSuccessor"/> names another document window, moves to that window and stays
+    /// open with its edits and any open confirm or Import notice. Otherwise, whatever the close's reason, cancels an open Import
+    /// notice or confirm (its action is dropped); then, while the theme has unsaved edits, holds the close and asks the unsaved
+    /// confirm, closing again after Save or Discard: the owner, when the close came from the owner's and the window has not moved
+    /// since, so the owner's close goes ahead. A close while that confirm is open is held too.
     /// </summary>
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
         base.OnClosing(e);
+        if (TryMoveToSuccessor(e.CloseReason))
+        {
+            return;
+        }
+
         if (_closeAllowed)
         {
             _closeAllowed = false;
@@ -96,6 +110,11 @@ public partial class ThemeSettingsWindow : Window
         if (_closeCheck is not null)
         {
             e.Cancel = true;
+            if (e.CloseReason == WindowCloseReason.OwnerWindowClosing)
+            {
+                _ownerToCloseAfterCheck = Owner;
+            }
+
             return;
         }
 
@@ -106,8 +125,29 @@ public partial class ThemeSettingsWindow : Window
         }
 
         e.Cancel = true;
-        _closeOwnerAfterCheck = e.CloseReason == WindowCloseReason.OwnerWindowClosing;
+        _ownerToCloseAfterCheck = e.CloseReason == WindowCloseReason.OwnerWindowClosing ? Owner : null;
         RunInBackground(CloseAfterCheckAsync, "the close confirm");
+    }
+
+    /// <summary>
+    /// On the owner's close, moves this window to the document window <see cref="OwnerSuccessor"/> names, if any; a shutdown's
+    /// close and this window's own close never move it. A move takes back a close a passed close check allowed.
+    /// </summary>
+    private bool TryMoveToSuccessor(WindowCloseReason reason)
+    {
+        if (
+            reason != WindowCloseReason.OwnerWindowClosing
+            || Owner is not Window closing
+            || OwnerSuccessor?.Invoke(closing) is not { } successor
+            || ReferenceEquals(successor, closing)
+        )
+        {
+            return false;
+        }
+
+        Owner = successor;
+        _closeAllowed = false;
+        return true;
     }
 
     /// <summary>
@@ -248,24 +288,39 @@ public partial class ThemeSettingsWindow : Window
 
     /// <summary>
     /// Closes again once the close check passes: the owner when its close was the one held, so it goes ahead and closes this
-    /// window with it, else this window.
+    /// window with it, else this window. The owner is the last one whose close was held while the check ran; when the window
+    /// moved to another document window since and no close of that window was held, it closes nothing and stays open over it.
     /// </summary>
     private async Task CloseAfterCheckAsync()
     {
-        bool closeOwner = _closeOwnerAfterCheck;
-        _closeOwnerAfterCheck = false;
-        if (!await ConfirmCloseAsync())
+        bool allowed;
+        WindowBase? heldOwner;
+        try
+        {
+            allowed = await ConfirmCloseAsync();
+        }
+        finally
+        {
+            heldOwner = _ownerToCloseAfterCheck;
+            _ownerToCloseAfterCheck = null;
+        }
+
+        if (!allowed)
         {
             return;
         }
 
-        if (closeOwner && Owner is Window owner)
+        if (heldOwner is null)
+        {
+            Close();
+        }
+        else if (ReferenceEquals(Owner, heldOwner) && heldOwner is Window owner)
         {
             owner.Close();
         }
         else
         {
-            Close();
+            _closeAllowed = false;
         }
     }
 

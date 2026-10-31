@@ -353,6 +353,169 @@ public sealed class ThemeSettingsHostTests
         });
 
     [Fact]
+    public Task Closing_the_owner_while_another_document_window_stays_moves_the_theme_window_to_it() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            Window first = fixture.NewOwner();
+            Window second = fixture.NewOwner();
+            fixture.Successor = closing => ReferenceEquals(closing, first) ? second : null;
+            fixture.Host.Show(first);
+            ThemeSettingsWindow window = fixture.Host.Window!;
+            fixture.Settle();
+
+            first.Close();
+            fixture.Settle();
+
+            Assert.False(first.IsVisible);
+            Assert.True(window.IsVisible);
+            Assert.Same(second, window.Owner);
+            Assert.Same(window, fixture.Host.Window);
+            Assert.Equal([first], fixture.SuccessorAsked);
+        });
+
+    [Fact]
+    public Task A_dirty_theme_window_keeps_its_edits_and_asks_nothing_when_it_is_moved() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Bridge.Apply("mine", "light");
+            Window first = fixture.NewOwner();
+            Window second = fixture.NewOwner();
+            fixture.Successor = closing => ReferenceEquals(closing, first) ? second : null;
+            fixture.Host.Show(first);
+            ThemeSettingsWindow window = fixture.Host.Window!;
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+
+            first.Close();
+            fixture.Settle();
+
+            Assert.False(first.IsVisible);
+            Assert.True(window.IsVisible);
+            Assert.Same(second, window.Owner);
+            Assert.False(Find<Control>(window, "Confirm").IsEffectivelyVisible);
+            Assert.True(fixture.ViewModel.IsDirty);
+            Assert.DoesNotContain("#3fb950", File.ReadAllText(fixture.PathOf("mine")), StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task Closing_the_last_document_window_still_asks_and_closes_with_it() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Bridge.Apply("mine", "light");
+            Window owner = fixture.NewOwner();
+            fixture.Host.Show(owner);
+            ThemeSettingsWindow window = fixture.Host.Window!;
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+
+            owner.Close();
+            fixture.Settle();
+
+            Assert.Equal([owner], fixture.SuccessorAsked);
+            Assert.True(Find<Control>(window, "Confirm").IsEffectivelyVisible);
+            Assert.True(owner.IsVisible);
+
+            Click(window, Find<Button>(window, "SecondaryButton"));
+            fixture.Settle();
+
+            Assert.False(owner.IsVisible);
+            Assert.False(window.IsVisible);
+            Assert.Null(fixture.Host.Window);
+        });
+
+    [Fact]
+    public Task An_app_shutdown_never_moves_the_theme_window() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            Window first = fixture.NewOwner();
+            Window second = fixture.NewOwner();
+            fixture.Successor = closing => ReferenceEquals(closing, first) ? second : null;
+            fixture.Host.Show(first);
+            ThemeSettingsWindow window = fixture.Host.Window!;
+            fixture.Settle();
+
+            CloseForShutdown(first);
+            fixture.Settle();
+
+            Assert.False(first.IsVisible);
+            Assert.False(window.IsVisible);
+            Assert.Null(fixture.Host.Window);
+            Assert.Empty(fixture.SuccessorAsked);
+            Assert.True(second.IsVisible);
+        });
+
+    [Fact]
+    public Task A_close_held_by_a_running_check_moves_instead_of_closing_when_a_window_appeared() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Bridge.Apply("mine", "light");
+            Window first = fixture.NewOwner();
+            fixture.Host.Show(first);
+            ThemeSettingsWindow window = fixture.Host.Window!;
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+            first.Close();
+            fixture.Settle();
+            Assert.True(Find<Control>(window, "Confirm").IsEffectivelyVisible);
+            Window second = fixture.NewOwner();
+            fixture.Successor = closing => ReferenceEquals(closing, first) ? second : null;
+
+            first.Close();
+            fixture.Settle();
+
+            Assert.False(first.IsVisible);
+            Assert.True(window.IsVisible);
+            Assert.Same(second, window.Owner);
+            Assert.True(Find<Control>(window, "Confirm").IsEffectivelyVisible);
+            Assert.True(fixture.ViewModel.IsDirty);
+
+            Click(window, Find<Button>(window, "SecondaryButton"));
+            fixture.Settle();
+
+            Assert.True(second.IsVisible);
+            Assert.True(window.IsVisible);
+            Assert.Same(window, fixture.Host.Window);
+            Assert.False(fixture.ViewModel.IsDirty);
+        });
+
+    [Fact]
+    public Task A_close_of_the_new_owner_held_while_the_confirm_is_up_goes_ahead_after_Discard() =>
+        Headless.Run(() =>
+        {
+            using var fixture = new Fixture();
+            fixture.Bridge.Apply("mine", "light");
+            Window first = fixture.NewOwner();
+            fixture.Host.Show(first);
+            ThemeSettingsWindow window = fixture.Host.Window!;
+            fixture.ViewModel.SetToken(ThemeTab.Light, "accent", new ColorValue("#3fb950"));
+            fixture.Settle();
+            first.Close();
+            fixture.Settle();
+            Window second = fixture.NewOwner();
+            fixture.Successor = closing => ReferenceEquals(closing, first) ? second : null;
+            first.Close();
+            fixture.Settle();
+            Assert.Same(second, window.Owner);
+
+            second.Close();
+            fixture.Settle();
+            Assert.True(second.IsVisible);
+            Assert.True(Find<Control>(window, "Confirm").IsEffectivelyVisible);
+
+            Click(window, Find<Button>(window, "SecondaryButton"));
+            fixture.Settle();
+
+            Assert.False(second.IsVisible);
+            Assert.False(window.IsVisible);
+            Assert.Null(fixture.Host.Window);
+        });
+
+    [Fact]
     public Task Shutdown_with_unsaved_edits_asks_and_Cancel_cancels_the_shutdown() =>
         Headless.Run(() =>
         {
@@ -419,6 +582,18 @@ public sealed class ThemeSettingsHostTests
         (typeof(ThemeBridge).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge) as Delegate)?.GetInvocationList().Length
         ?? 0;
 
+    /// <summary>
+    /// Closes <paramref name="window"/> as the desktop lifetime's shutdown does, through Avalonia's internal <c>CloseCore</c> with
+    /// <see cref="WindowCloseReason.ApplicationShutdown"/>: the headless platform has no desktop lifetime to shut down.
+    /// </summary>
+    private static void CloseForShutdown(Window window)
+    {
+        MethodInfo closeCore =
+            typeof(Window).GetMethod("CloseCore", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Avalonia's Window.CloseCore is gone.");
+        closeCore.Invoke(window, [WindowCloseReason.ApplicationShutdown, true, false]);
+    }
+
     private static T Find<T>(Window window, string name)
         where T : Control =>
         window.GetVisualDescendants().OfType<T>().FirstOrDefault(control => control.Name == name)
@@ -475,9 +650,20 @@ public sealed class ThemeSettingsHostTests
                         return new DeletingTrash();
                     },
                     FileActions = FileActions,
+                    OwnerSuccessor = closing =>
+                    {
+                        SuccessorAsked.Add(closing);
+                        return Successor(closing);
+                    },
                 }
             );
         }
+
+        /// <summary>The document window the settings window moves to when its owner closes; none by default.</summary>
+        public Func<Window, Window?> Successor { get; set; } = _ => null;
+
+        /// <summary>Each closing owner the host's successor was asked about.</summary>
+        public List<Window> SuccessorAsked { get; } = [];
 
         public RecordingAppLog Log { get; } = new();
 

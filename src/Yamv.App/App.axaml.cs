@@ -196,7 +196,8 @@ public partial class App : Application
     internal static void OpenReadyLatch() => ReadyLatch?.Open(job => Dispatcher.UIThread.Post(job));
 
     /// <summary>
-    /// Shows the theme settings window owned by <paramref name="owner"/>, or activates the open one, which keeps its first owner.
+    /// Shows the theme settings window over <paramref name="owner"/>, or activates the open one; when its owner closes while
+    /// another document window stays open, it moves to that window.
     /// </summary>
     /// <param name="owner">The window that asked.</param>
     /// <exception cref="InvalidOperationException">The start is a harness start or is released, so it has no host.</exception>
@@ -505,7 +506,7 @@ public partial class App : Application
             built.Push(bridge);
             IDisposable themesSync = CreateThemesSync(bridge, log);
             built.Push(themesSync);
-            var host = ThemeSettingsHost.Create(bridge, log);
+            var host = ThemeSettingsHost.Create(bridge, log, SuccessorOf);
             built.Push(host);
             var settings = new SettingsStore(AppPaths.SettingsFile, log);
             AppSettings saved = settings.Load();
@@ -547,6 +548,21 @@ public partial class App : Application
                 log.LogError($"Could not dispose a {part.GetType().Name} after building the shared window parts failed.", exception);
             }
         }
+    }
+
+    /// <summary>
+    /// The document window the theme settings window moves to when <paramref name="closing"/> closes: the most recently active
+    /// other tracked document window, one that is not minimised first; null when no other is tracked.
+    /// </summary>
+    private Window? SuccessorOf(Window closing)
+    {
+        IEnumerable<DocumentWindow> tracked = _main is { } main ? _viewers.Prepend(main) : _viewers;
+        return tracked
+            .Where(document => !ReferenceEquals(document.Composition.Window, closing))
+            .OrderBy(document => document.Composition.Window.WindowState == WindowState.Minimized)
+            .ThenByDescending(document => document.ActivatedAt)
+            .FirstOrDefault()
+            ?.Composition.Window;
     }
 
     /// <summary>
