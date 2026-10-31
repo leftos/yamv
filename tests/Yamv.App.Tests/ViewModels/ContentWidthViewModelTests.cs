@@ -1261,6 +1261,433 @@ public sealed class ContentWidthViewModelTests
             Assert.Equal(1, popover.SliderPosition);
         });
 
+    [Fact]
+    public Task A_save_that_finds_the_width_already_stored_re_shows_the_segment() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            Assert.True(popover.CanReset);
+            Assert.Null(popover.InheritedFrom);
+            double stored = popover.SliderPosition;
+
+            // Another window removes the document's own width and gives the parent the same width; the drag back to 760 then
+            // finds the store already holding it, and the segment now inherits it.
+            Assert.True(fixture.Widths.Remove(Docs));
+            Assert.True(fixture.Widths.Set(Repo, ContentWidth.FromPx(760)));
+
+            popover.SliderPosition = 0;
+            popover.SliderPosition = stored;
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Null(fixture.Widths.Get(Docs));
+            Assert.Equal(760, fixture.Widths.Get(Repo)?.Px);
+            Assert.Equal(Docs, popover.SelectedSegment?.Folder);
+            Assert.False(popover.CanReset);
+            Assert.Equal("yamv", popover.InheritedFrom);
+            Assert.Equal("760 px", popover.Readout);
+            Assert.Equal(stored, popover.SliderPosition, 6);
+        });
+
+    [Fact]
+    public Task A_throwing_segment_read_shows_the_read_message() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            var store = new FaultyWidthStore(fixture.Widths);
+            store.Faults.Add(nameof(IContentWidthStore.Resolve));
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+
+            popover.SelectSegmentCommand.Execute(popover.Segments[0]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(ContentWidthViewModel.ReadFailedMessage, popover.FootMessage);
+            Assert.False(popover.IsStale);
+            Assert.Equal(Docs, popover.SelectedSegment?.Folder);
+            Assert.Equal("760 px", popover.Readout);
+            Assert.Empty(fixture.Surface.ContentWidths);
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Level == "error" && entry.Message.Contains("read the width of docs", StringComparison.Ordinal)
+            );
+        });
+
+    [Fact]
+    public Task A_throwing_reset_springs_back_with_the_save_message() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            var store = new FaultyWidthStore(fixture.Widths);
+            store.Faults.Add(nameof(IContentWidthStore.Remove));
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            Assert.True(popover.CanReset);
+            popover.SliderPosition = 0;
+            Assert.Equal(new double?[] { 480 }, fixture.Surface.ContentWidths);
+
+            popover.ResetCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(760, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(ContentWidthViewModel.SaveFailedMessage, popover.FootMessage);
+            Assert.False(popover.IsStale);
+            Assert.Equal("760 px", popover.Readout);
+            Assert.Equal(ContentWidth.FromPx(760).ToSlider(WideTextSpace), popover.SliderPosition, 6);
+            Assert.Equal(new double?[] { 480, 760 }, fixture.Surface.ContentWidths);
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Level == "error" && entry.Message.Contains("remove the content width of", StringComparison.Ordinal)
+            );
+        });
+
+    [Fact]
+    public Task A_throwing_clear_all_springs_back_with_the_save_message() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            var store = new FaultyWidthStore(fixture.Widths);
+            store.Faults.Add(nameof(IContentWidthStore.ClearAtOrBelow));
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(popover.CanClearAll);
+            popover.SliderPosition = 0;
+            Assert.Equal(new double?[] { 480 }, fixture.Surface.ContentWidths);
+
+            popover.ClearAllCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(760, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(ContentWidthViewModel.SaveFailedMessage, popover.FootMessage);
+            Assert.False(popover.IsStale);
+            Assert.Equal("760 px", popover.Readout);
+            Assert.Equal(ContentWidth.FromPx(760).ToSlider(WideTextSpace), popover.SliderPosition, 6);
+            Assert.Equal(new double?[] { 480, 760 }, fixture.Surface.ContentWidths);
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Level == "error" && entry.Message.Contains("clear the content widths at and below", StringComparison.Ordinal)
+            );
+        });
+
+    [Fact]
+    public Task A_throwing_count_read_keeps_the_popover_open_with_the_read_message() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Repo, ContentWidth.FromPx(560)));
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            var store = new FaultyWidthStore(fixture.Widths);
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.Equal(2, popover.ClearAllCount);
+
+            // The Reset succeeds, and the count read that follows it throws: the count Clear all shows stays as it was.
+            store.Faults.Add(nameof(IContentWidthStore.CountAtOrBelow));
+            popover.ResetCommand.Execute(null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(ContentWidthViewModel.ReadFailedMessage, popover.FootMessage);
+            Assert.False(popover.IsStale);
+            Assert.Null(fixture.Widths.Get(Docs));
+            Assert.Equal(560, fixture.Widths.Get(Repo)?.Px);
+            Assert.Equal(2, popover.ClearAllCount);
+            Assert.True(popover.CanClearAll);
+            Assert.Equal("560 px", popover.Readout);
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Level == "error" && entry.Message.Contains("read the saved-width count", StringComparison.Ordinal)
+            );
+        });
+
+    [Fact]
+    public Task A_throwing_resend_shows_the_save_message() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([DocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            var store = new FaultyWidthStore(fixture.Widths);
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            popover.SliderPosition = 0;
+
+            // The popover closes mid-drag, so it re-sends the stored width, and the store throws.
+            store.Faults.Add(nameof(IContentWidthStore.Resolve));
+            popover.Close();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(popover.IsStale);
+            Assert.Null(popover.FootMessage);
+            Assert.Equal((ToastKind.Warning, "Couldn't save the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Level == "error" && entry.Message.Contains("resend the content width", StringComparison.Ordinal)
+            );
+            // The re-send could not read the store, so the page gets the popover's last stored width instead.
+            Assert.Equal(new double?[] { 480, 760 }, fixture.Surface.ContentWidths);
+        });
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task A_throwing_save_springs_back_with_the_save_message(bool reaches) =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            var store = new FaultyWidthStore(fixture.Widths);
+            store.Faults.Add(nameof(IContentWidthStore.Set));
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            if (!reaches)
+            {
+                // The repo folder is further from the document than the folder holding its width, so a drag there moves no page.
+                popover.SelectSegmentCommand.Execute(popover.Segments[1]);
+                await fixture.ViewModel.WhenRendersSettled();
+                Assert.False(popover.DragReachesDocument);
+            }
+
+            popover.SliderPosition = 0;
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            double stored = reaches ? 760 : ContentWidth.DefaultPx;
+            Assert.Equal(760, fixture.Widths.Get(Docs)?.Px);
+            Assert.Null(fixture.Widths.Get(Repo));
+            Assert.Equal(ContentWidthViewModel.SaveFailedMessage, popover.FootMessage);
+            Assert.Equal(ReadoutPx(stored), popover.Readout);
+            Assert.Equal(ContentWidth.FromPx(stored).ToSlider(WideTextSpace), popover.SliderPosition, 6);
+            double?[] sent = reaches ? [480, 760] : [];
+            Assert.Equal(sent, fixture.Surface.ContentWidths);
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Level == "error" && entry.Message.Contains("save the content width", StringComparison.Ordinal)
+            );
+        });
+
+    [Fact]
+    public Task A_resize_re_evaluates_the_mark() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(800)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            Assert.False(popover.IsWiderThanWindow);
+
+            popover.UpdatePaneWidth(NarrowPane);
+
+            Assert.True(popover.IsWiderThanWindow);
+            Assert.Equal("800 px", popover.Readout);
+            Assert.True(popover.IsSliderEnabled);
+            Assert.Equal(1, popover.SliderPosition);
+
+            popover.UpdatePaneWidth(WidePane);
+
+            Assert.False(popover.IsWiderThanWindow);
+            Assert.Equal("800 px", popover.Readout);
+            Assert.Equal(ContentWidth.FromPx(800).ToSlider(WideTextSpace), popover.SliderPosition, 6);
+        });
+
+    [Fact]
+    public Task A_resize_during_a_drag_leaves_the_slider_where_the_drag_holds_it() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            popover.SliderPosition = 0;
+
+            popover.UpdatePaneWidth(NarrowPane);
+
+            Assert.True(popover.IsSliderEnabled);
+            Assert.Null(popover.SliderCaption);
+            Assert.Equal(0, popover.SliderPosition);
+            Assert.Equal("480 px", popover.Readout);
+            Assert.Equal(new double?[] { 480 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task A_resize_that_disables_the_slider_ends_the_drag_and_gives_the_page_the_stored_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            popover.SliderPosition = 0;
+            Assert.Equal(new double?[] { 480 }, fixture.Surface.ContentWidths);
+
+            popover.UpdatePaneWidth(500);
+
+            Assert.False(popover.IsSliderEnabled);
+            Assert.Equal(ContentWidthViewModel.NarrowCaption, popover.SliderCaption);
+            Assert.Equal(new double?[] { 480, 760 }, fixture.Surface.ContentWidths);
+
+            popover.UpdatePaneWidth(WidePane);
+
+            Assert.True(popover.IsSliderEnabled);
+            Assert.Equal("760 px", popover.Readout);
+            Assert.Equal(ContentWidth.FromPx(760).ToSlider(WideTextSpace), popover.SliderPosition, 6);
+
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.Equal(760, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(new double?[] { 480, 760 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task A_throwing_read_during_a_drag_leaves_the_drag_and_its_release_saves() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            var store = new FaultyWidthStore(fixture.Widths);
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            await fixture.ViewModel.WhenRendersSettled();
+            popover.SliderPosition = 0;
+            Assert.Equal(new double?[] { 480 }, fixture.Surface.ContentWidths);
+
+            store.Faults.Add(nameof(IContentWidthStore.Resolve));
+            popover.SelectSegmentCommand.Execute(popover.Segments[1]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(ContentWidthViewModel.ReadFailedMessage, popover.FootMessage);
+            Assert.Equal(Docs, popover.SelectedSegment?.Folder);
+            Assert.Equal(0, popover.SliderPosition);
+            Assert.Equal("480 px", popover.Readout);
+            Assert.Equal(new double?[] { 480 }, fixture.Surface.ContentWidths);
+
+            // The store works again, and the release saves the drag that the failed read left alone.
+            store.Faults.Remove(nameof(IContentWidthStore.Resolve));
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(480, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(new double?[] { 480, 480 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task A_failed_read_moves_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([DocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            var store = new FaultyWidthStore(fixture.Widths);
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            double before = popover.SliderPosition;
+            TaskCompletionSource hold = fixture.HoldQueue();
+
+            try
+            {
+                // Ctrl+] stores and sends 800 and queues the popover's read of the new width, which then throws.
+                fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+                store.Faults.Add(nameof(IContentWidthStore.Resolve));
+                popover.Refresh();
+                hold.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+
+            Assert.False(popover.IsStale);
+            Assert.Equal(800, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(new double?[] { 800 }, fixture.Surface.ContentWidths);
+            Assert.Equal(before, popover.SliderPosition, 6);
+            Assert.Equal("760 px", popover.Readout);
+            Assert.Equal(ContentWidthViewModel.ReadFailedMessage, popover.FootMessage);
+        });
+
+    [Fact]
+    public Task A_stale_failed_read_sends_nothing_to_the_page() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([DocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            var store = new FaultyWidthStore(fixture.Widths);
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            TaskCompletionSource hold = fixture.HoldQueue();
+
+            try
+            {
+                // The same ordering with Esc: the read is still queued when the popover closes, and it then throws.
+                fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+                store.Faults.Add(nameof(IContentWidthStore.Resolve));
+                popover.Refresh();
+                popover.Close();
+                hold.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+
+            Assert.True(popover.IsStale);
+            Assert.Equal(800, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(new double?[] { 800 }, fixture.Surface.ContentWidths);
+            Assert.Null(popover.FootMessage);
+            Assert.Equal((ToastKind.Warning, "Couldn't save the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+        });
+
+    [Fact]
+    public Task A_stale_save_that_throws_gives_the_page_the_stored_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([DocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            var store = new FaultyWidthStore(fixture.Widths);
+            ContentWidthViewModel popover = CreatePopover(fixture, store);
+            TaskCompletionSource hold = fixture.HoldQueue();
+
+            try
+            {
+                popover.SliderPosition = 0;
+                popover.EndDrag();
+                store.Faults.Add(nameof(IContentWidthStore.Set));
+
+                // Esc closes the popover after the release, so the ended drag queues no re-send ahead of the save.
+                popover.MarkStale();
+                hold.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+
+            Assert.True(popover.IsStale);
+            Assert.Equal(new double?[] { 480, 760 }, fixture.Surface.ContentWidths);
+            Assert.Null(popover.FootMessage);
+            Assert.Equal((ToastKind.Warning, "Couldn't save the width; see the log"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(
+                fixture.Log.Entries,
+                entry => entry.Level == "error" && entry.Message.Contains("save the content width", StringComparison.Ordinal)
+            );
+        });
+
+    private static ContentWidthViewModel CreatePopover(Fixture fixture, IContentWidthStore store)
+    {
+        (ContentWidth width, WidthSource source) = fixture.Widths.Resolve(DocA);
+        var host = new ContentWidthHost(
+            DocA,
+            fixture.Surface,
+            new DocumentWindowServices(fixture.Widths, fixture.Reader, fixture.Timers, fixture.Log, fixture.Toasts),
+            store,
+            fixture.ViewModel,
+            from => WidthScopes.For(DocA, Repo, groupIsRepo: true, from)
+        );
+        return new ContentWidthViewModel(host, source, width, WidePane);
+    }
+
     private static string P(params string[] parts) => Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", Path.Combine(parts));
 
     private static string ReadoutPx(double px) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{px:0} px");
@@ -1398,6 +1825,37 @@ public sealed class ContentWidthViewModelTests
                 Directory.Delete(WidthsFolder, recursive: true);
             }
         }
+    }
+
+    /// <summary>
+    /// The fixture's width store, with the members a test names throwing instead of reaching it. A file store never throws for
+    /// a path it is given, so a fault is how a store exception reaches the popover's guard.
+    /// </summary>
+    private sealed class FaultyWidthStore(WidthStore inner) : IContentWidthStore
+    {
+        /// <summary>The members whose calls throw.</summary>
+        public HashSet<string> Faults { get; } = new(StringComparer.Ordinal);
+
+        public ContentWidth Default => Fault(nameof(Default), () => inner.Default);
+
+        public (ContentWidth Width, WidthSource Source) Resolve(string documentPath) => Fault(nameof(Resolve), () => inner.Resolve(documentPath));
+
+        public (ContentWidth Width, WidthSource Source) ResolveFolder(string folder) =>
+            Fault(nameof(ResolveFolder), () => inner.ResolveFolder(folder));
+
+        public ContentWidth? Get(string folder) => Fault(nameof(Get), () => inner.Get(folder));
+
+        public bool Set(string folder, ContentWidth width) => Fault(nameof(Set), () => inner.Set(folder, width));
+
+        public bool SetDefault(ContentWidth width) => Fault(nameof(SetDefault), () => inner.SetDefault(width));
+
+        public bool Remove(string folder) => Fault(nameof(Remove), () => inner.Remove(folder));
+
+        public bool ClearAtOrBelow(string groupRoot) => Fault(nameof(ClearAtOrBelow), () => inner.ClearAtOrBelow(groupRoot));
+
+        public int CountAtOrBelow(string groupRoot) => Fault(nameof(CountAtOrBelow), () => inner.CountAtOrBelow(groupRoot));
+
+        private T Fault<T>(string member, Func<T> call) => Faults.Contains(member) ? throw new IOException($"The store cannot {member}.") : call();
     }
 
     /// <summary>A clock that hands every call to <paramref name="inner"/> and records each timer it creates.</summary>

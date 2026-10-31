@@ -1266,6 +1266,33 @@ public sealed class MainWindowTests
         });
 
     [Fact]
+    public Task Resizing_the_document_column_re_measures_the_open_width_popover() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(800)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.ContentWidthButton);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+            ContentWidthViewModel popover = Assert.IsType<ContentWidthViewModel>(fixture.Window.WidthPopover.DataContext);
+            double wide = fixture.Window.DocumentColumn.Bounds.Width;
+            Assert.True(ContentWidth.TextSpace(wide) > 800);
+            Assert.False(popover.IsWiderThanWindow);
+
+            fixture.Window.Width = 900;
+            fixture.Settle();
+
+            double narrow = fixture.Window.DocumentColumn.Bounds.Width;
+            Assert.True(ContentWidth.TextSpace(narrow) < 800);
+            Assert.True(popover.IsWiderThanWindow);
+            Assert.Equal(1, popover.SliderPosition);
+            Assert.Equal("800 px", popover.Readout);
+        });
+
+    [Fact]
     public Task Opening_the_width_popover_closes_the_more_menu() =>
         Headless.RunAsync(async () =>
         {

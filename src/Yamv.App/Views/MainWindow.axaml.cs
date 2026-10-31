@@ -547,7 +547,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnDocumentColumnSizeChanged(object? sender, SizeChangedEventArgs e) => SizeConfirmCard();
+    private void OnDocumentColumnSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        SizeConfirmCard();
+        _widthPopover?.UpdatePaneWidth(DocumentColumn.Bounds.Width);
+    }
 
     private void SizeConfirmCard()
     {
@@ -773,6 +777,8 @@ public partial class MainWindow : Window
 
         MorePopup.IsOpen = false;
         _widthPopover = popover;
+        // The column may have resized while the popover was created; the popover re-measures to the pane it opens over.
+        popover.UpdatePaneWidth(DocumentColumn.Bounds.Width);
         popover.PropertyChanged += OnWidthPopoverPropertyChanged;
         WidthPopover.DataContext = popover;
         WidthPopup.IsOpen = true;

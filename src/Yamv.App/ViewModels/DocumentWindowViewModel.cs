@@ -1152,7 +1152,14 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         string folder = Path.GetDirectoryName(path) ?? path;
         string groupRoot = ShowTree ? group.Path : folder;
         bool groupIsRepo = group.IsRepo && SamePath(group.Path, groupRoot);
-        var host = new ContentWidthHost(path, _surface, _services, this, from => WidthScopes.For(path, groupRoot, groupIsRepo, from));
+        var host = new ContentWidthHost(
+            path,
+            _surface,
+            _services,
+            new WidthStoreAdapter(_widths),
+            this,
+            from => WidthScopes.For(path, groupRoot, groupIsRepo, from)
+        );
         var popover = new ContentWidthViewModel(host, source, width, paneWidth);
         _contentWidthPopover?.MarkStale();
         _contentWidthPopover = popover;
