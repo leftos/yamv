@@ -1,0 +1,61 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  x:Class="Yamv.App.Views.DropOverlay"
+  DragDrop.AllowDrop="True"
+  Background="Transparent"
+  FontFamily="{DynamicResource YamvUiFont}"
+>
+  <UserControl.Styles>
+    <Style Selector="Border#Tint">
+      <Setter Property="Background" Value="{DynamicResource YamvAccent}" />
+      <Setter Property="Opacity" Value="0.09" />
+    </Style>
+    <Style Selector="Panel#Form.no Border#Tint">
+      <Setter Property="Background" Value="{DynamicResource YamvTextMuted}" />
+      <Setter Property="Opacity" Value="0.08" />
+    </Style>
+    <Style Selector="Rectangle#Outline">
+      <Setter Property="Stroke" Value="{DynamicResource YamvAccent}" />
+    </Style>
+    <Style Selector="Panel#Form.no Rectangle#Outline">
+      <Setter Property="Stroke" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+    <Style Selector="TextBlock#Say">
+      <Setter Property="FontSize" Value="21" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+    </Style>
+    <Style Selector="Panel#Form.no TextBlock#Say">
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvTextMuted}" />
+    </Style>
+  </UserControl.Styles>
+  <Panel x:Name="Form" IsVisible="False">
+    <Border Background="{DynamicResource YamvPageBackground}" />
+    <Border x:Name="Tint" />
+    <Rectangle x:Name="Outline" Margin="10" RadiusX="12" RadiusY="12" StrokeThickness="2" StrokeDashArray="3,2" />
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+      <Viewbox x:Name="OpenIcon" Width="34" Height="34">
+        <Canvas Width="34" Height="34">
+          <Path Data="M8,3.5 H20 L27,10.5 V30.5 H8 Z" Stroke="{DynamicResource YamvAccent}" StrokeThickness="2" StrokeJoin="Round" />
+          <Path
+            Data="M17.5,13 V24 M13,19.5 L17.5,24 L22,19.5"
+            Stroke="{DynamicResource YamvAccent}"
+            StrokeThickness="2"
+            StrokeLineCap="Round"
+            StrokeJoin="Round"
+          />
+        </Canvas>
+      </Viewbox>
+      <Viewbox x:Name="RefusedIcon" Width="30" Height="30">
+        <Canvas Width="16" Height="16">
+          <Ellipse Canvas.Left="1.8" Canvas.Top="1.8" Width="12.4" Height="12.4" Stroke="{DynamicResource YamvTextMuted}" StrokeThickness="1.5" />
+          <Path Data="M3.7,12.3 L12.3,3.7" Stroke="{DynamicResource YamvTextMuted}" StrokeThickness="1.5" />
+        </Canvas>
+      </Viewbox>
+      <TextBlock x:Name="Say" HorizontalAlignment="Center" />
+    </StackPanel>
+  </Panel>
+</UserControl>

@@ -5,8 +5,9 @@ namespace Yamv.App.Views;
 
 /// <summary>
 /// The 38 px custom title bar: the document name and its location, and the <c>TitleBarTools</c> slot for title-bar buttons,
-/// left to right: the ⟷ content-width button (<see cref="ContentWidthButton"/>, which the window opens its popover from and
-/// anchors it to), then the ⋯ button (<see cref="MoreButton"/>, which opens the window's menu of app-wide entries). The
+/// left to right: the Open… button (<see cref="OpenButton"/>, which shows the window's file picker), the ⟷ content-width button
+/// (<see cref="ContentWidthButton"/>, which the window opens its popover from and anchors it to),
+/// then the ⋯ button (<see cref="MoreButton"/>, which opens the window's menu of app-wide entries). The
 /// window's caption buttons are the ones Avalonia's drawn decorations put over the bar's right end, so the slot keeps clear
 /// of them on Windows. On macOS the traffic lights stay on the left, so the text starts 78 px in.
 /// </summary>

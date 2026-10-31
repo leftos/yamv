@@ -15,6 +15,7 @@
   Background="{DynamicResource YamvPageBackground}"
   Foreground="{DynamicResource YamvText}"
   FontFamily="{DynamicResource YamvUiFont}"
+  DragDrop.AllowDrop="True"
 >
   <Window.Styles>
     <!-- Tree rows: the fills, the accent bar and the close button are drawn here, so Fluent's own item fills never show. -->
@@ -251,6 +252,22 @@
           PlacementGravity="Top"
         >
           <views:ToastHost x:Name="ToastHost" MaxWidth="{Binding #DocumentColumn.Bounds.Width}" />
+        </Popup>
+        <!--
+          The drop overlay: a native popup too, the only thing that can take a drag from the web view. It hangs from the top left
+          of Body, the window below the title bar, and is sized to Body.
+        -->
+        <Popup
+          x:Name="DropPopup"
+          ShouldUseOverlayLayer="False"
+          IsLightDismissEnabled="False"
+          TakesFocusFromNativeControl="False"
+          WindowManagerAddShadowHint="False"
+          Placement="AnchorAndGravity"
+          PlacementAnchor="TopLeft"
+          PlacementGravity="BottomRight"
+        >
+          <views:DropOverlay x:Name="DropOverlay" />
         </Popup>
       </Panel>
       <GridSplitter

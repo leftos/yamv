@@ -133,6 +133,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>Where the window shows that an operation the user started failed; the window draws a <see cref="ToastCenter"/>.</summary>
     public IToasts Toasts { get; }
 
+    /// <summary>The window's clock.</summary>
+    internal TimeProvider Time => _services.Time;
+
     /// <summary>
     /// The tree's top-level rows. They are rebuilt when the tree's shape changes; otherwise the same rows are kept and their
     /// selection, missing flag and expansion updated.

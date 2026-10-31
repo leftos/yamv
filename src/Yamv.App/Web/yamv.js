@@ -476,6 +476,7 @@
     findState = { query: findState.query, marks: [], index: -1 };
     const range = document.createRange();
     range.selectNodeContents(staged);
+    pageDrag = false;
     content.replaceChildren(range.extractContents());
     discardStaging();
     if (width) {
@@ -512,6 +513,7 @@
     template.innerHTML = bodyHtml;
     sanitize(template.content);
     rewriteImages(template.content, settings.docBase, settings.rootBase);
+    pageDrag = false;
     target.replaceChildren(template.content);
     highlightCode(target);
     const pending = [];
@@ -871,6 +873,9 @@
     return target !== null;
   }
 
+  let lastDragPost = -Infinity;
+  let pageDrag = false;
+
   // A primary click (click) or a middle click (auxclick, button 1) on a document link; other buttons do nothing. The
   // second click of a double click is swallowed, so a link posts once.
   function onLinkClick(event) {
@@ -897,6 +902,41 @@
 
   document.addEventListener("click", onLinkClick);
   document.addEventListener("auxclick", onLinkClick);
+
+  // Tells the host files are being dragged over the page, so it can raise its overlay. dragover counts as well as dragenter:
+  // after a drop the next drag's first event is dragover. Neither is default-prevented: that would lose a drop's paths.
+  function isOutsideFileDrag(event) {
+    return !pageDrag && Array.from(event.dataTransfer.types).includes("Files");
+  }
+
+  function onFileDrag(event) {
+    if (!isOutsideFileDrag(event)) {
+      return;
+    }
+    const now = performance.now();
+    if (now - lastDragPost < 200) {
+      return;
+    }
+    lastDragPost = now;
+    post({ type: "drag", over: true });
+  }
+
+  // A drag begun in the page, such as a selection holding an image, is no file arriving from outside.
+  document.addEventListener("dragstart", () => {
+    pageDrag = true;
+  });
+  // On the window, in the capture phase: a render can remove the source node, whose dragend then never bubbles.
+  window.addEventListener("dragend", () => {
+    pageDrag = false;
+  }, true);
+  document.addEventListener("dragenter", onFileDrag);
+  document.addEventListener("dragover", onFileDrag);
+  document.addEventListener("dragleave", (event) => {
+    if (event.relatedTarget === null && isOutsideFileDrag(event)) {
+      lastDragPost = -Infinity;
+      post({ type: "drag", over: false });
+    }
+  });
 
   window.addEventListener("scroll", () => {
     if (rendering) {

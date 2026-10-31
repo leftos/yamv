@@ -65,6 +65,8 @@ public sealed class DocumentView : UserControl, IDocumentSurface
 
     public event EventHandler<KeyForwardedEventArgs>? KeyForwarded;
 
+    public event EventHandler<bool>? DragOverChanged;
+
     /// <summary>
     /// Shows <paramref name="show"/>'s document at its content width, restoring its fragment if given, else its anchor,
     /// else its scroll fraction; a page that already shows the document keeps its own top block, or its pin to the top or
@@ -496,6 +498,9 @@ public sealed class DocumentView : UserControl, IDocumentSurface
                 break;
             case "key" when message.Key is not null:
                 KeyForwarded?.Invoke(this, new KeyForwardedEventArgs(message.Key, message.Ctrl, message.Meta, message.Shift, message.Alt));
+                break;
+            case "drag" when message.Over is bool over:
+                DragOverChanged?.Invoke(this, over);
                 break;
             case "find":
                 break;

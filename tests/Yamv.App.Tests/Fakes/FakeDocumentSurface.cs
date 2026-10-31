@@ -12,6 +12,8 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     public event EventHandler<KeyForwardedEventArgs>? KeyForwarded;
 
+    public event EventHandler<bool>? DragOverChanged;
+
     /// <summary>Every <see cref="ShowAsync"/> call, oldest first.</summary>
     public List<ShownDocument> Shown { get; } = [];
 
@@ -128,6 +130,12 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     /// <summary>Raises <see cref="LinkActivated"/> as the page would for an activated link.</summary>
     public void RaiseLink(LinkActivatedEventArgs link) => LinkActivated?.Invoke(this, link);
+
+    /// <summary>Raises <see cref="DragOverChanged"/> as the page would: true for files over it, false for a drag leaving.</summary>
+    public void RaiseDragOver(bool over) => DragOverChanged?.Invoke(this, over);
+
+    /// <summary>Whether anything listens to <see cref="DragOverChanged"/>.</summary>
+    public bool HasDragSubscribers => DragOverChanged is not null;
 
     /// <summary>Whether anything listens to <see cref="LinkActivated"/>.</summary>
     public bool HasLinkSubscribers => LinkActivated is not null;

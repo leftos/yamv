@@ -72,6 +72,11 @@
     window as the menu's item does and captures that window instead of the main one; the run waits for the "Window: theme
     settings shown" log line. Passed as YAMV_DEV_THEME_SETTINGS_ENTRY. Not with -WidthPopover or -Toasts.
 
+.PARAMETER DropOverlay
+    With -App: ok shows the drop overlay's "Drop to open" form once the window has shown, no its grey refusal, and paints
+    the overlay, a window of its own, over the capture. Passed as YAMV_DEV_DROP_OVERLAY; the run waits for the
+    "Window: drop overlay shown" log line. Not with -WidthPopover, -Toasts or -ThemeSettingsEntry.
+
 .PARAMETER ThemeSettings
     Run the theme settings window instead of the harness, on a fresh data folder under .tmp\yamv-data.
 
@@ -124,6 +129,7 @@ param(
     [ValidateSet('', 'clearall', 'folder')] [string] $WidthPopoverStep = '',
     [switch] $Toasts,
     [ValidateSet('', 'menu', 'open')] [string] $ThemeSettingsEntry = '',
+    [ValidateSet('', 'ok', 'no')] [string] $DropOverlay = '',
     [switch] $ThemeSettings,
     [string] $Themes = '',
     [string] $ImportFile = '',
@@ -139,8 +145,8 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $exe = Join-Path $root 'src\Yamv.App\bin\Release\net10.0\yamv.exe'
 $capture = Join-Path $PSScriptRoot 'capture-window.ps1'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-if (($Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover -or $Toasts -or $ThemeSettingsEntry) -and -not $App) {
-    throw ('-Session, -Settings, -Widths, -DeleteAfterShown, -WidthPopover, -Toasts and -ThemeSettingsEntry need -App: ' +
+if (($Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover -or $Toasts -or $ThemeSettingsEntry -or $DropOverlay) -and -not $App) {
+    throw ('-Session, -Settings, -Widths, -DeleteAfterShown, -WidthPopover, -Toasts, -ThemeSettingsEntry and -DropOverlay need -App: ' +
         'the harnesses read no session, settings.json or widths.json.')
 }
 if ($Toasts -and $WidthPopover) {
@@ -148,6 +154,9 @@ if ($Toasts -and $WidthPopover) {
 }
 if ($ThemeSettingsEntry -and ($WidthPopover -or $Toasts)) {
     throw '-ThemeSettingsEntry, -WidthPopover and -Toasts each wait for their own log line; pass one.'
+}
+if ($DropOverlay -and ($WidthPopover -or $Toasts -or $ThemeSettingsEntry)) {
+    throw '-DropOverlay, -WidthPopover, -Toasts and -ThemeSettingsEntry each wait for their own log line; pass one.'
 }
 if ($WidthPopoverStep -and -not $WidthPopover) {
     throw '-WidthPopoverStep needs -WidthPopover: it acts on the popover that switch opens.'
@@ -191,10 +200,12 @@ if ($App) {
     $env:YAMV_DEV_WIDTH_POPOVER = if ($WidthPopoverStep) { $WidthPopoverStep } elseif ($WidthPopover) { '1' } else { $null }
     $env:YAMV_DEV_TOASTS = if ($Toasts) { '1' } else { $null }
     $env:YAMV_DEV_THEME_SETTINGS_ENTRY = if ($ThemeSettingsEntry) { $ThemeSettingsEntry } else { $null }
+    $env:YAMV_DEV_DROP_OVERLAY = if ($DropOverlay) { $DropOverlay } else { $null }
     $readyLine = if ($WidthPopover) { 'Window: (width popover shown|no width popover to show)' }
     elseif ($Toasts) { 'Window: toasts shown' }
     elseif ($ThemeSettingsEntry -eq 'menu') { 'Window: more menu shown' }
     elseif ($ThemeSettingsEntry -eq 'open') { 'Window: (theme settings shown|no theme settings window to show)' }
+    elseif ($DropOverlay) { 'Window: drop overlay shown' }
     else { 'Window: shown' }
 }
 elseif ($ThemeSettings) {
@@ -209,6 +220,7 @@ elseif ($ThemeSettings) {
     $env:YAMV_DEV_WIDTH_POPOVER = $null
     $env:YAMV_DEV_TOASTS = $null
     $env:YAMV_DEV_THEME_SETTINGS_ENTRY = $null
+    $env:YAMV_DEV_DROP_OVERLAY = $null
     $readyLine = 'Window: shown'
 }
 else {
@@ -218,6 +230,7 @@ else {
     $env:YAMV_DEV_WIDTH_POPOVER = $null
     $env:YAMV_DEV_TOASTS = $null
     $env:YAMV_DEV_THEME_SETTINGS_ENTRY = $null
+    $env:YAMV_DEV_DROP_OVERLAY = $null
     $readyLine = 'Harness: showing'
 }
 
@@ -292,7 +305,7 @@ try {
         & $capture -ProcessId $process.Id -Out $Out -Title 'Theme settings'
     }
     else {
-        & $capture -ProcessId $process.Id -Out $Out -WithPopups:($WidthPopover -or $Toasts -or $ThemeSettingsEntry -eq 'menu')
+        & $capture -ProcessId $process.Id -Out $Out -WithPopups:($WidthPopover -or $Toasts -or $ThemeSettingsEntry -eq 'menu' -or $DropOverlay)
     }
     Write-Output "pid=$($process.Id) exited=$($process.HasExited)"
 }

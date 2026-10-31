@@ -20,6 +20,9 @@ public interface IDocumentSurface
     /// <summary>An app shortcut was pressed while the page had focus.</summary>
     event EventHandler<KeyForwardedEventArgs>? KeyForwarded;
 
+    /// <summary>Files are being dragged over the page (true), or a drag left it (false).</summary>
+    event EventHandler<bool>? DragOverChanged;
+
     /// <summary>
     /// Shows a rendered document at its content width, restoring its fragment if given, else its scroll position. The page
     /// hides the outgoing document before it applies the width, so the incoming one shows once, at its own width.

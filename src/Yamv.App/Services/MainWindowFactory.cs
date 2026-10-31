@@ -27,6 +27,28 @@ public static class MainWindowFactory
         !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
         && Environment.GetEnvironmentVariable(ToastsVariable) == "1";
 
+    /// <summary>
+    /// Set to ok or no in a run with its own data folder, it makes the main window show that form of the drop overlay once it has
+    /// shown, for a hidden-desktop capture.
+    /// </summary>
+    internal const string DropOverlayVariable = "YAMV_DEV_DROP_OVERLAY";
+
+    /// <summary>The form <see cref="DropOverlayVariable"/> asks for, in a run with its own data folder, so the owner's app never shows it.</summary>
+    private static DevDropOverlay DevDropOverlayAsked()
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable)))
+        {
+            return DevDropOverlay.None;
+        }
+
+        return Environment.GetEnvironmentVariable(DropOverlayVariable) switch
+        {
+            "ok" => DevDropOverlay.Open,
+            "no" => DevDropOverlay.Refused,
+            _ => DevDropOverlay.None,
+        };
+    }
+
     /// <summary>Creates the one theme bridge the app applies through: the catalog over the data folder's themes.</summary>
     /// <param name="application">The application whose resources and theme variant the bridge writes.</param>
     /// <param name="log">The process's log.</param>
@@ -95,7 +117,11 @@ public static class MainWindowFactory
             );
             viewModel = new DocumentWindowViewModel(state, view, services);
             viewModel.Restore(session);
-            var window = new MainWindow(viewModel, view, view, log) { ToastsWhenShown = DevToastsAsked() };
+            var window = new MainWindow(viewModel, view, view, log)
+            {
+                ToastsWhenShown = DevToastsAsked(),
+                DropOverlayWhenShown = DevDropOverlayAsked(),
+            };
             RestoreLayout(window, session);
             var saver = new MainWindowSession(window, viewModel, store, TimeProvider.System, log);
             return new MainWindowComposition(window, viewModel, bridge, view, saver);

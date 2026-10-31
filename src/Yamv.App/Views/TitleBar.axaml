@@ -3,6 +3,7 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:vm="using:Yamv.App.ViewModels"
   xmlns:chrome="using:Avalonia.Controls.Chrome"
+  xmlns:views="using:Yamv.App.Views"
   x:Class="Yamv.App.Views.TitleBar"
   x:DataType="vm:DocumentWindowViewModel"
 >
@@ -61,6 +62,20 @@
         HorizontalAlignment="Right"
         chrome:WindowDecorationProperties.ElementRole="User"
       >
+        <Button
+          x:Name="OpenButton"
+          Classes="tool"
+          ToolTip.Tip="{x:Static views:MainWindow.OpenToolTip}"
+          AutomationProperties.Name="Open"
+        >
+          <Path
+            Width="16"
+            Height="16"
+            Data="M1.8,12.6 V3.2 H5.9 L7.4,4.7 H12.7 V6.8 M1.8,12.6 L3.7,7 H14.3 L12.4,12.6 Z"
+            StrokeThickness="1.35"
+            StrokeJoin="Round"
+          />
+        </Button>
         <Button x:Name="ContentWidthButton" Classes="tool" IsEnabled="{Binding CanEditContentWidth}" AutomationProperties.Name="Content width">
           <Path
             Width="16"

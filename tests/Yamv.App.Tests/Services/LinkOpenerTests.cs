@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using Microsoft.Extensions.Time.Testing;
 using Yamv.App.Controls;
 using Yamv.App.Services;
 using Yamv.App.Tests.Fakes;
@@ -27,9 +28,154 @@ public sealed class LinkOpenerTests
             Assert.Equal(0, fixture.Runs);
             Assert.Empty(fixture.Contexts);
             fixture.AssertNothingOpened();
+            Assert.Empty(fixture.Dropped);
             Assert.Empty(fixture.Toasts.Shown);
             LogEntry entry = Assert.Single(fixture.Log.Entries);
             Assert.Equal(("info", $"Link from a {sourceName} ignored: https://example.com/"), (entry.Level, entry.Message));
+        });
+
+    [Fact]
+    public Task A_file_dropped_on_the_page_opens_whatever_document_the_view_last_showed() =>
+        Headless.RunAsync(async () =>
+        {
+            string dropped = P("elsewhere", "dropped.md");
+            var uri = new Uri(dropped);
+            var fixture = new Fixture { DragSignalled = true, Decision = new OpenDocument(dropped, dropped, null) };
+
+            // WebView2 raises a new-window request for a drop; the view stamps the latest show, which need not be open.
+            await fixture.ClickAsync(new LinkActivatedEventArgs(uri.AbsoluteUri, uri, 0, LinkSource.NewWindow, P("gone", "closed.md")));
+            fixture.EndDropWait();
+
+            Assert.Equal([dropped], Assert.Single(fixture.Dropped));
+            Assert.Equal(0, fixture.Runs);
+            fixture.AssertNothingOpened();
+            Assert.Empty(fixture.Toasts.Shown);
+        });
+
+    [Fact]
+    public Task A_drop_arriving_after_the_window_closed_opens_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            var fixture = new Fixture { DragSignalled = true };
+
+            await fixture.Opener.HandleAsync(NewWindow(new Uri(P("drop", "b.md"))));
+            fixture.Opener.Dispose();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(fixture.Dropped);
+            LogEntry entry = Assert.Single(fixture.Log.Entries);
+            Assert.Contains("after the window closed", entry.Message, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task Files_of_one_drop_join_one_batch() =>
+        Headless.RunAsync(async () =>
+        {
+            string[] paths = [P("drop", "b.md"), P("drop", "c.txt")];
+            TimeSpan almost = LinkOpener.DropBatchWait - TimeSpan.FromMilliseconds(1);
+            var fixture = new Fixture { DragSignalled = true };
+
+            await fixture.Opener.HandleAsync(NewWindow(new Uri(paths[0])));
+            fixture.Advance(almost);
+            await fixture.Opener.HandleAsync(NewWindow(new Uri(paths[1])));
+            fixture.Advance(almost);
+            Assert.Empty(fixture.Dropped);
+
+            fixture.Advance(TimeSpan.FromMilliseconds(1));
+
+            Assert.Equal(paths, Assert.Single(fixture.Dropped));
+        });
+
+    [Fact]
+    public Task A_file_arriving_after_the_signal_ended_joins_its_batch() =>
+        Headless.RunAsync(async () =>
+        {
+            string[] paths = [P("drop", "b.md"), P("drop", "c.txt")];
+            var fixture = new Fixture { DragSignalled = true };
+
+            await fixture.Opener.HandleAsync(NewWindow(new Uri(paths[0])));
+            fixture.DragSignalled = false;
+            await fixture.Opener.HandleAsync(NewWindow(new Uri(paths[1])));
+            fixture.EndDropWait();
+
+            Assert.Equal(paths, Assert.Single(fixture.Dropped));
+        });
+
+    [Fact]
+    public Task A_new_window_link_after_the_batch_opened_is_ignored() =>
+        Headless.RunAsync(async () =>
+        {
+            string dropped = P("drop", "b.md");
+            var fixture = new Fixture { DragSignalled = true };
+
+            await fixture.Opener.HandleAsync(NewWindow(new Uri(dropped)));
+            fixture.EndDropWait();
+            fixture.DragSignalled = false;
+            await fixture.Opener.HandleAsync(NewWindow(new Uri(P("drop", "c.txt"))));
+            fixture.EndDropWait();
+
+            Assert.Equal([dropped], Assert.Single(fixture.Dropped));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message.StartsWith("Link from a new window ignored", StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task Three_dropped_files_open_as_one_batch_in_order() =>
+        Headless.RunAsync(async () =>
+        {
+            string[] paths = [P("drop", "b.md"), P("drop", "c.txt"), P("drop", "a.md")];
+            var fixture = new Fixture { DragSignalled = true };
+
+            foreach (string path in paths)
+            {
+                await fixture.Opener.HandleAsync(NewWindow(new Uri(path)));
+            }
+
+            Assert.Empty(fixture.Dropped);
+            fixture.EndDropWait();
+
+            Assert.Equal(paths, Assert.Single(fixture.Dropped));
+        });
+
+    [Fact]
+    public Task A_new_window_file_link_with_no_drag_signal_is_ignored() =>
+        Headless.RunAsync(async () =>
+        {
+            var fixture = new Fixture();
+
+            await fixture.ClickAsync(NewWindow(new Uri(P("drop", "b.md"))));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(fixture.Dropped);
+            fixture.AssertNothingOpened();
+            Assert.Equal("info", Assert.Single(fixture.Log.Entries).Level);
+        });
+
+    [Fact]
+    public Task An_http_new_window_link_during_a_drag_is_ignored() =>
+        Headless.RunAsync(async () =>
+        {
+            var fixture = new Fixture { DragSignalled = true };
+
+            await fixture.ClickAsync(NewWindow(new Uri("https://example.com/page.md")));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(fixture.Dropped);
+            fixture.AssertNothingOpened();
+            Assert.Empty(fixture.Toasts.Shown);
+        });
+
+    [Fact]
+    public Task A_navigation_link_during_a_drag_is_ignored() =>
+        Headless.RunAsync(async () =>
+        {
+            var uri = new Uri(P("drop", "b.md"));
+            var fixture = new Fixture { DragSignalled = true };
+
+            await fixture.ClickAsync(new LinkActivatedEventArgs(uri.AbsoluteUri, uri, 0, LinkSource.Navigation, Doc));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(fixture.Dropped);
+            fixture.AssertNothingOpened();
         });
 
     [Theory]
@@ -435,6 +581,8 @@ public sealed class LinkOpenerTests
     private static LinkActivatedEventArgs Click(string href, Uri? resolved, string? documentPath) =>
         new(href, resolved, 0, LinkSource.Click, documentPath);
 
+    private static LinkActivatedEventArgs NewWindow(Uri uri) => new(uri.AbsoluteUri, uri, 0, LinkSource.NewWindow, Doc);
+
     private static string P(params string[] parts) => Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", Path.Combine(parts));
 
     /// <summary>The documents of a window: which group root each open document has, and every linked document opened.</summary>
@@ -492,11 +640,31 @@ public sealed class LinkOpenerTests
                         var done = new TaskCompletionSource<LinkDecision>();
                         _pending.Enqueue((work, done));
                         return done.Task;
-                    }
-                )
+                    },
+                    Time
+                ),
+                new LinkDropRoute(() => DragSignalled, Dropped.Add)
             );
             DecideBy = _ => Decision!;
         }
+
+        /// <summary>What the drag signal answers.</summary>
+        public bool DragSignalled { get; set; }
+
+        /// <summary>The clock a drop's batch waits on.</summary>
+        public FakeTimeProvider Time { get; } = new();
+
+        public void Advance(TimeSpan by)
+        {
+            Time.Advance(by);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        /// <summary>Lets a queued drop's wait run out, so its batch is handed over.</summary>
+        public void EndDropWait() => Advance(LinkOpener.DropBatchWait);
+
+        /// <summary>Every batch of dropped paths handed to the window, oldest first.</summary>
+        public List<IReadOnlyList<string>> Dropped { get; } = [];
 
         public LinkDecision? Decision { get; init; }
 

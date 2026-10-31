@@ -41,4 +41,52 @@ public sealed class DocumentFileTypesTests
         Assert.Equal(extensions, DocumentFileTypes.Extensions);
         Assert.Equal(patterns, DocumentFileTypes.Patterns);
     }
+
+    [Fact]
+    public void DropHint_names_every_document_type() => Assert.Equal("Drop .md, .markdown, .mdx or .txt files", DocumentFileTypes.DropHint);
+
+    [Fact]
+    public void Sort_keeps_documents_in_drop_order()
+    {
+        DroppedFiles sorted = DocumentFileTypes.Sort(["b.md", "c.txt", "a.markdown"]);
+
+        Assert.Equal(["b.md", "c.txt", "a.markdown"], sorted.Documents);
+        Assert.Equal(0, sorted.Refused);
+    }
+
+    [Fact]
+    public void Sort_counts_the_rest_as_refused()
+    {
+        DroppedFiles sorted = DocumentFileTypes.Sort(["run.exe", "b.md", "tool.ps1", ""]);
+
+        Assert.Equal(["b.md"], sorted.Documents);
+        Assert.Equal(3, sorted.Refused);
+    }
+
+    [Fact]
+    public void Sort_refuses_a_folder_named_like_a_document()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "yamv-sort-" + Guid.NewGuid().ToString("N"), "notes.md");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            DroppedFiles sorted = DocumentFileTypes.Sort([folder]);
+
+            Assert.Empty(sorted.Documents);
+            Assert.Equal(1, sorted.Refused);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(folder)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Sort_of_nothing_is_empty()
+    {
+        DroppedFiles sorted = DocumentFileTypes.Sort([]);
+
+        Assert.Empty(sorted.Documents);
+        Assert.Equal(0, sorted.Refused);
+    }
 }

@@ -23,14 +23,14 @@ namespace Yamv.App.Tests.Views;
 public sealed class ContentWidthPopoverTests
 {
     [Fact]
-    public Task The_button_is_the_first_title_bar_tool_and_is_enabled_only_while_a_document_is_shown() =>
+    public Task The_button_follows_Open_in_the_title_bar_and_is_enabled_only_while_a_document_is_shown() =>
         Headless.RunAsync(async () =>
         {
             await using var fixture = new Fixture();
             await fixture.OpenAsync();
             StackPanel tools = fixture.Window.WindowTitleBar.TitleBarTools;
 
-            Assert.Same(fixture.Button, tools.Children[0]);
+            Assert.Same(fixture.Button, tools.Children[1]);
             Assert.False(fixture.Button.IsEnabled);
 
             fixture.ViewModel.Open([fixture.DocA]);

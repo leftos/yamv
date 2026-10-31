@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Microsoft.Extensions.Time.Testing;
@@ -25,6 +26,262 @@ namespace Yamv.App.Tests.Views;
 
 public sealed class MainWindowTests
 {
+    [Fact]
+    public Task The_title_bar_Open_button_opens_the_picker() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Files.DocumentsToPick = [fixture.DocB];
+            TitleBar bar = fixture.Window.WindowTitleBar;
+
+            Assert.Same(bar.OpenButton, bar.TitleBarTools.Children[0]);
+            Assert.Equal(MainWindow.OpenToolTip, ToolTip.GetTip(bar.OpenButton));
+            fixture.ClickEvent(bar.OpenButton);
+
+            Assert.Equal(1, fixture.Files.DocumentPicks);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task The_Open_button_opens_the_picker_in_a_viewer_window() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture(persist: false);
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.OpenButton);
+
+            Assert.Equal(1, fixture.Files.DocumentPicks);
+        });
+
+    [Fact]
+    public Task Dropping_documents_opens_them_and_selects_the_first() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            await fixture.Window.OpenDroppedAsync([fixture.DocB, fixture.Other]);
+            fixture.Settle();
+
+            Assert.Equal([fixture.DocA, fixture.DocB, fixture.Other], fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+            Assert.Empty(fixture.Toasts.Items);
+        });
+
+    [Fact]
+    public Task A_mixed_drop_opens_the_documents_and_refuses_the_rest_once() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            await fixture.Window.OpenDroppedAsync(["pic.png", fixture.DocB, "tool.ps1"]);
+            fixture.Settle();
+
+            Assert.Equal([fixture.DocA, fixture.DocB], fixture.State.Documents);
+            ToastItem toast = Assert.Single(fixture.Toasts.Items);
+            Assert.Equal((ToastKind.Refusal, DocumentFileTypes.DropHint, 1), (toast.Kind, toast.Text, toast.Count));
+        });
+
+    [Fact]
+    public Task A_drop_of_only_non_documents_toasts_the_hint() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            await fixture.Window.OpenDroppedAsync(["run.exe", string.Empty]);
+            fixture.Settle();
+
+            Assert.Equal([fixture.DocA], fixture.State.Documents);
+            Assert.Equal(DocumentFileTypes.DropHint, Assert.Single(fixture.Toasts.Items).Text);
+        });
+
+    [Fact]
+    public Task A_drop_of_an_open_document_selects_it() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+
+            await fixture.Window.OpenDroppedAsync([fixture.DocB]);
+            fixture.Settle();
+
+            Assert.Equal([fixture.DocA, fixture.DocB], fixture.State.Documents);
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task Hovering_with_no_document_shows_the_grey_form() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            DragDropEffects effects = fixture.Window.OnDragPaths(["run.exe"]);
+            fixture.Settle();
+
+            Assert.Equal(DragDropEffects.None, effects);
+            Assert.True(fixture.Window.DropPopup.IsOpen);
+            Assert.Contains("no", fixture.Window.DropOverlay.Form.Classes);
+            Assert.Equal(DocumentFileTypes.DropHint, fixture.Window.DropOverlay.Say.Text);
+        });
+
+    [Fact]
+    public Task Hovering_with_a_document_shows_drop_to_open() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            DragDropEffects effects = fixture.Window.OnDragPaths(["run.exe", fixture.DocB]);
+            fixture.Settle();
+
+            Assert.Equal(DragDropEffects.Copy, effects);
+            Assert.True(fixture.Window.DropPopup.IsOpen);
+            Assert.DoesNotContain("no", fixture.Window.DropOverlay.Form.Classes);
+            Assert.Equal(DropOverlay.OpenText, fixture.Window.DropOverlay.Say.Text);
+        });
+
+    [Fact]
+    public Task The_empty_state_takes_a_drag_over_its_blank_area() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            // The window's fill is the theme resource YamvPageBackground, which the test app never sets.
+            fixture.Window.Background = Brushes.White;
+            await fixture.OpenAsync();
+            Panel column = fixture.Window.DocumentColumn;
+            Point blank = column.TranslatePoint(new Point(4, column.Bounds.Height - 4), fixture.Window)!.Value;
+
+            IInputElement? hit = fixture.Window.InputHitTest(blank);
+
+            Assert.True(DragDrop.GetAllowDrop(Assert.IsAssignableFrom<Interactive>(hit)));
+        });
+
+    [Fact]
+    public Task A_drop_reports_copy_to_its_source() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            Assert.Equal(DragDropEffects.Copy, fixture.Window.OnDropPaths([fixture.DocB]));
+        });
+
+    [Fact]
+    public Task A_drop_with_no_paths_reports_none() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            Assert.Equal(DragDropEffects.None, fixture.Window.OnDropPaths([]));
+            Assert.Equal([fixture.DocA], fixture.State.Documents);
+        });
+
+    [Fact]
+    public Task Minimising_during_a_drag_hides_the_overlay_for_good() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Window.OnDragPaths([fixture.DocB]);
+            fixture.Settle();
+            Assert.True(fixture.Window.DropPopup.IsOpen);
+
+            fixture.Window.WindowState = WindowState.Minimized;
+            fixture.Settle();
+            fixture.Window.WindowState = WindowState.Normal;
+            fixture.Settle();
+
+            Assert.False(fixture.Window.DropPopup.IsOpen);
+        });
+
+    [Fact]
+    public Task A_drag_with_no_local_paths_shows_the_grey_form() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Surface.RaiseDragOver(true);
+
+            DragDropEffects effects = fixture.Window.OnDragPaths([]);
+            fixture.Settle();
+
+            Assert.Equal(DragDropEffects.None, effects);
+            Assert.True(fixture.Window.DropPopup.IsOpen);
+            Assert.Contains("no", fixture.Window.DropOverlay.Form.Classes);
+        });
+
+    [Fact]
+    public Task A_drag_with_no_local_paths_keeps_its_grey_form_across_the_title_bar() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Surface.RaiseDragOver(true);
+            fixture.Window.OnDragPaths([]);
+            fixture.Surface.RaiseDragOver(false);
+
+            fixture.Window.OnDragPaths([]);
+            fixture.Time.Advance(DropOverlayViewModel.Grace);
+            fixture.Settle();
+
+            Assert.True(fixture.Window.DropPopup.IsOpen);
+            Assert.Contains("no", fixture.Window.DropOverlay.Form.Classes);
+        });
+
+    [Fact]
+    public Task A_cancelled_drag_hides_the_overlay_after_the_grace() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Surface.RaiseDragOver(true);
+            fixture.Settle();
+            Assert.True(fixture.Window.DropPopup.IsOpen);
+
+            fixture.Time.Advance(DropOverlayViewModel.Grace);
+            fixture.Settle();
+
+            Assert.False(fixture.Window.DropPopup.IsOpen);
+        });
+
+    [Fact]
+    public Task A_drop_sorted_after_the_window_closed_opens_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            Task dropped = fixture.Window.OpenDroppedAsync([fixture.DocB, "run.exe"]);
+            fixture.Window.Close();
+            await dropped;
+
+            Assert.Equal([fixture.DocA], fixture.State.Documents);
+            Assert.Empty(fixture.Toasts.Items);
+        });
+
+    [Fact]
+    public Task Closing_the_window_unhooks_the_drag_handlers() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Window.OnDragPaths([fixture.DocB]);
+            fixture.Settle();
+            Assert.True(fixture.Surface.HasDragSubscribers);
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.False(fixture.Surface.HasDragSubscribers);
+            Assert.False(fixture.Window.DropPopup.IsOpen);
+        });
+
     [Fact]
     public Task Tree_shows_repo_group_badge_folder_and_documents() =>
         Headless.RunAsync(async () =>

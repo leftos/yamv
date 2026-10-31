@@ -76,6 +76,34 @@ public sealed class DocumentViewScrollMessageTests
         });
 
     [Fact]
+    public Task A_drag_message_raises_the_drag_event() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            List<bool> raised = [];
+            view.DragOverChanged += (_, over) => raised.Add(over);
+
+            view.Handle(Parse("""{"type":"drag","over":true}"""));
+
+            Assert.Equal([true], raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_drag_left_message_raises_it_false() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            List<bool> raised = [];
+            view.DragOverChanged += (_, over) => raised.Add(over);
+
+            view.Handle(Parse("""{"type":"drag","over":false}"""));
+
+            Assert.Equal([false], raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
     public Task A_click_link_carries_source_click_and_the_document_path() =>
         Headless.RunAsync(() =>
         {

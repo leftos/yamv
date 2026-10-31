@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -16,6 +17,7 @@ using Yamv.App.Platform;
 using Yamv.App.Services;
 using Yamv.App.ViewModels;
 using Yamv.Core.Diagnostics;
+using Yamv.Core.Documents;
 using Yamv.Core.Input;
 using Yamv.Core.Links;
 using Yamv.Core.Platform;
@@ -27,13 +29,13 @@ namespace Yamv.App.Views;
 /// A document window: the custom title bar, the document column (the document view, the empty state or the missing pane)
 /// and the tree sidebar on the right behind a splitter. The sidebar and splitter show only when the view model shows its tree
 /// and the user has not hidden the sidebar; hidden, their columns take no width. The window runs the keyboard shortcuts, both
-/// its own key presses and those the page forwards, the tree rows' context menus, Open files… and Locate…, and keeps its
-/// normal (restored) rectangle for the session.
+/// its own key presses and those the page forwards, the tree rows' context menus, Open files…, Locate… and files dropped on it,
+/// and keeps its normal (restored) rectangle for the session.
 /// </summary>
 [SuppressMessage(
     "Reliability",
     "CA1001:Types that own disposable fields should be disposable",
-    Justification = "A window is not disposed; its link opener is disposed when the window closes (OnClosed)."
+    Justification = "A window is not disposed; its link opener and drop overlay are disposed when the window closes (OnClosed)."
 )]
 public partial class MainWindow : Window
 {
@@ -43,6 +45,7 @@ public partial class MainWindow : Window
     private const double MinSidebarWidth = 200;
     private const double MaxSidebarWidth = 480;
     private const double MinDocumentWidth = 320;
+    private const string OpenFilesFailedToast = "Couldn't open the files; see the log";
 
     // The ⋯ menu's shadow is not a theme token: the width popover's far and near shadows, in each theme.
     private static readonly Color LightShadowColor = Color.Parse("#1F2328");
@@ -51,6 +54,8 @@ public partial class MainWindow : Window
     private readonly IDocumentSurface? _surface;
     private readonly IAppLog? _log;
     private readonly LinkOpener? _linkOpener;
+    private readonly DropOverlayViewModel? _dropOverlay;
+    private bool? _dragHasDocument;
     private double _sidebarWidth = DefaultSidebarWidth;
     private bool _sidebarShown = true;
     private bool _opened;
@@ -90,7 +95,14 @@ public partial class MainWindow : Window
             viewModel,
             viewModel.Toasts,
             log,
-            new LinkOpenerSeams(uri => Launcher.LaunchUriAsync(uri), () => FileActions!, LinkPolicy.Decide, decide => Task.Run(decide))
+            new LinkOpenerSeams(
+                uri => Launcher.LaunchUriAsync(uri),
+                () => FileActions!,
+                LinkPolicy.Decide,
+                decide => Task.Run(decide),
+                viewModel.Time
+            ),
+            new LinkDropRoute(() => _dropOverlay!.DragSignalledRecently, OpenDropped)
         );
         _toasts = viewModel.Toasts as ToastCenter;
         ToastPopup.PlacementTarget = DocumentColumn;
@@ -109,10 +121,18 @@ public partial class MainWindow : Window
         viewModel.CloseRequested += OnCloseRequested;
         surface.KeyForwarded += OnKeyForwarded;
         surface.LinkActivated += _linkOpener.OnLinkActivated;
+        _dropOverlay = new DropOverlayViewModel(viewModel.Time);
+        _dropOverlay.PropertyChanged += OnDropOverlayPropertyChanged;
+        surface.DragOverChanged += OnPageDragOverChanged;
+        DropPopup.PlacementTarget = Body;
+        Body.SizeChanged += OnBodySizeChanged;
+        AddDragHandlers(this);
+        AddDragHandlers(DropOverlay);
         EmptyState.OpenFilesRequested += OnOpenFilesRequested;
         MissingPane.LocateRequested += OnLocateRequested;
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
         Tree.AddHandler(KeyDownEvent, OnTreeKeyDown, RoutingStrategies.Tunnel);
+        WindowTitleBar.OpenButton.Click += OnOpenClick;
         WindowTitleBar.ContentWidthButton.Click += OnContentWidthClick;
         WidthPopup.PlacementTarget = WindowTitleBar.ContentWidthButton;
         // A press on ⟷ reaches the button instead of light-dismissing the popup, so its click toggles the popover closed.
@@ -142,6 +162,9 @@ public partial class MainWindow : Window
     /// <summary>The ⋯ menu's key hint for Theme settings…: ⌘, on macOS, Ctrl+, elsewhere.</summary>
     public static string ThemeSettingsKeyHint { get; } = OperatingSystem.IsMacOS() ? "⌘," : "Ctrl+,";
 
+    /// <summary>The title bar's Open… tooltip: with ⌘O on macOS, Ctrl+O elsewhere.</summary>
+    public static string OpenToolTip { get; } = OperatingSystem.IsMacOS() ? "Open… (⌘O)" : "Open… (Ctrl+O)";
+
     /// <summary>The pickers, reveal and clipboard the window's menus, buttons and Ctrl/Cmd+O use; tests replace it.</summary>
     internal IFileActions? FileActions { get; set; }
 
@@ -157,6 +180,12 @@ public partial class MainWindow : Window
     /// The hidden-desktop capture sets it to check the toasts against their mock.
     /// </summary>
     internal bool ToastsWhenShown { get; set; }
+
+    /// <summary>
+    /// Which form of the drop overlay the window shows once it has shown its first document, writing
+    /// <c>Window: drop overlay shown</c>. The hidden-desktop capture sets it to check the overlay against its mock.
+    /// </summary>
+    internal DevDropOverlay DropOverlayWhenShown { get; set; }
 
     /// <summary>
     /// What the window does with its ⋯ menu once it has shown its first document: nothing, open the menu (writing
@@ -241,6 +270,12 @@ public partial class MainWindow : Window
         if (change.Property == WindowStateProperty)
         {
             UpdateToastPopup();
+            if (WindowState == WindowState.Minimized)
+            {
+                _dropOverlay?.Ended();
+            }
+
+            UpdateDropPopup();
         }
     }
 
@@ -281,6 +316,190 @@ public partial class MainWindow : Window
     /// window's toasts stay, held, until it is restored.
     /// </summary>
     private void UpdateToastPopup() => ToastPopup.IsOpen = _opened && WindowState != WindowState.Minimized && _toasts is { Items.Count: > 0 };
+
+    private void AddDragHandlers(Interactive target)
+    {
+        target.AddHandler(DragDrop.DragEnterEvent, OnDragEnter);
+        target.AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        target.AddHandler(DragDrop.DragLeaveEvent, OnDragLeave);
+        target.AddHandler(DragDrop.DropEvent, OnDrop);
+    }
+
+    private void RemoveDragHandlers(Interactive target)
+    {
+        target.RemoveHandler(DragDrop.DragEnterEvent, OnDragEnter);
+        target.RemoveHandler(DragDrop.DragOverEvent, OnDragOver);
+        target.RemoveHandler(DragDrop.DragLeaveEvent, OnDragLeave);
+        target.RemoveHandler(DragDrop.DropEvent, OnDrop);
+    }
+
+    /// <summary>
+    /// The dragged files' local paths, an empty string for a folder or a file that has none, which sorts as refused. Avalonia
+    /// releases the data when the drop's handler returns, so a drop reads them inside it.
+    /// </summary>
+    private static string[] LocalPaths(IDataTransfer data) =>
+        data.TryGetFiles() is { } files
+            ? [.. files.Select(item => item is IStorageFolder ? string.Empty : item.TryGetLocalPath() ?? string.Empty)]
+            : [];
+
+    /// <summary>A drag over the overlay bubbles to the window as well; marking it handled keeps the two from both acting.</summary>
+    private void OnDragEnter(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = _dragHasDocument is null ? OnDragPaths(LocalPaths(e.DataTransfer)) : HoldVerdict();
+        e.Handled = true;
+    }
+
+    private void OnDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = HoldVerdict();
+        e.Handled = true;
+    }
+
+    private void OnDragLeave(object? sender, DragEventArgs e)
+    {
+        _dropOverlay!.Left();
+        e.Handled = true;
+    }
+
+    private void OnDrop(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = OnDropPaths(LocalPaths(e.DataTransfer));
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Judges a drag by its file names alone. The list is read once per drag, as the read stats each path on the UI thread; the
+    /// verdict then serves every enter and move until the overlay hides. A drag with no paths shows nothing, unless the overlay
+    /// already shows for it: those files have no local path, so it shows the grey form.
+    /// </summary>
+    /// <param name="paths">The dragged files' local paths.</param>
+    /// <returns>The effect the drag may have here.</returns>
+    internal DragDropEffects OnDragPaths(IReadOnlyList<string> paths)
+    {
+        if (paths.Count > 0)
+        {
+            _dragHasDocument = paths.Any(DocumentFileTypes.IsDocument);
+        }
+        else
+        {
+            _dragHasDocument = _dropOverlay!.State is DropOverlayState.Undecided or DropOverlayState.Refused ? false : null;
+        }
+
+        return HoldVerdict();
+    }
+
+    /// <summary>Keeps the overlay on the drag's verdict, which also stops a grace a late page signal started.</summary>
+    private DragDropEffects HoldVerdict()
+    {
+        if (_dragHasDocument is not bool anyDocument)
+        {
+            return DragDropEffects.None;
+        }
+
+        _dropOverlay!.Entered(anyDocument);
+        return anyDocument ? DragDropEffects.Copy : DragDropEffects.None;
+    }
+
+    /// <summary>Takes a drop and hides the overlay.</summary>
+    /// <param name="paths">The dropped files' local paths.</param>
+    /// <returns>What the drop's source is told happened.</returns>
+    internal DragDropEffects OnDropPaths(IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0)
+        {
+            _dropOverlay!.Ended();
+            return DragDropEffects.None;
+        }
+
+        OpenDropped(paths);
+        return DragDropEffects.Copy;
+    }
+
+    /// <summary>Opens the documents among <paramref name="paths"/>, refusing the rest, and brings the window forward.</summary>
+    /// <param name="paths">The dropped files' local paths, in drop order.</param>
+    internal void OpenDropped(IReadOnlyList<string> paths)
+    {
+        _dropOverlay!.Ended();
+        RunLogged(() => OpenDroppedAsync(paths), "Open dropped files", OpenFilesFailedToast);
+    }
+
+    /// <summary>Sorts the drop off the UI thread, as it reads the disk, and acts on it back on the UI thread.</summary>
+    internal async Task OpenDroppedAsync(IReadOnlyList<string> paths)
+    {
+        DroppedFiles sorted = await Task.Run(() => DocumentFileTypes.Sort(paths));
+        if (!_opened)
+        {
+            _log!.LogInfo($"Drop: sorted after the window closed; nothing opened: {string.Join(", ", paths)}");
+            return;
+        }
+
+        _log!.LogInfo($"Drop: {sorted.Documents.Count} document(s) to open, {sorted.Refused} refused: {string.Join(", ", paths)}");
+        if (sorted.Documents.Count > 0)
+        {
+            _viewModel!.Open(sorted.Documents);
+        }
+
+        if (sorted.Refused > 0)
+        {
+            _viewModel!.Toasts.Show(ToastKind.Refusal, DocumentFileTypes.DropHint);
+        }
+
+        Activate();
+    }
+
+    private void OnPageDragOverChanged(object? sender, bool over)
+    {
+        if (over)
+        {
+            _dropOverlay!.PageDragOver();
+        }
+        else
+        {
+            _dropOverlay!.PageDragLeft();
+        }
+    }
+
+    private void OnDropOverlayPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        _log!.LogInfo($"Drop overlay: {_dropOverlay!.State}");
+        if (_dropOverlay.State == DropOverlayState.Hidden)
+        {
+            _dragHasDocument = null;
+        }
+
+        UpdateDropPopup();
+    }
+
+    private void OnBodySizeChanged(object? sender, SizeChangedEventArgs e) => SizeDropOverlay();
+
+    private void SizeDropOverlay()
+    {
+        DropOverlay.Width = Body.Bounds.Width;
+        DropOverlay.Height = Body.Bounds.Height;
+    }
+
+    /// <summary>
+    /// Opens the overlay while a drag is over the shown window, unless it is minimized, closing the width popover and the ⋯ menu:
+    /// no pointer input reaches a light dismiss during a drag.
+    /// </summary>
+    private void UpdateDropPopup()
+    {
+        if (_dropOverlay is not { } overlay)
+        {
+            return;
+        }
+
+        bool open = _opened && WindowState != WindowState.Minimized && overlay.State != DropOverlayState.Hidden;
+        if (open && !DropPopup.IsOpen)
+        {
+            CloseWidthPopover(refocusDocument: false);
+            MorePopup.IsOpen = false;
+            SizeDropOverlay();
+        }
+
+        DropOverlay.Show(overlay.State);
+        DropPopup.IsOpen = open;
+    }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -398,7 +617,7 @@ public partial class MainWindow : Window
                 _viewModel!.Reload();
                 break;
             case ShortcutCommand.OpenFiles:
-                RunLogged(OpenFilesAsync, "Open files", "Couldn't open the files; see the log");
+                RunLogged(OpenFilesAsync, "Open files", OpenFilesFailedToast);
                 break;
             case ShortcutCommand.NarrowerWidth:
                 _viewModel!.StepContentWidth(wider: false, DocumentColumn.Bounds.Width);
@@ -631,7 +850,9 @@ public partial class MainWindow : Window
 
     private static Color WithOpacity(Color color, double opacity) => Color.FromArgb((byte)Math.Round(opacity * 255), color.R, color.G, color.B);
 
-    private void OnOpenFilesRequested(object? sender, EventArgs e) => RunLogged(OpenFilesAsync, "Open files", "Couldn't open the files; see the log");
+    private void OnOpenFilesRequested(object? sender, EventArgs e) => RunLogged(OpenFilesAsync, "Open files", OpenFilesFailedToast);
+
+    private void OnOpenClick(object? sender, RoutedEventArgs e) => RunLogged(OpenFilesAsync, "Open files", OpenFilesFailedToast);
 
     private void OnLocateRequested(object? sender, EventArgs e) => RunLogged(LocateAsync, "Locate", "Couldn't locate the file; see the log");
 
@@ -971,6 +1192,14 @@ public partial class MainWindow : Window
         _log!.LogInfo(OwnedWindows.Any(window => window.IsVisible) ? "Window: theme settings shown" : "Window: no theme settings window to show");
     }
 
+    /// <summary>Opens the drop overlay in the form the capture asked for, with no drag, and writes the line the capture waits for.</summary>
+    private async Task ShowDevDropOverlayAsync()
+    {
+        _dropOverlay!.Entered(DropOverlayWhenShown == DevDropOverlay.Open);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        _log!.LogInfo("Window: drop overlay shown");
+    }
+
     /// <summary>Writes <c>Window: shown</c> once the first document has been shown, or at once for the empty state or missing pane.</summary>
     private async Task LogShownAsync()
     {
@@ -992,6 +1221,11 @@ public partial class MainWindow : Window
             {
                 await ShowDevThemeSettingsEntryAsync();
             }
+
+            if (DropOverlayWhenShown != DevDropOverlay.None)
+            {
+                await ShowDevDropOverlayAsync();
+            }
         }
         // The log line is a dev aid; a failure is logged rather than lost in a discarded task.
         catch (Exception exception)
@@ -1006,6 +1240,7 @@ public partial class MainWindow : Window
         CloseWidthPopover(refocusDocument: false);
         MorePopup.IsOpen = false;
         ToastPopup.IsOpen = false;
+        DropPopup.IsOpen = false;
         ToastPopup.Opened -= OnToastPopupOpened;
         ToastPopup.Closed -= OnToastPopupClosed;
         if (_toasts is not null)
@@ -1013,6 +1248,7 @@ public partial class MainWindow : Window
             ((INotifyCollectionChanged)_toasts.Items).CollectionChanged -= OnToastsChanged;
         }
 
+        WindowTitleBar.OpenButton.Click -= OnOpenClick;
         WindowTitleBar.ContentWidthButton.Click -= OnContentWidthClick;
         WidthPopup.Closed -= OnWidthPopupClosed;
         WindowTitleBar.MoreButton.Click -= OnMoreClick;
@@ -1023,6 +1259,12 @@ public partial class MainWindow : Window
         _viewModel.CloseRequested -= OnCloseRequested;
         _surface!.KeyForwarded -= OnKeyForwarded;
         _surface.LinkActivated -= _linkOpener!.OnLinkActivated;
+        _surface.DragOverChanged -= OnPageDragOverChanged;
+        _dropOverlay!.PropertyChanged -= OnDropOverlayPropertyChanged;
+        _dropOverlay.Dispose();
+        Body.SizeChanged -= OnBodySizeChanged;
+        RemoveDragHandlers(this);
+        RemoveDragHandlers(DropOverlay);
         _linkOpener.Dispose();
         EmptyState.OpenFilesRequested -= OnOpenFilesRequested;
         MissingPane.LocateRequested -= OnLocateRequested;
@@ -1045,6 +1287,19 @@ internal enum DevWidthPopover
 
     /// <summary>Open the popover and select the document's own folder segment.</summary>
     SelectDocumentFolder,
+}
+
+/// <summary>Which form of the drop overlay a document window shows once shown, for a hidden-desktop capture.</summary>
+internal enum DevDropOverlay
+{
+    /// <summary>None: the overlay opens only for a drag.</summary>
+    None,
+
+    /// <summary>"Drop to open".</summary>
+    Open,
+
+    /// <summary>The grey refusal.</summary>
+    Refused,
 }
 
 /// <summary>What a document window does with its ⋯ menu once shown, for a hidden-desktop capture.</summary>

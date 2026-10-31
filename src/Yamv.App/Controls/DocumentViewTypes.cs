@@ -27,10 +27,10 @@ public enum LinkSource
     /// <summary>A primary or middle click on a link in the shown document.</summary>
     Click,
 
-    /// <summary>The web view started a navigation away from the page, such as a file dropped on it.</summary>
+    /// <summary>The web view started a navigation away from the page.</summary>
     Navigation,
 
-    /// <summary>The web view asked for a new window.</summary>
+    /// <summary>The web view asked for a new window, as it does for each file dropped on the page.</summary>
     NewWindow,
 }
 
@@ -109,6 +109,9 @@ internal sealed class PageMessage
     public string? Where { get; init; }
 
     public string? Message { get; init; }
+
+    /// <summary>A <c>drag</c> message's direction: true while files are over the page, false once the drag left it.</summary>
+    public bool? Over { get; init; }
 
     /// <summary>The render a <c>rendered</c>, <c>scroll</c> or <c>link</c> message belongs to.</summary>
     public int? Generation { get; init; }

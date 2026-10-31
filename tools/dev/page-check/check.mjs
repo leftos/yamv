@@ -703,6 +703,37 @@ try {
     const beforeSentinel = posted.slice(0, sentinel);
     check("a double click on a link posts it once", beforeSentinel.length === 1 && beforeSentinel[0] === "other.md", posted);
   }
+
+  // A drag over the page tells the host only when it holds files, and never takes the drop from the web view.
+  {
+    const dragOver = (withFiles) => page.evaluate((files) => {
+      const dataTransfer = new DataTransfer();
+      if (files) {
+        dataTransfer.items.add(new File(["x"], "a.md"));
+      } else {
+        dataTransfer.setData("text/plain", "words");
+      }
+      const event = new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer });
+      document.body.dispatchEvent(event);
+      return { types: Array.from(dataTransfer.types), prevented: event.defaultPrevented, posted: window.__messages.filter((m) => m.type === "drag") };
+    }, withFiles);
+    await clearMessages();
+    await page.evaluate(() => document.body.dispatchEvent(new DragEvent("dragstart", { bubbles: true })));
+    const inPage = await dragOver(true);
+    await page.evaluate(() => document.body.dispatchEvent(new DragEvent("dragend", { bubbles: true })));
+    check("a drag begun in the page posts no drag message", inPage.posted.length === 0, inPage);
+    const text = await dragOver(false);
+    check("a text drag over the page posts no drag message", text.posted.length === 0 && !text.prevented, text);
+    const textLeave = await page.evaluate(() => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData("text/plain", "words");
+      document.body.dispatchEvent(new DragEvent("dragleave", { bubbles: true, dataTransfer }));
+      return window.__messages.filter((m) => m.type === "drag");
+    });
+    check("a text drag's dragleave posts nothing", textLeave.length === 0, textLeave);
+    const files = await dragOver(true);
+    check("a file drag over the page posts drag and is not default-prevented", files.posted.length === 1 && files.posted[0].over === true && !files.prevented, files);
+  }
 } finally {
   await browser.close();
 }

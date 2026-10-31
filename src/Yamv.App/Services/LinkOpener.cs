@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using Yamv.App.Controls;
 using Yamv.App.ViewModels;
 using Yamv.Core.Diagnostics;
@@ -23,26 +24,40 @@ internal interface ILinkDocuments
 /// <param name="FileActions">Reads the window's current file actions, which open a viewable file in its default app.</param>
 /// <param name="Decide">Decides what a link opens; <see cref="LinkPolicy.Decide(Uri?, LinkContext)"/> outside tests.</param>
 /// <param name="Run">Runs blocking work off the UI thread; <c>Task.Run</c> outside tests.</param>
+/// <param name="Time">The clock a drop's batch waits on.</param>
 internal sealed record LinkOpenerSeams(
     Func<Uri, Task<bool>> OpenInBrowser,
     Func<IFileActions> FileActions,
     Func<Uri?, LinkContext, LinkDecision> Decide,
-    Func<Func<LinkDecision>, Task<LinkDecision>> Run
+    Func<Func<LinkDecision>, Task<LinkDecision>> Run,
+    TimeProvider Time
 );
+
+/// <summary>How a file dropped on the page, which reaches a <see cref="LinkOpener"/> as a new-window link, leaves it.</summary>
+/// <param name="Signalled">Whether the page signalled a file drag just now, which tells a drop from a document's new-window link.</param>
+/// <param name="Open">Opens the dropped paths as one batch, in drop order; it is the window's, and sorts them itself.</param>
+internal sealed record LinkDropRoute(Func<bool> Signalled, Action<IReadOnlyList<string>> Open);
 
 /// <summary>
 /// Turns a clicked link in a window's document into the one action its <see cref="LinkDecision"/> names, and tells the user
-/// in a toast when a link opens nothing. The decision is made off the UI thread, and only the newest click acts.
+/// in a toast when a link opens nothing. The decision is made off the UI thread, and only the newest click acts. A file
+/// dropped on the page is no click: it skips all of that and goes to the window with the rest of its drop.
 /// </summary>
 internal sealed class LinkOpener : IDisposable
 {
     /// <summary>The toast of a link the app could not act on.</summary>
     internal const string LinkFailedToast = "Couldn't open the link; see the log";
 
+    /// <summary>How long after a drop's last file its batch is handed over.</summary>
+    internal static readonly TimeSpan DropBatchWait = TimeSpan.FromMilliseconds(50);
+
     private readonly ILinkDocuments _documents;
     private readonly IToasts _toasts;
     private readonly IAppLog _log;
     private readonly LinkOpenerSeams _seams;
+    private readonly LinkDropRoute _drops;
+    private readonly List<string> _droppedPaths = [];
+    private ITimer? _dropTimer;
     private int _newestClick;
     private bool _disposed;
 
@@ -51,16 +66,19 @@ internal sealed class LinkOpener : IDisposable
     /// <param name="toasts">Where a link that opens nothing is shown.</param>
     /// <param name="log">Where every link and its outcome is logged.</param>
     /// <param name="seams">The browser, the file actions, the policy and the thread pool.</param>
-    public LinkOpener(ILinkDocuments documents, IToasts toasts, IAppLog log, LinkOpenerSeams seams)
+    /// <param name="drops">How a file dropped on the page reaches the window.</param>
+    public LinkOpener(ILinkDocuments documents, IToasts toasts, IAppLog log, LinkOpenerSeams seams, LinkDropRoute drops)
     {
         ArgumentNullException.ThrowIfNull(documents);
         ArgumentNullException.ThrowIfNull(toasts);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(seams);
+        ArgumentNullException.ThrowIfNull(drops);
         _documents = documents;
         _toasts = toasts;
         _log = log;
         _seams = seams;
+        _drops = drops;
     }
 
     /// <summary>Handles a link the surface raised; every failure is logged, so it never throws.</summary>
@@ -79,12 +97,18 @@ internal sealed class LinkOpener : IDisposable
 
     /// <summary>Decides <paramref name="link"/> off the UI thread and acts on the decision back on it.</summary>
     /// <remarks>
-    /// Only a click acts. The group root is read on the UI thread from the document that holds the link, not the selection;
-    /// a decision that finishes after a newer click, or after the window closed, does nothing.
+    /// Only a click acts, or a file dropped on the page. The group root is read on the UI thread from the document that holds
+    /// the link, not the selection; a decision that finishes after a newer click, or after the window closed, does nothing.
     /// </remarks>
     internal async Task HandleAsync(LinkActivatedEventArgs link)
     {
         ArgumentNullException.ThrowIfNull(link);
+        if (IsDrop(link))
+        {
+            QueueDrop(link.ResolvedUri!.LocalPath);
+            return;
+        }
+
         if (link.Source != LinkSource.Click)
         {
             _log.LogInfo($"Link from a {SourceName(link.Source)} ignored: {link.Href}");
@@ -121,7 +145,50 @@ internal sealed class LinkOpener : IDisposable
         }
     }
 
-    public void Dispose() => _disposed = true;
+    public void Dispose()
+    {
+        _disposed = true;
+        _dropTimer?.Dispose();
+        _dropTimer = null;
+        OpenDropped();
+    }
+
+    /// <summary>
+    /// A drop is a new-window request for an absolute <c>file:</c> URI. The page's drag signal starts a batch; handing a batch over
+    /// ends the signal, so a file joining one already queued does not need it.
+    /// </summary>
+    private bool IsDrop(LinkActivatedEventArgs link) =>
+        link is { Source: LinkSource.NewWindow, ResolvedUri: { IsAbsoluteUri: true, IsFile: true } }
+        && (_droppedPaths.Count > 0 || _drops.Signalled());
+
+    /// <summary>Adds a dropped path to the batch. A drop raises one link per file, so each arrival restarts the wait.</summary>
+    private void QueueDrop(string path)
+    {
+        _droppedPaths.Add(path);
+        _dropTimer?.Dispose();
+        _dropTimer = _seams.Time.CreateTimer(_ => Dispatcher.UIThread.Post(OpenDropped), null, DropBatchWait, Timeout.InfiniteTimeSpan);
+    }
+
+    private void OpenDropped()
+    {
+        if (_droppedPaths.Count == 0)
+        {
+            return;
+        }
+
+        _dropTimer?.Dispose();
+        _dropTimer = null;
+        string[] paths = [.. _droppedPaths];
+        _droppedPaths.Clear();
+        if (_disposed)
+        {
+            _log.LogInfo($"Link: a drop arrived after the window closed; nothing opened: {string.Join(", ", paths)}");
+            return;
+        }
+
+        _log.LogInfo($"Link: {paths.Length} file(s) dropped on the page.");
+        _drops.Open(paths);
+    }
 
     private static string SourceName(LinkSource source) =>
         source switch
