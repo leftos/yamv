@@ -14,6 +14,11 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     public event EventHandler<bool>? DragOverChanged;
 
+    public event EventHandler? ViewportWidthChanged;
+
+    /// <summary>The width <see cref="RaiseViewportWidth"/> last reported; null again once a show starts a new render.</summary>
+    public double? ViewportWidth { get; private set; }
+
     /// <summary>Every <see cref="ShowAsync"/> call, oldest first.</summary>
     public List<ShownDocument> Shown { get; } = [];
 
@@ -58,6 +63,7 @@ public sealed class FakeDocumentSurface : IDocumentSurface
             show.Fragment,
             show.ContentWidth
         );
+        ViewportWidth = null;
         Shown.Add(shown);
         Calls.Add(shown);
         OnShown?.Invoke(shown);
@@ -143,6 +149,19 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     /// <summary>Raises <see cref="DragOverChanged"/> as the page would: true for files over it, false for a drag leaving.</summary>
     public void RaiseDragOver(bool over) => DragOverChanged?.Invoke(this, over);
+
+    /// <summary>Whether anything listens to <see cref="ViewportWidthChanged"/>.</summary>
+    public bool HasViewportSubscribers => ViewportWidthChanged is not null;
+
+    /// <summary>
+    /// Reports <paramref name="width"/> as the shown render's viewport width, as the page would, and raises
+    /// <see cref="ViewportWidthChanged"/>.
+    /// </summary>
+    public void RaiseViewportWidth(double width)
+    {
+        ViewportWidth = width;
+        ViewportWidthChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>Whether anything listens to <see cref="DragOverChanged"/>.</summary>
     public bool HasDragSubscribers => DragOverChanged is not null;

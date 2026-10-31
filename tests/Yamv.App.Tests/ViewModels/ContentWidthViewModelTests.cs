@@ -1158,6 +1158,21 @@ public sealed class ContentWidthViewModelTests
         });
 
     [Fact]
+    public Task A_stored_width_equal_to_the_text_space_is_wider_than_the_window() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            double textSpace = ContentWidth.TextSpace(NarrowPane);
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(textSpace)));
+
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, NarrowPane);
+
+            Assert.Equal("712 px", popover.Readout);
+            Assert.True(popover.IsWiderThanWindow);
+            Assert.Equal(1, popover.SliderPosition);
+        });
+
+    [Fact]
     public Task Opening_and_closing_with_a_wider_stored_width_writes_nothing() =>
         Headless.RunAsync(async () =>
         {
@@ -1244,20 +1259,6 @@ public sealed class ContentWidthViewModelTests
             Assert.Null(fixture.Widths.Get(Docs));
             Assert.Equal("800 px", popover.Readout);
             Assert.True(popover.IsWiderThanWindow);
-            Assert.Equal(1, popover.SliderPosition);
-        });
-
-    [Fact]
-    public Task A_width_equal_to_the_text_space_is_not_marked_wider() =>
-        Headless.RunAsync(async () =>
-        {
-            await using var fixture = new Fixture();
-            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(712)));
-
-            ContentWidthViewModel popover = await fixture.OpenAsync(DocA, NarrowPane);
-
-            Assert.Equal("712 px", popover.Readout);
-            Assert.False(popover.IsWiderThanWindow);
             Assert.Equal(1, popover.SliderPosition);
         });
 

@@ -126,6 +126,81 @@ public sealed class DocumentViewScrollMessageTests
         });
 
     [Fact]
+    public Task A_viewport_report_for_the_shown_render_sets_its_width_and_raises_once_per_change() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            int raised = 0;
+            view.ViewportWidthChanged += (_, _) => raised++;
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-viewport-doc", "a.md")));
+
+            view.Handle(Parse("""{"type":"viewport","value":995,"generation":1}"""));
+            view.Handle(Parse("""{"type":"viewport","value":995,"generation":1}"""));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(995, view.ViewportWidth);
+            Assert.Equal(1, raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_viewport_report_from_another_render_or_without_one_is_dropped() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            int raised = 0;
+            view.ViewportWidthChanged += (_, _) => raised++;
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-viewport-doc", "a.md")));
+
+            view.Handle(Parse("""{"type":"viewport","value":995,"generation":0}"""));
+            view.Handle(Parse("""{"type":"viewport","value":995}"""));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(view.ViewportWidth);
+            Assert.Equal(0, raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_new_show_clears_the_viewport_width_and_drops_the_older_render_s_late_report() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            string folder = Path.Combine(Path.GetTempPath(), "yamv-viewport-doc");
+            _ = view.ShowAsync(Show(Path.Combine(folder, "a.md")));
+            view.Handle(Parse("""{"type":"viewport","value":995,"generation":1}"""));
+            int raised = 0;
+            view.ViewportWidthChanged += (_, _) => raised++;
+
+            _ = view.ShowAsync(Show(Path.Combine(folder, "b.md")));
+            Assert.Null(view.ViewportWidth);
+            view.Handle(Parse("""{"type":"viewport","value":980,"generation":1}"""));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(view.ViewportWidth);
+            Assert.Equal(0, raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_viewport_report_of_no_width_or_0_is_ignored() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            int raised = 0;
+            view.ViewportWidthChanged += (_, _) => raised++;
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-viewport-doc", "a.md")));
+
+            view.Handle(Parse("""{"type":"viewport","value":0,"generation":1}"""));
+            view.Handle(Parse("""{"type":"viewport","generation":1}"""));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(view.ViewportWidth);
+            Assert.Equal(0, raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
     public Task A_link_from_an_older_render_is_dropped() =>
         Headless.RunAsync(() =>
         {

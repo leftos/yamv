@@ -38,7 +38,6 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     private WidthScopes _scopes;
     private ContentWidth _storedWidth;
     private ContentWidth _width;
-    private bool _moved;
     private int _unsavedDrags;
     private bool _placingSlider;
     private ITimer? _footTimer;
@@ -119,6 +118,10 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool DragReachesDocument { get; private set; }
 
+    /// <summary>True while a slider drag is in progress: the slider moved, and the drag has not ended or been cancelled.</summary>
+    [ObservableProperty]
+    public partial bool IsDragging { get; private set; }
+
     /// <summary>
     /// How many folders at or below the group root hold a width of their own: what Clear all overrides here removes. Read when
     /// the popover opens and after each change it makes.
@@ -154,15 +157,17 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     /// </summary>
     public void EndDrag()
     {
-        if (IsStale || !IsSliderEnabled || !_moved)
+        if (IsStale || !IsSliderEnabled || !IsDragging)
         {
             return;
         }
 
-        _moved = false;
+        // The drag's width and segment are taken and its save counted before the drag ends, so a re-span the end prompts
+        // leaves the slider at the drag's width.
         _unsavedDrags++;
         ContentWidth width = _width;
         WidthScope segment = _scopes.Selected;
+        IsDragging = false;
         QueueGuarded(
             () => SaveAsync(width, segment),
             $"save the content width {ReadoutOf(width)} for {segment.Label} of {DocumentPath}",
@@ -189,7 +194,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
             SliderStep.Full => ContentWidth.Full,
             _ => throw new ArgumentOutOfRangeException(nameof(step), step, "Unknown slider step."),
         };
-        _moved = true;
+        IsDragging = true;
         IsWiderThanWindow = false;
         if (width == _width)
         {
@@ -283,9 +288,9 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     /// </summary>
     internal void MarkStale()
     {
-        bool dragging = _moved && !IsStale;
+        bool dragging = IsDragging && !IsStale;
         IsStale = true;
-        _moved = false;
+        IsDragging = false;
         _footTimer?.Dispose();
         _footTimer = null;
         if (dragging)
@@ -320,9 +325,9 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         _textSpace = ContentWidth.TextSpace(paneWidth);
         OnPropertyChanged(nameof(IsSliderEnabled));
         OnPropertyChanged(nameof(SliderCaption));
-        if (_moved && !IsSliderEnabled)
+        if (IsDragging && !IsSliderEnabled)
         {
-            _moved = false;
+            IsDragging = false;
             if (DragReachesDocument)
             {
                 SendCommittedToPage(_storedWidth);
@@ -338,7 +343,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     private IContentWidthStore Widths => _host.Store;
 
     /// <summary>True while a drag is in progress or an ended drag's save has not run: the slider stays at the drag's width.</summary>
-    private bool HoldsSlider => _moved || _unsavedDrags > 0;
+    private bool HoldsSlider => IsDragging || _unsavedDrags > 0;
 
     partial void OnSliderPositionChanged(double value)
     {
@@ -348,7 +353,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         }
 
         ContentWidth width = ContentWidth.FromSlider(value, _textSpace);
-        _moved = true;
+        IsDragging = true;
         IsWiderThanWindow = false;
         if (width == _width)
         {
@@ -439,7 +444,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
             return;
         }
 
-        _moved = false;
+        IsDragging = false;
         ShowSegment(_scopes, _storedWidth, document.Source);
         SendCommittedToPage(document.Width);
     }
@@ -593,7 +598,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
             return;
         }
 
-        _moved = false;
+        IsDragging = false;
         if (!HoldsSlider)
         {
             PlaceSlider(_storedWidth);
@@ -664,7 +669,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Moves the slider to <paramref name="width"/> without starting a drag. A px width wider than the text space is marked
+    /// Moves the slider to <paramref name="width"/> without starting a drag. A px width as wide as the text space or wider is marked
     /// <see cref="IsWiderThanWindow"/>, and an enabled slider is placed at its right end (1) for it; a disabled one stays where
     /// <see cref="ContentWidth.ToSlider"/> puts it.
     /// </summary>
@@ -672,7 +677,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     {
         _width = width;
         Readout = ReadoutOf(width);
-        IsWiderThanWindow = width.Px > _textSpace;
+        IsWiderThanWindow = width.Px >= _textSpace;
         _placingSlider = true;
         try
         {

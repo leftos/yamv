@@ -284,6 +284,20 @@ public sealed class MainWindowTests
         });
 
     [Fact]
+    public Task Closing_the_window_unhooks_the_viewport_handler() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Assert.True(fixture.Surface.HasViewportSubscribers);
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.False(fixture.Surface.HasViewportSubscribers);
+        });
+
+    [Fact]
     public Task Tree_shows_repo_group_badge_folder_and_documents() =>
         Headless.RunAsync(async () =>
         {
@@ -718,6 +732,60 @@ public sealed class MainWindowTests
 
             Assert.False(File.Exists(fixture.WidthsFile));
             Assert.Empty(fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task A_width_step_measures_the_text_space_the_page_reports_not_the_column() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.Full));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+            // Puts a grid value 5 px inside the column's 15 px scrollbar band.
+            double column = fixture.Window.DocumentColumn.Bounds.Width;
+            fixture.Window.Width += 5 - ((((column - 568) % 40) + 40) % 40);
+            fixture.Settle();
+            column = fixture.Window.DocumentColumn.Bounds.Width;
+            double hidden = column - 93;
+            // A long document's classic scrollbar takes 15 px of the column (measured on WebView2 at 1010 px: 1010 → 995).
+            fixture.Surface.RaiseViewportWidth(column - 15);
+            bool mac = OperatingSystem.IsMacOS();
+
+            fixture.Surface.RaiseKey(new KeyForwardedEventArgs("[", ctrl: !mac, meta: mac, shift: false, alt: false));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(hidden - 40, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new double?[] { hidden - 40 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task A_report_from_an_older_render_is_not_used() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.Full));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+            // Puts a grid value 5 px inside the column's 15 px scrollbar band, so the report and the column step apart.
+            double column = fixture.Window.DocumentColumn.Bounds.Width;
+            fixture.Window.Width += 5 - ((((column - 568) % 40) + 40) % 40);
+            fixture.Settle();
+            column = fixture.Window.DocumentColumn.Bounds.Width;
+            double fromColumn = column - 93;
+            fixture.Surface.RaiseViewportWidth(column - 15);
+            fixture.Press(Key.R, CommandModifier);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+            bool mac = OperatingSystem.IsMacOS();
+
+            fixture.Surface.RaiseKey(new KeyForwardedEventArgs("[", ctrl: !mac, meta: mac, shift: false, alt: false));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(fromColumn, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new double?[] { fromColumn }, fixture.Surface.ContentWidths);
         });
 
     [Fact]
@@ -1290,6 +1358,118 @@ public sealed class MainWindowTests
             Assert.True(popover.IsWiderThanWindow);
             Assert.Equal(1, popover.SliderPosition);
             Assert.Equal("800 px", popover.Readout);
+        });
+
+    [Fact]
+    public Task An_open_popover_re_spans_when_the_page_reports_a_new_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(800)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.ContentWidthButton);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+            ContentWidthViewModel popover = Assert.IsType<ContentWidthViewModel>(fixture.Window.WidthPopover.DataContext);
+            double column = fixture.Window.DocumentColumn.Bounds.Width;
+            Assert.Equal(ContentWidth.FromPx(800).ToSlider(ContentWidth.TextSpace(column)), popover.SliderPosition, 6);
+            double report = column - 15;
+
+            fixture.Surface.RaiseViewportWidth(report);
+
+            Assert.Equal(ContentWidth.FromPx(800).ToSlider(report - 88), popover.SliderPosition, 6);
+        });
+
+    [Fact]
+    public Task A_resize_that_disables_the_slider_after_a_report_ends_the_drag_unsaved() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(800)));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Surface.RaiseViewportWidth(fixture.Window.DocumentColumn.Bounds.Width - 15);
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.ContentWidthButton);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+            ContentWidthViewModel popover = Assert.IsType<ContentWidthViewModel>(fixture.Window.WidthPopover.DataContext);
+            popover.SliderPosition = 0.5;
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(popover.IsDragging);
+
+            fixture.Window.Width = 560;
+            fixture.Settle();
+            Assert.True(ContentWidth.TextSpace(fixture.Window.DocumentColumn.Bounds.Width - 15) < ContentWidth.MinimumPx);
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.False(popover.IsSliderEnabled);
+            Assert.False(popover.IsDragging);
+            Assert.Equal(800, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(800, fixture.Surface.ContentWidths[^1]);
+        });
+
+    [Fact]
+    public Task A_width_step_right_after_a_resize_measures_the_new_column_less_the_reported_scrollbar() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.Full));
+            fixture.Window.Width = 1600;
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Surface.RaiseViewportWidth(fixture.Window.DocumentColumn.Bounds.Width - 15);
+
+            // Narrower, with a grid value 5 px inside the new column's 15 px scrollbar band.
+            fixture.Window.Width = 1200;
+            fixture.Settle();
+            double column = fixture.Window.DocumentColumn.Bounds.Width;
+            fixture.Window.Width += 5 - ((((column - 568) % 40) + 40) % 40);
+            fixture.Settle();
+            column = fixture.Window.DocumentColumn.Bounds.Width;
+            double hidden = column - 93;
+            bool mac = OperatingSystem.IsMacOS();
+
+            fixture.Surface.RaiseKey(new KeyForwardedEventArgs("[", ctrl: !mac, meta: mac, shift: false, alt: false));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(hidden - 40, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new double?[] { hidden - 40 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task A_report_during_a_slider_drag_waits_for_the_drag_to_save_then_re_spans_the_popover() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.GetDirectoryName(fixture.DocA)!;
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.Full));
+            await fixture.OpenAsync(fixture.DocA);
+            // A column whose text space (490) is 10 px above the slider's minimum, so a 15 px scrollbar takes it below.
+            fixture.Window.Width += 578 - fixture.Window.DocumentColumn.Bounds.Width;
+            fixture.Settle();
+            double column = fixture.Window.DocumentColumn.Bounds.Width;
+            Assert.Equal(490, ContentWidth.TextSpace(column));
+            fixture.ClickEvent(fixture.Window.WindowTitleBar.ContentWidthButton);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+            ContentWidthViewModel popover = Assert.IsType<ContentWidthViewModel>(fixture.Window.WidthPopover.DataContext);
+            Assert.True(popover.IsSliderEnabled);
+            popover.SliderPosition = 0.5;
+            double? dragged = ContentWidth.FromSlider(0.5, ContentWidth.TextSpace(column)).Px;
+            Assert.NotNull(dragged);
+
+            fixture.Surface.RaiseViewportWidth(column - 15);
+            Assert.True(popover.IsSliderEnabled);
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.Equal(dragged, fixture.Widths.Get(docs)?.Px);
+            Assert.False(popover.IsSliderEnabled);
         });
 
     [Fact]

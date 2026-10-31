@@ -48,7 +48,7 @@
 - **Source** (of a width): the folder a document's width is inherited from, or the app default; the popover opens with it selected and the Ctrl+[ and Ctrl+] steps edit it ([content-width.md](design/content-width.md)).
 - **Staging**: the hidden element the page builds a reloaded document in while the old page stays on screen; it is swapped in in one step once built (`yamv.js`).
 - **Text measure**: the width in px of the document's text lines, which is what a stored content width means; the column adds 44 px of side padding on each side.
-- **Text space**: the room a pane leaves for the document's text: the pane width less the page's 88 px of side padding (`ContentWidth.TextSpace`); a content width is compared against it ([content-width.md](design/content-width.md)).
+- **Text space**: the room a pane leaves for the document's text: the document column's width less the scrollbar the page last reported (the `viewport` message; the whole column until the shown page reports), less the page's 88 px of side padding (`ContentWidth.TextSpace`); a content width is compared against it ([content-width.md](design/content-width.md)).
 - **Theme family**: one `.yamv-theme.json` file, holding a light half, a dark half or both ([themes.md](design/themes.md)).
 - **Toast**: a short-lived card at the bottom of the document pane reporting a failed or refused operation the user started (`ToastCenter`, shown through `IToasts`); a repeat of its text counts "×N" and restarts its 5 s fade, the fade pauses while the window is inactive or minimized, and at most three are up ([look.md](design/look.md)).
 - **Token**: a named theme value (a colour, font, size) that drives both the document page (as a `--yamv-*` CSS property) and the app chrome.

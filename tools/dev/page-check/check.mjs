@@ -797,6 +797,64 @@ try {
     const files = await dragOver(true);
     check("a file drag over the page posts drag and is not default-prevented", files.posted.length === 1 && files.posted[0].over === true && !files.prevented, files);
   }
+
+  // The page reports the width its text column is laid out in, which a classic scrollbar narrows. Playwright hides
+  // scrollbars by default, so these checks run in a browser of their own that shows them, as WebView2 does.
+  {
+    const scrollbarBrowser = await chromium.launch({ headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
+    try {
+      const shown = await scrollbarBrowser.newPage({ viewport: { width: 1010, height: 662 } });
+      shown.setDefaultTimeout(5 * 60_000);
+      await shown.addInitScript(() => {
+        window.__messages = [];
+        window.invokeCSharpAction = (body) => window.__messages.push(JSON.parse(body));
+      });
+      await shown.goto(templateUrl);
+      await shown.waitForFunction(() => window.__messages.some((message) => message.type === "ready"));
+      const longHtml = Array.from({ length: 120 }, (_, index) => `<p>Paragraph ${index}.</p>`).join("\n");
+      const shortHtml = "<p>One paragraph.</p>";
+      const renderShown = (html, generation) =>
+        shown.evaluate(([h, o]) => window.yamv.render(h, o), [html, { ...baseOptions, contentWidth: "none", generation }]);
+      // The viewport messages of a render, after two frames so a resize report the render caused has been posted.
+      const viewportsOf = (generation) =>
+        shown.evaluate(async (g) => {
+          await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
+          return window.__messages.filter((message) => message.type === "viewport" && message.generation === g);
+        }, generation);
+
+      await renderShown(longHtml, 30);
+      const longReports = await viewportsOf(30);
+      check(
+        "a document taller than the view reports the 995 px its scrollbar leaves of 1010, once",
+        longReports.length === 1 && longReports[0].value === 995,
+        longReports,
+      );
+      await renderShown(shortHtml, 31);
+      const shortReports = await viewportsOf(31);
+      check("a short document that replaces it reports 1010 for the newer render", shortReports.at(-1)?.value === 1010, shortReports);
+      await renderShown(shortHtml, 32);
+      const sameReports = await viewportsOf(32);
+      check("a new render reports its width even when it is the width already reported", sameReports.at(-1)?.value === 1010, sameReports);
+
+      // A resize while a render waits for its math does not report for that render before it has rendered.
+      const mathHtml = `${longHtml}\n<p><span class="math">\\(x^2\\)</span></p>`;
+      const mathRender = shown.evaluate(
+        ([h, o]) => window.yamv.render(h, o),
+        [mathHtml, { ...baseOptions, contentWidth: "none", generation: 33, hasMath: true }],
+      );
+      await shown.setViewportSize({ width: 900, height: 662 });
+      await mathRender;
+      const mathReports = await viewportsOf(33);
+      const mathMessages = await shown.evaluate(() => window.__messages.filter((m) => m.generation === 33).map((m) => m.type));
+      check(
+        "a render's first viewport report comes after its rendered message",
+        mathMessages.indexOf("rendered") >= 0 && mathMessages.indexOf("rendered") < mathMessages.indexOf("viewport"),
+        { mathMessages, mathReports },
+      );
+    } finally {
+      await scrollbarBrowser.close();
+    }
+  }
 } finally {
   await browser.close();
 }

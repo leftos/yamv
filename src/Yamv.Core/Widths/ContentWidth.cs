@@ -119,7 +119,8 @@ public readonly record struct ContentWidth
 
     /// <summary>
     /// The room a pane of <paramref name="paneWidth"/> px leaves for the text: the pane less <see cref="SidePaddingPx"/>, never
-    /// below 1 px. The steps, the slider and Full compare a width against this, not against the pane.
+    /// below 1 px. The pane is the width the page lays the text column out in: the document column less a classic scrollbar
+    /// when the page shows one. The steps, the slider and Full compare a width against this, not against the pane.
     /// </summary>
     public static double TextSpace(double paneWidth) => Math.Max(paneWidth - SidePaddingPx, 1);
 

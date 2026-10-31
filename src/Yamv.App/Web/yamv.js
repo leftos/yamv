@@ -23,6 +23,8 @@
   let stagedWidth = null;
   // Counts theme changes, so a render can tell its diagrams were drawn in an older theme.
   let themeGeneration = 0;
+  // The width last posted in a viewport message and the render it was posted for; generation -1 until a render finishes.
+  let viewportPosted = { generation: -1, value: -1 };
 
   function post(message) {
     if (typeof window.invokeCSharpAction === "function") {
@@ -547,9 +549,21 @@
     }
   }
 
+  // Posts { type: "viewport", value, generation }: the width of the element that holds the content, which is the width
+  // the text column is laid out in (a classic scrollbar narrows it). The forced post when a render finishes is the first
+  // of each render; unforced, it posts only once the current render has had that first post, and only a changed width.
+  function reportViewport(force) {
+    const value = content.parentElement.clientWidth;
+    if (!force && (viewportPosted.generation !== renderGeneration || viewportPosted.value === value)) {
+      return;
+    }
+    viewportPosted = { generation: renderGeneration, value };
+    post({ type: "viewport", value, generation: renderGeneration });
+  }
+
   // Ends a render: drops its staging when it never swapped in and, unless a newer render has started, shows the content,
-  // posts { type: "rendered", generation } and, once the frame that scrolls it has passed, a scroll report, so the host
-  // keeps the anchor the new content landed on.
+  // posts { type: "rendered", generation } and the viewport width it was laid out in and, once the frame that scrolls it
+  // has passed, a scroll report, so the host keeps the anchor the new content landed on.
   function finishRender(generation, target) {
     if (target === staging) {
       discardStaging();
@@ -559,6 +573,7 @@
     }
     content.classList.remove("yamv-pending");
     post({ type: "rendered", generation });
+    reportViewport(true);
     window.requestAnimationFrame(() => {
       if (generation === renderGeneration) {
         rendering = false;
@@ -967,6 +982,9 @@
     window.clearTimeout(scrollTimer);
     scrollTimer = window.setTimeout(reportScroll, 150);
   }, { passive: true });
+
+  // Fires on any width change of the holder: a window resize, or a scrollbar appearing or going.
+  new ResizeObserver(() => reportViewport(false)).observe(content.parentElement);
 
   document.addEventListener("securitypolicyviolation", (event) => {
     post({ type: "error", where: "csp", message: `${event.effectiveDirective} blocked ${event.blockedURI || "inline code"}` });

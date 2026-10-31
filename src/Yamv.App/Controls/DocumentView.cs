@@ -67,6 +67,10 @@ public sealed class DocumentView : UserControl, IDocumentSurface
 
     public event EventHandler<bool>? DragOverChanged;
 
+    public event EventHandler? ViewportWidthChanged;
+
+    public double? ViewportWidth { get; private set; }
+
     /// <summary>
     /// Shows <paramref name="show"/>'s document at its content width, restoring its fragment if given, else its anchor,
     /// else its scroll fraction; a page that already shows the document keeps its own top block, or its pin to the top or
@@ -84,6 +88,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         _documentUri = new Uri(fullPath);
         _lastScroll = null;
         int generation = ++_generation;
+        ViewportWidth = null;
         var options = new RenderOptions(
             generation,
             fullPath,
@@ -418,6 +423,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private void OnAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
     {
         _ready = false;
+        ViewportWidth = null;
         _templateNavigationAllowed = true;
         _rendered?.TrySetResult();
         _log.LogInfo("The document page's web view was destroyed; the page will load again and replay its state");
@@ -517,6 +523,11 @@ public sealed class DocumentView : UserControl, IDocumentSurface
             case "drag" when message.Over is bool over:
                 DragOverChanged?.Invoke(this, over);
                 break;
+            case "viewport" when message.Value is double width && width > 0 && message.Generation == _generation:
+                TakeViewportWidth(width);
+                break;
+            case "viewport":
+                break;
             case "find":
                 break;
             case "blocked":
@@ -531,6 +542,17 @@ public sealed class DocumentView : UserControl, IDocumentSurface
                 _log.LogWarning($"Ignored a page message of unknown type '{LogText.Clean(message.Type)}'");
                 break;
         }
+    }
+
+    private void TakeViewportWidth(double width)
+    {
+        if (ViewportWidth == width)
+        {
+            return;
+        }
+
+        ViewportWidth = width;
+        ViewportWidthChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>The position a <c>scroll</c> message reports: its fraction and anchor; null when it carries no fraction.</summary>

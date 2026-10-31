@@ -66,6 +66,18 @@ public partial class MainWindow : Window
     private double _reportedSidebarWidth;
     private ContentWidthViewModel? _widthPopover;
     private bool _creatingWidthPopover;
+
+    /// <summary>
+    /// A viewport report arrived during the open popover's slider drag; the popover re-spans when the drag ends. Cleared when
+    /// the popover is forgotten or a column resize re-spans it.
+    /// </summary>
+    private bool _viewportHeldForDrag;
+
+    /// <summary>
+    /// How much narrower than the document column the shown render's page last reported its text column (a classic
+    /// scrollbar), never below 0; used only while <see cref="IDocumentSurface.ViewportWidth"/> holds a report.
+    /// </summary>
+    private double _viewportInset;
     private readonly ToastCenter? _toasts;
     private ToastClickThrough? _toastClickThrough;
 
@@ -134,6 +146,7 @@ public partial class MainWindow : Window
         _dropOverlay = new DropOverlayViewModel(viewModel.Time);
         _dropOverlay.PropertyChanged += OnDropOverlayPropertyChanged;
         surface.DragOverChanged += OnPageDragOverChanged;
+        surface.ViewportWidthChanged += OnViewportWidthChanged;
         DropPopup.PlacementTarget = Body;
         Body.SizeChanged += OnBodySizeChanged;
         AddDragHandlers(this);
@@ -551,8 +564,44 @@ public partial class MainWindow : Window
     private void OnDocumentColumnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
         SizeConfirmCard();
-        _widthPopover?.UpdatePaneWidth(DocumentColumn.Bounds.Width);
+        // The re-span measures with the latest report's inset, so a report held for a drag is applied here; clearing the
+        // flag first keeps a drag this re-span cancels from re-spanning a second time.
+        _viewportHeldForDrag = false;
+        _widthPopover?.UpdatePaneWidth(PaneWidth());
     }
+
+    /// <summary>
+    /// The shown render's page reported a new width for its text column: its inset from the column is kept, and an open
+    /// popover re-spans to it; during a slider drag it waits for the drag to end, so a report the drag's own preview causes
+    /// cannot end it unsaved.
+    /// </summary>
+    private void OnViewportWidthChanged(object? sender, EventArgs e)
+    {
+        if (_surface!.ViewportWidth is { } reported)
+        {
+            _viewportInset = Math.Max(DocumentColumn.Bounds.Width - reported, 0);
+        }
+
+        if (_widthPopover is not { } popover)
+        {
+            return;
+        }
+
+        if (popover.IsDragging)
+        {
+            _viewportHeldForDrag = true;
+            return;
+        }
+
+        popover.UpdatePaneWidth(PaneWidth());
+    }
+
+    /// <summary>
+    /// The width the page lays the text column out in: the live document column less the inset (a classic scrollbar) the
+    /// shown render's page last reported, so a resize moves it at once; the column alone until that render's page has
+    /// reported.
+    /// </summary>
+    private double PaneWidth() => _surface!.ViewportWidth is null ? DocumentColumn.Bounds.Width : DocumentColumn.Bounds.Width - _viewportInset;
 
     private void SizeConfirmCard()
     {
@@ -740,10 +789,10 @@ public partial class MainWindow : Window
                 RunLogged(OpenFilesAsync, "Open files", OpenFilesFailedToast);
                 break;
             case ShortcutCommand.NarrowerWidth:
-                _viewModel!.StepContentWidth(wider: false, DocumentColumn.Bounds.Width);
+                _viewModel!.StepContentWidth(wider: false, PaneWidth());
                 break;
             case ShortcutCommand.WiderWidth:
-                _viewModel!.StepContentWidth(wider: true, DocumentColumn.Bounds.Width);
+                _viewModel!.StepContentWidth(wider: true, PaneWidth());
                 break;
             case ShortcutCommand.ThemeSettings:
                 RequestThemeSettings();
@@ -775,7 +824,7 @@ public partial class MainWindow : Window
         ContentWidthViewModel? popover;
         try
         {
-            popover = await _viewModel!.CreateContentWidthPopoverAsync(DocumentColumn.Bounds.Width);
+            popover = await _viewModel!.CreateContentWidthPopoverAsync(PaneWidth());
         }
         finally
         {
@@ -795,8 +844,9 @@ public partial class MainWindow : Window
 
         MorePopup.IsOpen = false;
         _widthPopover = popover;
+        _viewportHeldForDrag = false;
         // The column may have resized while the popover was created; the popover re-measures to the pane it opens over.
-        popover.UpdatePaneWidth(DocumentColumn.Bounds.Width);
+        popover.UpdatePaneWidth(PaneWidth());
         popover.PropertyChanged += OnWidthPopoverPropertyChanged;
         WidthPopover.DataContext = popover;
         WidthPopup.IsOpen = true;
@@ -804,9 +854,24 @@ public partial class MainWindow : Window
         WidthPopover.WidthSlider.Focus(NavigationMethod.Directional);
     }
 
-    /// <summary>The popover's document stopped being the shown one, or a newer popover replaced it: it closes.</summary>
+    /// <summary>
+    /// The popover's document stopped being the shown one, or a newer popover replaced it: it closes. A drag that ended
+    /// after a viewport report arrived re-spans the popover to it.
+    /// </summary>
     private void OnWidthPopoverPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (
+            e.PropertyName == nameof(ContentWidthViewModel.IsDragging)
+            && sender is ContentWidthViewModel { IsDragging: false } ended
+            && ReferenceEquals(ended, _widthPopover)
+            && _viewportHeldForDrag
+        )
+        {
+            _viewportHeldForDrag = false;
+            ended.UpdatePaneWidth(PaneWidth());
+            return;
+        }
+
         if (
             e.PropertyName == nameof(ContentWidthViewModel.IsStale)
             && sender is ContentWidthViewModel { IsStale: true } popover
@@ -842,6 +907,7 @@ public partial class MainWindow : Window
         }
 
         _widthPopover = null;
+        _viewportHeldForDrag = false;
         popover.PropertyChanged -= OnWidthPopoverPropertyChanged;
         popover.Close();
         WidthPopover.DataContext = null;
@@ -1403,6 +1469,7 @@ public partial class MainWindow : Window
         _surface.LinkActivated -= OnLinkActivatedCancelCard;
         _surface.LinkActivated -= _linkOpener!.OnLinkActivated;
         _surface.DragOverChanged -= OnPageDragOverChanged;
+        _surface.ViewportWidthChanged -= OnViewportWidthChanged;
         _dropOverlay!.PropertyChanged -= OnDropOverlayPropertyChanged;
         _dropOverlay.Dispose();
         Body.SizeChanged -= OnBodySizeChanged;

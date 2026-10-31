@@ -113,7 +113,7 @@ internal sealed class PageMessage
     /// <summary>A <c>drag</c> message's direction: true while files are over the page, false once the drag left it.</summary>
     public bool? Over { get; init; }
 
-    /// <summary>The render a <c>rendered</c>, <c>scroll</c> or <c>link</c> message belongs to.</summary>
+    /// <summary>The render a <c>rendered</c>, <c>scroll</c>, <c>link</c> or <c>viewport</c> message belongs to.</summary>
     public int? Generation { get; init; }
 }
 

@@ -23,6 +23,15 @@ public interface IDocumentSurface
     /// <summary>Files are being dragged over the page (true), or a drag left it (false).</summary>
     event EventHandler<bool>? DragOverChanged;
 
+    /// <summary><see cref="ViewportWidth"/> changed to a new width the shown render's page reported.</summary>
+    event EventHandler? ViewportWidthChanged;
+
+    /// <summary>
+    /// The width the shown render's text column is laid out in, as its page last reported it; null until that render's page
+    /// has reported.
+    /// </summary>
+    double? ViewportWidth { get; }
+
     /// <summary>
     /// Shows a rendered document at its content width, restoring its fragment if given, else its scroll position. The page
     /// hides the outgoing document before it applies the width, so the incoming one shows once, at its own width.
