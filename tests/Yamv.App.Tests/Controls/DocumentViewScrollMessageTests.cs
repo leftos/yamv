@@ -64,7 +64,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task Handling_a_scroll_message_raises_ScrollChanged() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             List<ScrollPosition> raised = [];
             view.ScrollChanged += (_, position) => raised.Add(position);
 
@@ -79,7 +79,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_drag_message_raises_the_drag_event() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             List<bool> raised = [];
             view.DragOverChanged += (_, over) => raised.Add(over);
 
@@ -93,7 +93,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_drag_left_message_raises_it_false() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             List<bool> raised = [];
             view.DragOverChanged += (_, over) => raised.Add(over);
 
@@ -107,7 +107,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_click_link_carries_source_click_and_the_document_path() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             List<LinkActivatedEventArgs> raised = [];
             view.LinkActivated += (_, link) => raised.Add(link);
             string document = Path.Combine(Path.GetTempPath(), "yamv-link-doc", "a.md");
@@ -204,7 +204,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_link_from_an_older_render_is_dropped() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             List<LinkActivatedEventArgs> raised = [];
             view.LinkActivated += (_, link) => raised.Add(link);
             _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-link-doc", "a.md")));
@@ -254,7 +254,7 @@ public sealed class DocumentViewScrollMessageTests
     public Task A_file_link_with_a_host_is_raised_not_dropped() =>
         Headless.RunAsync(() =>
         {
-            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"));
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
             List<LinkActivatedEventArgs> raised = [];
             view.LinkActivated += (_, link) => raised.Add(link);
 

@@ -135,6 +135,50 @@ public sealed class MainWindowFactoryTests
         });
 
     [Fact]
+    public Task Elevated_main_window_restores_the_session_and_saves_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var main = new ViewerFixture { Elevated = true };
+            string plan = main.Write("plan.md");
+            new SessionStore(main.SessionFile, main.Log).Save(new SessionState { OpenFiles = [plan], SelectedFile = plan });
+            string saved = File.ReadAllText(main.SessionFile);
+
+            main.BuildMain();
+
+            Assert.Equal(plan, main.ViewModel.SelectedPath);
+            Assert.True(main.ViewModel.ShowsAdministrator);
+            Assert.Null(main.Composition.Session);
+            main.ViewModel.ToggleSidebarCommand.Execute(null);
+            main.ViewModel.Open([main.Write("notes.md")]);
+            main.Composition.Dispose();
+            Assert.Equal(saved, File.ReadAllText(main.SessionFile));
+        });
+
+    [Fact]
+    public Task Main_window_not_elevated_has_its_session_saver_and_no_Administrator_mark() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var main = new ViewerFixture();
+
+            main.BuildMain();
+
+            Assert.NotNull(main.Composition.Session);
+            Assert.False(main.ViewModel.ShowsAdministrator);
+        });
+
+    [Fact]
+    public Task Elevated_viewer_shows_the_Administrator_mark() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var viewer = new ViewerFixture { Elevated = true };
+
+            viewer.Build(viewer.Write("plan.md"));
+
+            Assert.True(viewer.ViewModel.ShowsAdministrator);
+            Assert.Equal("plan.md — YAMV (Administrator)", viewer.ViewModel.WindowTitle);
+        });
+
+    [Fact]
     public Task Create_and_CreateViewer_watch_their_documents() =>
         Headless.RunAsync(async () =>
         {
@@ -216,13 +260,16 @@ public sealed class MainWindowFactoryTests
 
         public DocumentWindowViewModel ViewModel => Composition.ViewModel;
 
+        /// <summary>Whether the window built is one of an elevated (Administrator) instance.</summary>
+        public bool Elevated { get; init; }
+
         /// <summary>Creates a viewer window over <paramref name="files"/>, drawn on <see cref="Surface"/>.</summary>
         /// <param name="files">The full paths the viewer shows.</param>
         public void Build(params string[] files) =>
-            Composition = MainWindowFactory.CreateViewer(Bridge, Widths, files, Log, new ViewerParts(new Border(), Surface, Changes));
+            Composition = MainWindowFactory.CreateViewer(Bridge, Widths, files, Log, new ViewerParts(new Border(), Surface, Changes, Elevated));
 
         /// <summary>Creates a main window over the temp data folder's session, following its documents through <see cref="Changes"/>.</summary>
-        public void BuildMain() => Composition = MainWindowFactory.Create(Bridge, Widths, Log, Changes);
+        public void BuildMain() => Composition = MainWindowFactory.Create(Bridge, Widths, Log, Changes, Elevated);
 
         /// <summary>The full path of a file in the documents folder; it is not created.</summary>
         /// <param name="name">The file's name.</param>

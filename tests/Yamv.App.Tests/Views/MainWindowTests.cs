@@ -45,6 +45,96 @@ public sealed class MainWindowTests
         });
 
     [Fact]
+    public Task An_elevated_main_window_shows_the_Administrator_chip_with_and_without_a_document() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture(elevated: true);
+            await fixture.OpenAsync();
+            TitleBar bar = fixture.Window.WindowTitleBar;
+
+            Assert.True(bar.AdministratorChip.IsEffectivelyVisible);
+            Assert.Contains("alone", bar.AdministratorChip.Classes);
+            Assert.Equal("YAMV (Administrator)", fixture.Window.Title);
+            Assert.Contains("Administrator", VisibleTexts(bar.AdministratorChip));
+
+            await fixture.OpenAsync(fixture.DocA);
+
+            Assert.True(bar.AdministratorChip.IsEffectivelyVisible);
+            Assert.DoesNotContain("alone", bar.AdministratorChip.Classes);
+            Assert.Equal("a.md — YAMV (Administrator)", fixture.Window.Title);
+            Assert.True(bar.AdministratorChip.Bounds.Left >= bar.TitleLocation.Bounds.Right);
+        });
+
+    [Fact]
+    public Task A_long_name_and_location_trim_before_the_Administrator_chip_does() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture(elevated: true);
+            fixture.Window.Width = 560;
+            string folders = Path.Combine("docs", new string('f', 40), new string('g', 40));
+            string longName = Path.Combine(fixture.Repo, folders, new string('n', 147) + ".md");
+
+            await fixture.OpenAsync(longName);
+
+            TitleBar bar = fixture.Window.WindowTitleBar;
+            Border chip = bar.AdministratorChip;
+            Assert.Equal(150, bar.TitleName.Text!.Length);
+            double shownWidth = chip.Bounds.Width;
+            Assert.True(chip.Bounds.Right <= bar.TitleText.Bounds.Width, "the chip runs out of the title area");
+            Assert.True(bar.TitleText.Bounds.Right <= bar.TitleBarTools.Bounds.Left, "the title area runs under the tools");
+            chip.Measure(Size.Infinity);
+            Assert.Equal(chip.DesiredSize.Width - chip.Margin.Left - chip.Margin.Right, shownWidth, precision: 3);
+        });
+
+    [Fact]
+    public Task An_elevated_windows_confirm_card_says_the_file_will_run_as_Administrator() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture(elevated: true);
+            await fixture.OpenAsync(fixture.DocA);
+            string script = Path.Combine(fixture.Repo, "docs", "setup.ps1");
+            File.WriteAllText(script, "Write-Host hi");
+            var shown = new TaskCompletionSource();
+            fixture.Window.ConfirmPopup.Opened += (_, _) => shown.TrySetResult();
+
+            fixture.Surface.RaiseLink(new LinkActivatedEventArgs("setup.ps1", new Uri(script), 0, LinkSource.Click, fixture.DocA));
+            await shown.Task.WaitAsync(TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken);
+            fixture.Settle();
+
+            Assert.EndsWith(". It will run as Administrator.", fixture.Window.ConfirmCard.Sentence.Text, StringComparison.Ordinal);
+            fixture.Window.ConfirmCardQuestion!.Cancel();
+            fixture.Settle();
+        });
+
+    [Fact]
+    public Task An_elevated_viewer_shows_the_Administrator_chip() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture(persist: false, elevated: true);
+
+            await fixture.OpenAsync(fixture.DocA);
+
+            Assert.True(fixture.Window.WindowTitleBar.AdministratorChip.IsEffectivelyVisible);
+            Assert.Equal("a.md — YAMV (Administrator)", fixture.Window.Title);
+        });
+
+    [Fact]
+    public Task A_window_not_elevated_shows_no_Administrator_chip_and_the_plain_titles() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync();
+
+            Assert.False(fixture.Window.WindowTitleBar.AdministratorChip.IsVisible);
+            Assert.Equal("YAMV", fixture.Window.Title);
+
+            await fixture.OpenAsync(fixture.DocA);
+
+            Assert.False(fixture.Window.WindowTitleBar.AdministratorChip.IsVisible);
+            Assert.Equal("a.md — YAMV", fixture.Window.Title);
+        });
+
+    [Fact]
     public Task The_Open_button_opens_the_picker_in_a_viewer_window() =>
         Headless.RunAsync(async () =>
         {
@@ -1876,7 +1966,9 @@ public sealed class MainWindowTests
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "yamv-window-" + Guid.NewGuid().ToString("N"));
 
-        public Fixture(bool persist = true)
+        /// <param name="persist">Whether the window's state persists, as a main window's does.</param>
+        /// <param name="elevated">Whether the window is one of an elevated (Administrator) instance.</param>
+        public Fixture(bool persist = true, bool elevated = false)
         {
             string repo = Path.Combine(_root, "repo");
             Repo = repo;
@@ -1905,7 +1997,11 @@ public sealed class MainWindowTests
             Widths = new WidthStore(WidthsFile, Log);
             Time = new FakeTimeProvider();
             Toasts = new ToastCenter(Time);
-            ViewModel = new DocumentWindowViewModel(State, Surface, new DocumentWindowServices(Widths, path => Reader(path), Time, Log, Toasts));
+            ViewModel = new DocumentWindowViewModel(
+                State,
+                Surface,
+                new DocumentWindowServices(Widths, path => Reader(path), Time, Log, Toasts) { Elevated = elevated }
+            );
             Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             Window.Closed += (_, _) => IsClosed = true;
         }

@@ -27,6 +27,10 @@ namespace Yamv.App.ViewModels;
 public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable, ILinkDocuments
 {
     private const string AppName = "YAMV";
+
+    /// <summary>What an elevated (Administrator) instance's window titles end with, for the taskbar and window switcher.</summary>
+    internal const string AdministratorSuffix = " (Administrator)";
+
     private static readonly TimeSpan MissingRecheckInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DeleteGrace = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan InUseLimit = TimeSpan.FromSeconds(10);
@@ -121,6 +125,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         _changes = services.Changes;
         _changes?.Changed += OnDocumentsChangedReported;
         Toasts = services.Toasts;
+        ShowsAdministrator = services.Elevated;
 
         Sync();
         WatchDocuments();
@@ -170,9 +175,18 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     public partial string TitleLocation { get; private set; } = "";
 
-    /// <summary>The window's own title, for the taskbar and window switcher.</summary>
+    /// <summary>
+    /// The window's own title, for the taskbar and window switcher; an elevated instance's ends with
+    /// <see cref="AdministratorSuffix"/>.
+    /// </summary>
     [ObservableProperty]
     public partial string WindowTitle { get; private set; } = AppName;
+
+    /// <summary>True when the window is the elevated (Administrator) instance's, so its title bar shows the Administrator chip.</summary>
+    public bool ShowsAdministrator { get; }
+
+    /// <summary>The native title for the selected document's <paramref name="name"/>, or the app name alone when there is none.</summary>
+    private string NativeTitle(string? name) => (name is null ? AppName : $"{name} — {AppName}") + (ShowsAdministrator ? AdministratorSuffix : "");
 
     /// <summary>True when the window shows its tree: it holds two or more documents, or it is the main window and holds one.</summary>
     [ObservableProperty]
@@ -833,7 +847,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             SelectedPath = selected;
             TitleName = title.Name;
             TitleLocation = title.Location;
-            WindowTitle = selected is null ? AppName : $"{title.Name} — {AppName}";
+            WindowTitle = NativeTitle(selected is null ? null : title.Name);
             ShowTree = _state.ShowTree;
             SidebarHidden = _state.SidebarHidden;
             IsEmpty = _state.IsEmpty;
@@ -1535,7 +1549,11 @@ public sealed record DocumentWindowServices(
     IAppLog Log,
     IToasts Toasts,
     IDocumentChanges? Changes = null
-);
+)
+{
+    /// <summary>Whether the window is the elevated (Administrator) instance's: its title bar and title say so.</summary>
+    public required bool Elevated { get; init; }
+}
 
 /// <summary>What kind of session change <see cref="DocumentWindowViewModel.SessionDirty"/> reports.</summary>
 /// <param name="scrollOnly">True when only the shown document's scroll position changed.</param>

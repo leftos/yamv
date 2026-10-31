@@ -46,12 +46,25 @@ public sealed record ConfirmText(string Title, string Body)
     /// <summary>The types that only point at something else, which can be any program or address.</summary>
     private static readonly HashSet<string> Shortcuts = new(StringComparer.OrdinalIgnoreCase) { ".lnk", ".url", ".webloc", ".fileloc" };
 
+    /// <summary>The sentence an elevated instance's card ends with, for anything but a folder.</summary>
+    private const string ElevatedSentence = " It will run as Administrator.";
+
     /// <summary>The words for <paramref name="path"/>, which show it as <paramref name="name"/>.</summary>
     /// <param name="path">The real path, which the type is read from.</param>
     /// <param name="name">The name the card shows, exactly as given; a caller that shows untrusted names sanitises it first.</param>
     /// <param name="isFolder">Whether <paramref name="path"/> is a folder on disk, which a macOS bundle is.</param>
     /// <param name="isMac">Whether the card names macOS and Finder rather than Windows and Explorer.</param>
-    public static ConfirmText For(string path, string name, bool isFolder, bool isMac)
+    /// <param name="elevated">
+    /// Whether YAMV runs as the elevated (Administrator) instance. A program, script or file it opens inherits the elevation, so
+    /// the card says so; a folder does not, since Explorer hands it to the running non-elevated Explorer, so its card says nothing.
+    /// </param>
+    public static ConfirmText For(string path, string name, bool isFolder, bool isMac, bool elevated)
+    {
+        ConfirmText text = Unelevated(path, name, isFolder, isMac);
+        return elevated && !isFolder ? text with { Body = text.Body + ElevatedSentence } : text;
+    }
+
+    private static ConfirmText Unelevated(string path, string name, bool isFolder, bool isMac)
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(name);

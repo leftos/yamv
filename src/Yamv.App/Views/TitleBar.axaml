@@ -45,6 +45,27 @@
     <Style Selector="Button.tool Path">
       <Setter Property="Stroke" Value="{Binding $parent[Button].Foreground}" />
     </Style>
+    <!-- The elevated instance's Administrator chip: the warning colours, 18 high, after the location (10 px), or right after the name when there is none. -->
+    <Style Selector="Border.admin">
+      <Setter Property="Height" Value="18" />
+      <Setter Property="Padding" Value="6,0" />
+      <Setter Property="Margin" Value="10,0,0,0" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource YamvWarningBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvWarningLine}" />
+    </Style>
+    <Style Selector="Border.admin.alone">
+      <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="Border.admin TextBlock">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvWarning}" />
+    </Style>
   </UserControl.Styles>
   <Border
     x:Name="Bar"
@@ -98,7 +119,32 @@
           />
         </Button>
       </StackPanel>
-      <DockPanel x:Name="TitleText" VerticalAlignment="Center" Margin="14,0,0,0" IsHitTestVisible="False">
+      <!--
+        Sized to its text, so the Administrator chip, docked right, sits right after the location. A DockPanel measures its
+        children in order: the chip first, so it never truncates, then the name, then the location, which truncates first.
+      -->
+      <DockPanel x:Name="TitleText" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="14,0,0,0" IsHitTestVisible="False">
+        <Border
+          x:Name="AdministratorChip"
+          DockPanel.Dock="Right"
+          Classes="admin"
+          Classes.alone="{Binding TitleLocation, Converter={x:Static StringConverters.IsNullOrEmpty}}"
+          IsVisible="{Binding ShowsAdministrator}"
+        >
+          <StackPanel Orientation="Horizontal">
+            <Viewbox Width="11" Height="11" Margin="0,0,4,0" VerticalAlignment="Center">
+              <Canvas Width="16" Height="16">
+                <Path
+                  Data="M8,1.5 L13.5,3.6 L13.5,7.7 C13.5,11 11.2,13.4 8,14.5 C4.8,13.4 2.5,11 2.5,7.7 L2.5,3.6 Z"
+                  Stroke="{DynamicResource YamvWarning}"
+                  StrokeThickness="1.6"
+                  StrokeJoin="Round"
+                />
+              </Canvas>
+            </Viewbox>
+            <TextBlock Text="Administrator" />
+          </StackPanel>
+        </Border>
         <TextBlock
           x:Name="TitleName"
           DockPanel.Dock="Left"

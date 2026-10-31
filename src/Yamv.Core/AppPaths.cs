@@ -47,6 +47,12 @@ public static class AppPaths
 
     public static string MainLockFile => Path.Combine(DataDirectory, "main.lock");
 
+    /// <summary>
+    /// The lock an elevated (Administrator) launch takes in place of <see cref="MainLockFile"/>, beside it: the elevated instance
+    /// has its own lock and pid file, and on Windows its own pipe, so it runs beside the normal one.
+    /// </summary>
+    public static string ElevatedLockFile => Path.Combine(DataDirectory, "main.admin.lock");
+
     /// <summary>The lock a failed launch holds while its not-responding box is up, so a burst of them shows one box.</summary>
     public static string LaunchErrorLockFile => Path.Combine(DataDirectory, "launch-error.lock");
 

@@ -13,6 +13,48 @@ public sealed class ProgramLaunchTests : IDisposable
     private readonly string _gateRoot = Path.Combine(Path.GetTempPath(), "yamv-launch-error-tests-" + Guid.NewGuid().ToString("N"));
 
     [Theory]
+    [InlineData(false, "main.lock")]
+    [InlineData(true, "main.admin.lock")]
+    public void TheLaunchTakesTheElevatedLockOnlyWhenElevated(bool elevated, string lockName) =>
+        Assert.Equal(lockName, Path.GetFileName(Program.MainLockFileFor(elevated)));
+
+    [Fact]
+    public void A_second_launch_reads_the_pid_of_the_instance_holding_the_lock_it_was_given()
+    {
+        string elevatedLock = Path.Combine(_gateRoot, "main.admin.lock");
+        using var running = new InstanceCoordinator(elevatedLock, _log);
+        Assert.True(running.TryAcquireMainLock());
+        using var launch = new InstanceCoordinator(elevatedLock, _log);
+
+        Assert.Equal(Environment.ProcessId, Program.SecondLaunchActionsFor(launch, elevatedLock, _log).ReadPid());
+        Assert.Null(Program.SecondLaunchActionsFor(launch, Path.Combine(_gateRoot, "main.lock"), _log).ReadPid());
+    }
+
+    [Fact]
+    public async Task A_second_launchs_request_dials_the_instance_holding_the_lock_it_was_given()
+    {
+        string elevatedLock = Path.Combine(_gateRoot, "main.admin.lock");
+        // Longer than the hang guard, so the request is never abandoned by the clock, however busy the machine.
+        using var running = new InstanceCoordinator(elevatedLock, _log) { ReplyBound = TimeSpan.FromMinutes(5) };
+        Assert.True(running.TryAcquireMainLock());
+        var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        running.StartServer(request =>
+        {
+            Assert.True(request.TryBegin());
+            request.Complete(InstanceReply.Opened);
+            received.TrySetResult(request.Message);
+        });
+        using var launch = new InstanceCoordinator(elevatedLock, _log);
+
+        InstanceRequestOutcome outcome = await Program
+            .SecondLaunchActionsFor(launch, elevatedLock, _log)
+            .Request(InstanceMessages.Activate, TestInstanceServer.HangGuard);
+
+        Assert.Equal(InstanceRequestOutcome.Confirmed, outcome);
+        Assert.Equal(InstanceMessages.Activate, await received.Task.WaitAsync(TestInstanceServer.HangGuard, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
     [InlineData(SecondLaunchOutcome.Activated, 0)]
     [InlineData(SecondLaunchOutcome.BecameMain, null)]
     [InlineData(SecondLaunchOutcome.Failed, 1)]

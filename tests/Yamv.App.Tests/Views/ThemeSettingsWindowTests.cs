@@ -39,6 +39,90 @@ public sealed class ThemeSettingsWindowTests
             Assert.False(fixture.Window.CanMaximize);
         });
 
+    [Theory]
+    [InlineData(true, "Theme settings (Administrator)")]
+    [InlineData(false, "Theme settings")]
+    public Task An_elevated_window_shows_the_Administrator_chip_and_says_so_in_its_title(bool elevated, string title) =>
+        Headless.Run(() =>
+        {
+            string folder = Path.Combine(Path.GetTempPath(), "yamv-theme-admin-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            (ThemeSettingsWindow window, _) = BuildAdministratorWindow(folder, "studio", elevated);
+            try
+            {
+                window.Show();
+                Dispatcher.UIThread.RunJobs();
+
+                Assert.Equal(elevated, window.AdministratorChip.IsEffectivelyVisible);
+                Assert.Equal(title, window.Title);
+                Assert.Equal(elevated, VisibleTexts(window.TitleBar).Contains("Administrator"));
+            }
+            finally
+            {
+                window.Close();
+                Directory.Delete(folder, recursive: true);
+            }
+        });
+
+    [Fact]
+    public Task A_long_theme_name_trims_before_the_Administrator_chip_does() =>
+        Headless.Run(() =>
+        {
+            string folder = Path.Combine(Path.GetTempPath(), "yamv-theme-admin-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            string longName = new('t', 150);
+            File.WriteAllText(
+                Path.Combine(folder, "long" + ThemeCatalog.FileSuffix),
+                $$"""{ "name": "{{longName}}", "light": { "tokens": { "accent": "#112233" } } }"""
+            );
+            (ThemeSettingsWindow window, _) = BuildAdministratorWindow(folder, "long", elevated: true);
+            window.Width = 760;
+            try
+            {
+                window.Show();
+                Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+
+                Border chip = window.AdministratorChip;
+                Assert.Contains(longName, window.TitleDetail.Text, StringComparison.Ordinal);
+                double shownWidth = chip.Bounds.Width;
+                Assert.True(chip.Bounds.Right <= window.TitleText.Bounds.Width, "the chip runs out of the title area");
+                Assert.True(window.TitleText.Bounds.Right <= window.TitleBar.Bounds.Width, "the title area runs out of the bar");
+                chip.Measure(Size.Infinity);
+                Assert.Equal(chip.DesiredSize.Width - chip.Margin.Left - chip.Margin.Right, shownWidth, precision: 3);
+            }
+            finally
+            {
+                window.Close();
+                Directory.Delete(folder, recursive: true);
+            }
+        });
+
+    /// <summary>Builds a settings window over the themes in <paramref name="folder"/> as the host does, with <paramref name="themeId"/> selected.</summary>
+    private static (ThemeSettingsWindow Window, ThemeSettingsViewModel ViewModel) BuildAdministratorWindow(
+        string folder,
+        string themeId,
+        bool elevated
+    )
+    {
+        var log = new RecordingAppLog();
+        return ThemeSettingsHost.BuildWindow(
+            new ThemeSettingsWindowParts
+            {
+                Catalog = new ThemeCatalog(folder, log),
+                Apply = (_, _) => { },
+                ThemeId = themeId,
+                Appearance = "light",
+                Log = log,
+                Trash = _ => new DeletingTrash([]),
+                OpenAsText = _ => { },
+                PickImport = _ => Task.FromResult<string?>(null),
+                FileActions = new FakeFileActions(),
+                Elevated = elevated,
+            }
+        );
+    }
+
     [Fact]
     public Task Selecting_the_invalid_row_shows_the_error_pane_and_hides_the_editor_host() =>
         Headless.Run(() =>

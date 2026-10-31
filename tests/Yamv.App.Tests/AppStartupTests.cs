@@ -326,7 +326,7 @@ public sealed class AppStartupTests
             var viewModel = new DocumentWindowViewModel(
                 state,
                 surface,
-                new DocumentWindowServices(widths, _ => "", time, log, new ToastCenter(time))
+                new DocumentWindowServices(widths, _ => "", time, log, new ToastCenter(time)) { Elevated = false }
             );
             var window = new MainWindow(viewModel, new Border(), surface, log);
             var composition = new MainWindowComposition(window, viewModel, bridge, surface, session: null);
@@ -1112,6 +1112,90 @@ public sealed class AppStartupTests
             Assert.Empty(calls);
             Assert.True(start.Window.IsVisible);
         });
+
+    [Fact]
+    public Task An_elevated_app_marks_every_window_and_leaves_the_session_file_alone() =>
+        Headless.Run(() =>
+        {
+            App.Elevated = true;
+            try
+            {
+                using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+                string saved = WriteSessionWithSidebarWidth(start.SessionFile, 333);
+                MainWindow main = AssertMarked(start.Window);
+                Assert.Equal("YAMV (Administrator)", main.Title);
+                MainWindow viewer = AssertMarked(ShowViewer(start.App));
+
+                Assert.IsType<DocumentWindowViewModel>(main.DataContext).ToggleSidebar();
+                main.Close();
+                Dispatcher.UIThread.RunJobs();
+                Assert.Equal(saved, File.ReadAllText(start.SessionFile));
+
+                start.App.BringAppForward();
+                MainWindow again = AssertMarked(start.App.MainDocumentWindow);
+                Assert.NotSame(main, again);
+                Assert.Equal(333, again.SidebarWidth);
+                start.App.ShowThemeSettings(again);
+                ThemeSettingsWindow settings = Assert.IsType<ThemeSettingsWindow>(start.App.ThemeSettingsHost?.Window);
+                Assert.Equal("Theme settings (Administrator)", settings.Title);
+                Assert.True(settings.AdministratorChip.IsVisible);
+
+                Assert.IsType<DocumentWindowViewModel>(again.DataContext).ToggleSidebar();
+                settings.Close();
+                again.Close();
+                viewer.Close();
+                Dispatcher.UIThread.RunJobs();
+                Assert.Equal(saved, File.ReadAllText(start.SessionFile));
+            }
+            finally
+            {
+                App.Elevated = false;
+            }
+        });
+
+    [Fact]
+    public Task The_dev_elevated_switch_marks_the_windows_saves_nothing_and_keeps_the_main_lock() =>
+        Headless.Run(() =>
+        {
+            string? before = Environment.GetEnvironmentVariable(MainWindowFactory.ElevatedVariable);
+            Environment.SetEnvironmentVariable(MainWindowFactory.ElevatedVariable, "1");
+            try
+            {
+                using var start = new GateStart(viewerFiles: [], stopAnswering: null);
+                MainWindow main = AssertMarked(start.Window);
+                MainWindow viewer = AssertMarked(ShowViewer(start.App));
+
+                Assert.IsType<DocumentWindowViewModel>(main.DataContext).ToggleSidebar();
+                main.Close();
+                viewer.Close();
+                Dispatcher.UIThread.RunJobs();
+
+                Assert.False(File.Exists(start.SessionFile));
+                Assert.False(App.Elevated);
+                Assert.Equal("main.lock", Path.GetFileName(Program.MainLockFileFor(App.Elevated)));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(MainWindowFactory.ElevatedVariable, before);
+            }
+        });
+
+    /// <summary>Asserts that <paramref name="window"/> is a document window marked as the elevated instance's, and returns it.</summary>
+    private static MainWindow AssertMarked(Window? window)
+    {
+        MainWindow marked = Assert.IsType<MainWindow>(window);
+        Assert.EndsWith(" (Administrator)", marked.Title, StringComparison.Ordinal);
+        Assert.True(marked.WindowTitleBar.AdministratorChip.IsVisible);
+        return marked;
+    }
+
+    /// <summary>Writes a session holding only a sidebar width to <paramref name="sessionFile"/> and returns the file's text.</summary>
+    private static string WriteSessionWithSidebarWidth(string sessionFile, double width)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(sessionFile)!);
+        new SessionStore(sessionFile, new RecordingAppLog()).Save(new SessionState { SidebarWidth = width });
+        return File.ReadAllText(sessionFile);
+    }
 
     [Fact]
     public Task OpenViewer_NeverWritesSession() =>

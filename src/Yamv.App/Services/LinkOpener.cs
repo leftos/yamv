@@ -37,13 +37,15 @@ internal interface ILinkDocuments
 /// <param name="Run">Runs blocking work off the UI thread; <c>Task.Run</c> outside tests.</param>
 /// <param name="Time">The clock a drop's batch waits on.</param>
 /// <param name="Confirm">Shows the confirm card with a title and a body; true when the user chose Open.</param>
+/// <param name="Elevated">Whether the window is the elevated (Administrator) instance's, so the card says what opens runs as Administrator.</param>
 internal sealed record LinkOpenerSeams(
     Func<Uri, Task<bool>> OpenInBrowser,
     Func<IFileActions> FileActions,
     Func<Uri?, LinkContext, LinkDecision> Decide,
     Func<Func<LinkDecision>, Task<LinkDecision>> Run,
     TimeProvider Time,
-    Func<string, string, Task<bool>> Confirm
+    Func<string, string, Task<bool>> Confirm,
+    bool Elevated
 );
 
 /// <summary>How a file dropped on the page, which reaches a <see cref="LinkOpener"/> as a new-window link, leaves it.</summary>
@@ -332,7 +334,7 @@ internal sealed class LinkOpener : IDisposable
         }
 
         string name = ToastValue.Plain(FolderName(confirm.Path));
-        var text = ConfirmText.For(confirm.Path, name, confirm.IsDirectory, OperatingSystem.IsMacOS());
+        var text = ConfirmText.For(confirm.Path, name, confirm.IsDirectory, OperatingSystem.IsMacOS(), _seams.Elevated);
         _log.LogInfo($"Link: asking before opening {LogText.Clean(confirm.Path)}.");
         if (!await _seams.Confirm(text.Title, text.Body))
         {

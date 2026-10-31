@@ -19,6 +19,9 @@ internal sealed class ThemeSettingsHostSeams
 
     /// <summary>Given the settings window's owner that is closing, the document window it moves to, or null when none remains.</summary>
     public required Func<Window, Window?> OwnerSuccessor { get; init; }
+
+    /// <summary>Whether the app is the elevated (Administrator) instance, so the settings window says so.</summary>
+    public required bool Elevated { get; init; }
 }
 
 /// <summary>What <see cref="ThemeSettingsHost.BuildWindow"/> builds a theme settings window from.</summary>
@@ -50,6 +53,9 @@ internal sealed class ThemeSettingsWindowParts
 
     /// <summary>The Export picker.</summary>
     public required IFileActions FileActions { get; init; }
+
+    /// <summary>Whether the window is the elevated (Administrator) instance's: its title bar and title say so.</summary>
+    public required bool Elevated { get; init; }
 }
 
 /// <summary>
@@ -102,7 +108,8 @@ internal sealed class ThemeSettingsHost : IDisposable
     /// <param name="bridge">The app's bridge: the theme in use, and where the window applies.</param>
     /// <param name="log">Where the window reports failures.</param>
     /// <param name="ownerSuccessor">Given the settings window's owner that is closing, the document window it moves to, or null.</param>
-    public static ThemeSettingsHost Create(ThemeBridge bridge, IAppLog log, Func<Window, Window?> ownerSuccessor)
+    /// <param name="elevated">Whether the app is the elevated (Administrator) instance, so the window says so.</param>
+    public static ThemeSettingsHost Create(ThemeBridge bridge, IAppLog log, Func<Window, Window?> ownerSuccessor, bool elevated)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(ownerSuccessor);
@@ -111,6 +118,7 @@ internal sealed class ThemeSettingsHost : IDisposable
             Trash = windowOf => new PlatformTrash(() => windowOf().TryGetPlatformHandle()?.Handle ?? 0),
             FileActions = new AvaloniaFileActions(log, null, AvaloniaFileActions.StartProcess, FileActionSeams.Default),
             OwnerSuccessor = ownerSuccessor,
+            Elevated = elevated,
         };
         return new ThemeSettingsHost(bridge, new ThemeCatalog(AppPaths.ThemesDirectory, log), log, seams);
     }
@@ -136,7 +144,7 @@ internal sealed class ThemeSettingsHost : IDisposable
             ConfirmImport = inspection => window!.ConfirmImportAsync(inspection),
         };
         var viewModel = new ThemeSettingsViewModel(parts.Catalog, seams, parts.ThemeId, parts.Appearance, parts.Log);
-        window = new ThemeSettingsWindow(viewModel, parts.Log);
+        window = new ThemeSettingsWindow(viewModel, parts.Log) { ShowsAdministrator = parts.Elevated };
         return (window, viewModel);
     }
 
@@ -174,6 +182,7 @@ internal sealed class ThemeSettingsHost : IDisposable
                 OpenAsText = fileActions.OpenWithDefaultApp,
                 PickImport = fileActions.PickThemeAsync,
                 FileActions = fileActions,
+                Elevated = _seams.Elevated,
             }
         );
         window.WindowStartupLocation = WindowStartupLocation.CenterOwner;

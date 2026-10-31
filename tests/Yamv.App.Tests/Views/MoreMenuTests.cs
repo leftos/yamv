@@ -36,7 +36,7 @@ public sealed class MoreMenuTests
                     new WidthStore(Path.Combine(root, "data", "widths.json"), log),
                     [document],
                     log,
-                    new ViewerParts(new Border(), new FakeDocumentSurface(), new FakeDocumentChanges())
+                    new ViewerParts(new Border(), new FakeDocumentSurface(), new FakeDocumentChanges(), Elevated: false)
                 );
                 MainWindow window = viewer.Window;
                 window.Show();

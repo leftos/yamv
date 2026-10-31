@@ -1731,6 +1731,9 @@ public sealed class ContentWidthViewModelTests
                 State,
                 Surface,
                 new DocumentWindowServices(Widths, path => Reader(path), Timers, Log, Toasts: ownToasts ? new ToastCenter(Timers) : Toasts)
+                {
+                    Elevated = false,
+                }
             );
         }
 

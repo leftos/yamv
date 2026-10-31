@@ -345,6 +345,9 @@ public sealed class ToastHostTests
                 state,
                 Surface,
                 new DocumentWindowServices(new WidthStore(Path.Combine(data, "widths.json"), Log), _ => "# A", Time, Log, Toasts: Toasts)
+                {
+                    Elevated = false,
+                }
             );
             Window = new MainWindow(ViewModel, Document, Surface, Log);
             Window.Closed += (_, _) => _closed = true;

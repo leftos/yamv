@@ -655,6 +655,7 @@ public sealed class ThemeSettingsHostTests
                         SuccessorAsked.Add(closing);
                         return Successor(closing);
                     },
+                    Elevated = false,
                 }
             );
         }

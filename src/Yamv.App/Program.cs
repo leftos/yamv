@@ -44,17 +44,26 @@ internal static class Program
     /// <summary>
     /// Takes the main-instance lock for every launch. The launch that gets it runs as the app, its files (if any) opening as
     /// the first viewer window. One that does not sends its files to the running app, or with no files asks it to come forward;
-    /// it runs as the app after all when the app exits meanwhile and leaves it the lock.
+    /// it runs as the app after all when the app exits meanwhile and leaves it the lock. An elevated launch takes the elevated
+    /// lock instead, so it meets only the elevated instance and runs as one beside the normal one.
     /// </summary>
     private static int Start(IReadOnlyList<string> files, string[] args)
     {
         App.ViewerFiles = files;
         var log = new FileAppLog(AppPaths.LogFile);
         App.ProcessLog = log;
-        using var coordinator = new InstanceCoordinator(AppPaths.MainLockFile, log);
+        bool elevated = OperatingSystem.IsWindows() && WindowsElevation.IsElevated(log);
+        App.Elevated = elevated;
+        string lockFile = MainLockFileFor(elevated);
+        if (elevated)
+        {
+            log.LogInfo($"Elevated instance: using {Path.GetFileName(lockFile)}.");
+        }
+
+        using var coordinator = new InstanceCoordinator(lockFile, log);
         if (!coordinator.TryAcquireMainLock())
         {
-            var launch = new SecondLaunch(SecondLaunchActionsFor(coordinator, log), log);
+            var launch = new SecondLaunch(SecondLaunchActionsFor(coordinator, lockFile, log), log);
 
             // Blocking: no sync context exists before Avalonia.
             int? exitCode = RunSecondLaunch(
@@ -73,6 +82,9 @@ internal static class Program
 
         return RunMain(coordinator, log, args);
     }
+
+    /// <summary>The main-instance lock a launch takes: the elevated instance's own when the launch is elevated.</summary>
+    internal static string MainLockFileFor(bool elevated) => elevated ? AppPaths.ElevatedLockFile : AppPaths.MainLockFile;
 
     /// <summary>
     /// What a launch that did not get the lock does: with no files it asks the app to come forward (<paramref name="activate"/>),
@@ -282,11 +294,11 @@ internal static class Program
     }
 
     /// <summary>The platform actions a launch that did not get the lock runs through.</summary>
-    private static SecondLaunchActions SecondLaunchActionsFor(InstanceCoordinator coordinator, IAppLog log) =>
+    internal static SecondLaunchActions SecondLaunchActionsFor(InstanceCoordinator coordinator, string lockFile, IAppLog log) =>
         new(
-            ReadPid: () => InstanceCoordinator.TryReadMainPid(AppPaths.MainLockFile, log),
+            ReadPid: () => InstanceCoordinator.TryReadMainPid(lockFile, log),
             AllowForeground: pid => AllowForeground(pid, log),
-            Request: (message, budget) => InstanceCoordinator.RequestAsync(AppPaths.MainLockFile, message, budget, log),
+            Request: (message, budget) => InstanceCoordinator.RequestAsync(lockFile, message, budget, log),
             BringForward: pid => BringForward(pid, log),
             RetryLock: coordinator.TryAcquireMainLockQuietly,
             Delay: delay => Task.Delay(delay),

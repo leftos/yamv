@@ -25,6 +25,21 @@ namespace Yamv.App.Views;
 /// </summary>
 public partial class ThemeSettingsWindow : Window
 {
+    /// <summary>The window's own title, for the taskbar and window switcher.</summary>
+    private const string WindowTitle = "Theme settings";
+
+    /// <summary>Where the title text starts from the bar's left end on Windows.</summary>
+    private const double TitleLeftMargin = 14;
+
+    /// <summary>
+    /// The width the drawn close button, the window's only caption button, takes from the bar's right end on Windows: one 45 px
+    /// button and the decorations' frame inset, with room to spare, so the title's Administrator chip never runs under it.
+    /// </summary>
+    private const double CloseButtonWidth = 56;
+
+    /// <summary>The gap on macOS between the title and the bar's right end, which has no caption buttons there.</summary>
+    private const double MacTitleRightMargin = 14;
+
     private readonly ThemeSettingsViewModel? _viewModel;
     private readonly IAppLog? _log;
     private bool _closeAllowed;
@@ -36,10 +51,9 @@ public partial class ThemeSettingsWindow : Window
     public ThemeSettingsWindow()
     {
         InitializeComponent();
-        if (OperatingSystem.IsMacOS())
-        {
-            TitleText.Margin = new Thickness(Yamv.App.Views.TitleBar.MacTrafficLightInset, 0, 0, 0);
-        }
+        TitleText.Margin = OperatingSystem.IsMacOS()
+            ? new Thickness(Yamv.App.Views.TitleBar.MacTrafficLightInset, 0, MacTitleRightMargin, 0)
+            : new Thickness(TitleLeftMargin, 0, CloseButtonWidth, 0);
     }
 
     /// <summary>Creates the window of <paramref name="viewModel"/>.</summary>
@@ -64,6 +78,20 @@ public partial class ThemeSettingsWindow : Window
     /// the owner's close moves this window instead of closing it.
     /// </summary>
     internal Func<Window, Window?>? OwnerSuccessor { get; set; }
+
+    /// <summary>
+    /// Whether the window is the elevated (Administrator) instance's: its title bar shows the Administrator chip and its title
+    /// ends with " (Administrator)".
+    /// </summary>
+    internal bool ShowsAdministrator
+    {
+        get => AdministratorChip.IsVisible;
+        init
+        {
+            AdministratorChip.IsVisible = value;
+            Title = value ? WindowTitle + DocumentWindowViewModel.AdministratorSuffix : WindowTitle;
+        }
+    }
 
     /// <summary>Asks Save, Discard or Cancel for the unsaved changes of the theme named <paramref name="name"/>.</summary>
     public async Task<UnsavedChoice> ConfirmUnsavedAsync(string name)

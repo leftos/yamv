@@ -21,6 +21,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private readonly IAppLog _log;
     private readonly NativeWebView _webView;
     private readonly Uri _templateUri;
+    private readonly bool _elevated;
     private readonly List<PendingCall> _pending = [];
     private readonly List<StateCall> _state = [];
     private bool _ready;
@@ -38,16 +39,23 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private int _generation;
     private TaskCompletionSource? _rendered;
 
-    public DocumentView(IAppLog log)
-        : this(log, WebAssets.TemplateUri(log)) { }
+    /// <summary>A view whose page loads from the extracted assets.</summary>
+    /// <param name="log">Where the view reports failures.</param>
+    /// <param name="elevated">
+    /// Whether the view is the elevated (Administrator) instance's, which keeps its WebView2 user data apart, so it never shares a
+    /// browser process with the normal instance.
+    /// </param>
+    public DocumentView(IAppLog log, bool elevated)
+        : this(log, WebAssets.TemplateUri(log), elevated) { }
 
     /// <summary>A view whose page loads from <paramref name="templateUri"/>; tests pass one that needs no extracted assets.</summary>
-    internal DocumentView(IAppLog log, Uri templateUri)
+    internal DocumentView(IAppLog log, Uri templateUri, bool elevated)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(templateUri);
         _log = log;
         _templateUri = templateUri;
+        _elevated = elevated;
         _webView = new NativeWebView();
         _webView.EnvironmentRequested += OnEnvironmentRequested;
         _webView.AdapterCreated += (_, _) => WebView2Accelerators.Disable(_webView.TryGetPlatformHandle(), _log);
@@ -397,28 +405,32 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private static string Truncate(string script) => script.Length <= 120 ? script : script[..120] + "…";
 
     /// <summary>
-    /// Keeps the browser's user data in <c>LocalApplicationData/YAMV/webview2</c>, beside the asset cache and shared by
-    /// every YAMV process, rather than in a folder next to the executable. A non-empty <c>WEBVIEW2_USER_DATA_FOLDER</c>
-    /// wins, so a hidden run can keep a profile of its own; it is passed on explicitly, since Avalonia's WebView2
-    /// adapter does not apply that variable itself.
+    /// Keeps the browser's user data in the folder <see cref="WindowsUserDataFolder"/> names rather than in a folder next to the
+    /// executable; <c>WEBVIEW2_USER_DATA_FOLDER</c> is passed on explicitly, since Avalonia's WebView2 adapter does not apply that
+    /// variable itself.
     /// </summary>
-    private static void OnEnvironmentRequested(object? sender, WebViewEnvironmentRequestedEventArgs e)
+    private void OnEnvironmentRequested(object? sender, WebViewEnvironmentRequestedEventArgs e)
     {
         switch (e)
         {
             case WindowsWebView2EnvironmentRequestedEventArgs windows:
-                windows.UserDataFolder = WindowsUserDataFolder();
+                windows.UserDataFolder = WindowsUserDataFolder(
+                    Environment.GetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER"),
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    _elevated
+                );
                 break;
         }
     }
 
-    private static string WindowsUserDataFolder()
-    {
-        string? overridden = Environment.GetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER");
-        return string.IsNullOrEmpty(overridden)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YAMV", "webview2")
-            : overridden;
-    }
+    /// <summary>
+    /// The WebView2 user-data folder: <c>YAMV/webview2</c> under <paramref name="localAppData"/>, beside the asset cache and
+    /// shared by the normal instance's windows, or <c>YAMV/webview2-admin</c> for the elevated instance, so the two never share
+    /// a browser process. A non-empty <paramref name="overridden"/> (<c>WEBVIEW2_USER_DATA_FOLDER</c>) wins, so a hidden run can
+    /// keep a profile of its own.
+    /// </summary>
+    internal static string WindowsUserDataFolder(string? overridden, string localAppData, bool elevated) =>
+        string.IsNullOrEmpty(overridden) ? Path.Combine(localAppData, "YAMV", elevated ? "webview2-admin" : "webview2") : overridden;
 
     private void OnAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
     {

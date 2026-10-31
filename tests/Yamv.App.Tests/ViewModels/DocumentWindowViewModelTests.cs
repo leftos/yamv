@@ -2725,6 +2725,9 @@ public sealed class DocumentWindowViewModelTests
                 State,
                 Surface,
                 new DocumentWindowServices(Widths, path => Reader(path), Time, Log, ownToasts ? new ToastCenter(Time) : Toasts, Changes)
+                {
+                    Elevated = false,
+                }
             );
         }
 

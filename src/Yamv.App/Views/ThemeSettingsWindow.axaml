@@ -167,6 +167,25 @@
       <Setter Property="Foreground" Value="{DynamicResource YamvWarning}" />
     </Style>
 
+    <!-- The elevated instance's Administrator chip in the title bar, as TitleBar.axaml draws it. -->
+    <Style Selector="Border.admin">
+      <Setter Property="Height" Value="18" />
+      <Setter Property="Padding" Value="6,0" />
+      <Setter Property="Margin" Value="10,0,0,0" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource YamvWarningBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvWarningLine}" />
+    </Style>
+    <Style Selector="Border.admin TextBlock">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvWarning}" />
+    </Style>
+
     <!-- The token editor's Shared / Light / Dark segments. -->
     <Style Selector="Border.seg">
       <Setter Property="BorderThickness" Value="1" />
@@ -340,17 +359,36 @@
         BorderThickness="0,0,0,1"
         chrome:WindowDecorationProperties.ElementRole="TitleBar"
       >
-        <StackPanel x:Name="TitleText" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0" IsHitTestVisible="False">
-          <TextBlock Text="Themes" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource YamvText}" Margin="0,0,10,0" />
-          <TextBlock
-            x:Name="TitleDetail"
-            Text="{Binding TitleDetail}"
-            FontSize="12.5"
-            FontWeight="Medium"
-            Foreground="{DynamicResource YamvTextMuted}"
-          />
+        <!--
+          Sized to its text, so the Administrator chip, docked right, sits right after the detail; its margins, set in code per
+          platform, keep it clear of the close button or the traffic lights. A DockPanel measures its children in order: the chip
+          first, so it never truncates, then the unsaved dot and the name, then the detail, which truncates first.
+        -->
+        <DockPanel
+          x:Name="TitleText"
+          HorizontalAlignment="Left"
+          VerticalAlignment="Center"
+          IsHitTestVisible="False"
+        >
+          <!-- The elevated instance's mark; the window shows it when it is the Administrator instance's. -->
+          <Border x:Name="AdministratorChip" DockPanel.Dock="Right" Classes="admin" IsVisible="False">
+            <StackPanel Orientation="Horizontal">
+              <Viewbox Width="11" Height="11" Margin="0,0,4,0" VerticalAlignment="Center">
+                <Canvas Width="16" Height="16">
+                  <Path
+                    Data="M8,1.5 L13.5,3.6 L13.5,7.7 C13.5,11 11.2,13.4 8,14.5 C4.8,13.4 2.5,11 2.5,7.7 L2.5,3.6 Z"
+                    Stroke="{DynamicResource YamvWarning}"
+                    StrokeThickness="1.6"
+                    StrokeJoin="Round"
+                  />
+                </Canvas>
+              </Viewbox>
+              <TextBlock Text="Administrator" />
+            </StackPanel>
+          </Border>
           <TextBlock
             x:Name="DirtyDot"
+            DockPanel.Dock="Right"
             Text="●"
             FontSize="10"
             Margin="6,0,0,0"
@@ -358,7 +396,23 @@
             Foreground="{DynamicResource YamvAccent}"
             IsVisible="{Binding IsDirty}"
           />
-        </StackPanel>
+          <TextBlock
+            DockPanel.Dock="Left"
+            Text="Themes"
+            FontSize="12.5"
+            FontWeight="SemiBold"
+            Foreground="{DynamicResource YamvText}"
+            Margin="0,0,10,0"
+          />
+          <TextBlock
+            x:Name="TitleDetail"
+            Text="{Binding TitleDetail}"
+            FontSize="12.5"
+            FontWeight="Medium"
+            TextTrimming="CharacterEllipsis"
+            Foreground="{DynamicResource YamvTextMuted}"
+          />
+        </DockPanel>
       </Border>
 
       <Border

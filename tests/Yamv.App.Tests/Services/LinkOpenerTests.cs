@@ -550,7 +550,7 @@ public sealed class LinkOpenerTests
 
             (string title, string body, _) = Assert.Single(fixture.Cards);
             Assert.Equal("Open setup.ps1?", title);
-            Assert.Equal(ConfirmText.For(script, "setup.ps1", isFolder: false, OperatingSystem.IsMacOS()).Body, body);
+            Assert.Equal(ConfirmText.For(script, "setup.ps1", isFolder: false, OperatingSystem.IsMacOS(), elevated: false).Body, body);
             Assert.False(handled.IsCompleted);
             fixture.AssertNothingOpened();
             Assert.Empty(fixture.Toasts.Shown);
@@ -989,7 +989,8 @@ public sealed class LinkOpenerTests
                         var answer = new TaskCompletionSource<bool>();
                         Cards.Add((title, body, answer));
                         return answer.Task;
-                    }
+                    },
+                    Elevated: false
                 ),
                 new LinkDropRoute(() => DragSignalled, Dropped.Add)
             );

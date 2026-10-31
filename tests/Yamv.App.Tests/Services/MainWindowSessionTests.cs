@@ -169,7 +169,7 @@ public sealed class MainWindowSessionTests
             ViewModel = new DocumentWindowViewModel(
                 state,
                 Surface,
-                new DocumentWindowServices(widths, File.ReadAllText, time, Log, new ToastCenter(time))
+                new DocumentWindowServices(widths, File.ReadAllText, time, Log, new ToastCenter(time)) { Elevated = false }
             );
             Window = new MainWindow(ViewModel, new Border(), Surface, Log) { FileActions = Files };
             _session = new MainWindowSession(Window, ViewModel, new SessionStore(SessionFile, Log), Time, Log);

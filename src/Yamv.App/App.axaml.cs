@@ -123,6 +123,18 @@ public partial class App : Application
     /// </summary>
     internal static bool LaunchGrace { get; set; }
 
+    /// <summary>
+    /// Whether this is the elevated (Administrator) instance: every one of its windows says so in its title bar, and its main
+    /// window saves no session. Set before Avalonia starts.
+    /// </summary>
+    internal static bool Elevated { get; set; }
+
+    /// <summary>
+    /// Whether the windows show the Administrator mark: <see cref="Elevated"/>, or a dev run with its own data folder that asks for
+    /// it (<see cref="MainWindowFactory.ElevatedVariable"/>), which keeps the normal lock.
+    /// </summary>
+    private static bool ShowsAdministrator => Elevated || MainWindowFactory.DevElevatedAsked();
+
     /// <summary>The clock the launch grace runs on; a test replaces it with a fake one.</summary>
     internal static TimeProvider LaunchClock { get; set; } = TimeProvider.System;
 
@@ -761,7 +773,7 @@ public partial class App : Application
         try
         {
             (ThemeBridge bridge, WidthStore widths) = Shared();
-            tracked = Track(MainWindowFactory.CreateViewer(bridge, widths, files, Log));
+            tracked = Track(MainWindowFactory.CreateViewer(bridge, widths, files, Log, ShowsAdministrator));
             _viewers.Add(tracked);
             return ShowBuilt(tracked.Composition.Window, beforeShow);
         }
@@ -789,7 +801,7 @@ public partial class App : Application
         try
         {
             (ThemeBridge bridge, WidthStore widths) = Shared();
-            tracked = Track(MainWindowFactory.Create(bridge, widths, Log));
+            tracked = Track(MainWindowFactory.Create(bridge, widths, Log, ShowsAdministrator));
             _main = tracked;
             if (!_arbiter.MainWindowOpen)
             {
@@ -878,7 +890,7 @@ public partial class App : Application
             built.Push(bridge);
             IDisposable themesSync = CreateThemesSync(bridge, log);
             built.Push(themesSync);
-            var host = ThemeSettingsHost.Create(bridge, log, SuccessorOf);
+            var host = ThemeSettingsHost.Create(bridge, log, SuccessorOf, ShowsAdministrator);
             built.Push(host);
             var settings = new SettingsStore(AppPaths.SettingsFile, log);
             AppSettings saved = settings.Load();
@@ -1332,6 +1344,7 @@ public partial class App : Application
                 Log = log,
                 Trash = _ => new HarnessTrash(),
                 OpenAsText = path => log.LogInfo($"Harness: edit as text {path}"),
+                Elevated = ShowsAdministrator,
                 PickImport = owner =>
                 {
                     if (pendingImport is not { } path)

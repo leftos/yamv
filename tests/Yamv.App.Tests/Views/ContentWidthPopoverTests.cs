@@ -809,7 +809,7 @@ public sealed class ContentWidthPopoverTests
             ViewModel = new DocumentWindowViewModel(
                 state,
                 Surface,
-                new DocumentWindowServices(Widths, File.ReadAllText, time, Log, new ToastCenter(time))
+                new DocumentWindowServices(Widths, File.ReadAllText, time, Log, new ToastCenter(time)) { Elevated = false }
             );
             Window = new MainWindow(ViewModel, Document, Surface, Log);
             Window.Closed += (_, _) => _closed = true;

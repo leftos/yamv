@@ -116,7 +116,8 @@ public partial class MainWindow : Window
                 LinkPolicy.Decide,
                 decide => Task.Run(decide),
                 viewModel.Time,
-                _confirmCard.AskAsync
+                _confirmCard.AskAsync,
+                viewModel.ShowsAdministrator
             ),
             new LinkDropRoute(() => _dropOverlay!.DragSignalledRecently, OpenDropped)
         );
@@ -1392,7 +1393,7 @@ public partial class MainWindow : Window
     /// <summary>Opens the confirm card with the words of the approved mock's file, and writes the line the capture waits for.</summary>
     private async Task ShowDevConfirmCardAsync()
     {
-        var text = ConfirmText.For("setup.ps1", "setup.ps1", isFolder: false, OperatingSystem.IsMacOS());
+        var text = ConfirmText.For("setup.ps1", "setup.ps1", isFolder: false, OperatingSystem.IsMacOS(), _viewModel!.ShowsAdministrator);
         _ = _confirmCard!.AskAsync(text.Title, text.Body);
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
         _log!.LogInfo($"Window: confirm card transparency given {TopLevel.GetTopLevel(ConfirmCard)?.ActualTransparencyLevel}");
