@@ -294,6 +294,32 @@ public sealed class ThemeFolderWatcherTests
     }
 
     [Fact]
+    public void A_source_disposed_during_its_start_stops_quietly()
+    {
+        ThemeFolderWatcher? watcher = null;
+        int attempts = 0;
+        var held = new FakeFolderEvents { ThrowOnStart = new ObjectDisposedException("FileSystemWatcher"), OnStart = () => watcher?.Dispose() };
+        try
+        {
+            watcher = new ThemeFolderWatcher(Folder, time, log, _ => ++attempts == 1 ? new FakeFolderEvents() : held, probe);
+            probe.State = FolderState.Present("replaced");
+
+            time.Advance(Tick);
+
+            Assert.Equal(2, attempts);
+            Assert.Equal(1, held.DisposeCount);
+            Assert.Empty(log.Entries);
+
+            time.Advance(Tick * 3);
+            Assert.Equal(2, attempts);
+        }
+        finally
+        {
+            watcher?.Dispose();
+        }
+    }
+
+    [Fact]
     public void StartThrows_LoggedAsArmFailureAndRetried()
     {
         arm.FailNextStart(new IOException("cannot start"));

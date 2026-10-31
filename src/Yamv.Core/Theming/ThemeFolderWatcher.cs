@@ -321,6 +321,10 @@ public sealed partial class ThemeFolderWatcher : IDisposable
         {
             next.Start();
         }
+        catch (ObjectDisposedException) when (IsGone(next))
+        {
+            return;
+        }
         catch (Exception exception) when (IsArmFailure(exception))
         {
             lock (gate)
@@ -354,6 +358,15 @@ public sealed partial class ThemeFolderWatcher : IDisposable
         if (recovered)
         {
             log.LogInfo($"Watching the themes folder {folder} again.");
+        }
+    }
+
+    /// <summary>Whether the watcher is disposed, or has already moved on from <paramref name="source"/>.</summary>
+    private bool IsGone(IFolderEvents source)
+    {
+        lock (gate)
+        {
+            return disposed || !ReferenceEquals(current, source);
         }
     }
 

@@ -19,11 +19,15 @@ internal sealed class FakeFolderEvents : IFolderEvents
     /// <summary>An exception <see cref="Start"/> throws.</summary>
     public Exception? ThrowOnStart { get; set; }
 
+    /// <summary>Runs first inside <see cref="Start"/>, as a source whose start runs the watcher's dispose before it throws.</summary>
+    public Action? OnStart { get; set; }
+
     public void Raise(FolderEvent folderEvent) => Raised?.Invoke(folderEvent);
 
     public void Start()
     {
         Started = true;
+        OnStart?.Invoke();
         if (ErrorOnStart is { } error)
         {
             Raise(new FolderEvent(FolderEventKind.Error, null, null, error));
