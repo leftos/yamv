@@ -59,7 +59,7 @@ bash scripts/make-app.sh publish/osx-arm64 dist   # dist/YAMV.app
 
 CI (`.github/workflows/ci.yml`) builds and tests on Windows and macOS for every push to `main` and every pull request, and uploads two artifacts: `yamv-win-x64.exe` and `YAMV-osx-arm64.app.zip`. GitHub downloads `yamv-win-x64.exe` as a zip holding `yamv.exe`.
 
-The CI artifacts are development builds: the main window shows the restored documents, but nothing is saved between runs yet.
+The CI artifacts are development builds, not releases.
 
 A downloaded `YAMV.app` is ad-hoc signed, not notarized, so macOS quarantines it. Clear the quarantine before the first open:
 
