@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV tail switch</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 2000px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 12px; font-size: 15.5px; max-width: 1560px; line-height: 1.5; }
+p.page code, .cap code, .fcap code, .rec code { font: 12.5px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+.anno-key { display: inline-block; width: 22px; height: 12px; border: 2px dashed #ffb27a; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+.rec { margin: 18px 0 0; max-width: 1560px; padding: 14px 18px; border-radius: 8px; background: rgba(0,0,0,.22); border-left: 4px solid #fff; color: #f4f6f8; font-size: 15px; line-height: 1.5; }
+.rec b.h { display: block; font: 650 17px "Inter V"; color: #fff; margin-bottom: 4px; }
+section { margin: 36px 0 0; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.28); }
+
+/* ---------- lanes side by side; one row per drawn state ---------- */
+.grid { display: grid; column-gap: 24px; row-gap: 16px; align-items: start; }
+.lane-h { padding-bottom: 4px; }
+.lane-h h3 { font: 600 17px "Inter V"; color: #fff; margin: 0 0 4px; }
+.lane-h h3 .q { display: inline-block; min-width: 30px; padding: 1px 7px; margin-right: 8px; border-radius: 5px; background: rgba(0,0,0,.28); font-size: 14px; text-align: center; }
+.lane-h h3 .rq { font: 600 11px "Inter V"; letter-spacing: .06em; text-transform: uppercase; background: #fff; color: #33373c; border-radius: 4px; padding: 2px 6px; margin-left: 8px; vertical-align: 2px; }
+.lane-h .facts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 7px; }
+.lane-h .facts span { font: 550 12px "Inter V"; color: #fff; background: rgba(0,0,0,.2); border-radius: 4px; padding: 2px 7px; }
+.lane-h p.cap { color: #f1f3f5; font-size: 13.5px; margin: 0; line-height: 1.45; }
+.lane-h p.cap b { color: #fff; }
+.strip-h { grid-column: 1 / -1; font: 600 11.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin-top: 10px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,.3); }
+.t { border-left: 3px solid rgba(255,255,255,.4); padding: 2px 0 4px 10px; }
+.t b { display: block; font: 700 19px "Inter V"; color: #fff; letter-spacing: -.01em; }
+.t span { display: block; font-size: 12.5px; color: #eef0f2; line-height: 1.38; margin-top: 3px; }
+.cell { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
+.fcap { color: #f1f3f5; font-size: 13px; margin: 0; line-height: 1.42; }
+.fcap b { color: #fff; }
+.zoom { width: max-content; flex: none; }
+
+/* ---------- the document window: every colour is a token ---------- */
+.win { position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 10px; flex: none;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-family: "Inter V", sans-serif; font-size: 13px; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; white-space: nowrap; position: relative; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--yamv-text-muted); margin-right: 6px; flex: none; position: relative; }
+.wbtn + .wbtn { margin-left: -2px; }
+.wbtn.open { background: var(--yamv-selection-background); color: var(--yamv-accent); }
+/* lane A: the Tail button lit, and paused */
+.wbtn.on { background: var(--yamv-selection-background); color: var(--yamv-accent); box-shadow: inset 0 0 0 1px var(--yamv-accent-soft); }
+.wbtn.paused { color: var(--yamv-accent); }
+.body { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+.col { box-sizing: content-box; max-width: 800px; margin: 0 auto; padding: 40px 44px 56px; position: absolute; left: 0; right: 0; }
+.side { flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 12px 8px; overflow: hidden; position: relative; }
+.sb { position: absolute; right: 3px; width: 6px; border-radius: 3px; background: var(--yamv-text-muted); opacity: .38; }
+
+/* document: a log appended to by a script */
+.md { font-family: "Inter V", sans-serif; font-size: 15.5px; line-height: 1.62; color: var(--yamv-text); }
+.md h1 { font-weight: 700; font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .5em; color: var(--yamv-heading); }
+.md h2 { font-weight: 700; font-size: 1.32em; line-height: 1.25; margin: 1.3em 0 .55em; padding-bottom: .3em; border-bottom: 1px solid var(--yamv-line); color: var(--yamv-heading); }
+.md p { margin: 0 0 1em; }
+.md ul { margin: 0 0 1em; padding-left: 1.4em; }
+.md li + li { margin-top: .15em; }
+.md li { white-space: nowrap; }
+.md code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md li code.ts { color: var(--yamv-text-muted); }
+.md .ok { color: #1a7f37; font-weight: 600; }
+.md .new { outline: 2px dashed var(--anno); outline-offset: 3px; border-radius: 2px; }
+
+/* tree */
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--yamv-text); white-space: nowrap; }
+.grp-h .chev { width: 10px; color: var(--yamv-text-muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.badge.dir { color: var(--yamv-text-muted); border-color: var(--yamv-line); }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; font-size: 13px; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--yamv-text-muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+.row .x { color: var(--yamv-text-muted); font-size: 12px; margin-left: 2px; }
+/* lane C: the tail mark in a tree row */
+.row .tailm { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; font: 600 9.5px "Inter V"; letter-spacing: .05em; text-transform: uppercase;
+              color: var(--yamv-accent); background: var(--yamv-page-background); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 0 5px 0 3px; height: 17px; }
+.row.sel .tailm { background: transparent; }
+
+/* tooltip, menus (their own popup windows over the page) */
+.tip { position: absolute; z-index: 8; background: var(--yamv-text); color: var(--yamv-page-background); font: 500 12px "Inter V"; padding: 5px 8px; border-radius: 5px; white-space: nowrap; }
+.menu { position: absolute; z-index: 8; width: 226px; background: var(--yamv-page-background); border: 1px solid var(--yamv-line); border-radius: 8px; padding: 4px;
+        box-shadow: 0 10px 22px var(--pop-shadow), 0 1px 3px var(--pop-shadow); font: 13px "Inter V"; color: var(--yamv-text); text-align: left; }
+.menu .mi { display: flex; align-items: center; height: 28px; padding: 0 10px 0 6px; border-radius: 5px; white-space: nowrap; }
+.menu .mi .chk { width: 18px; flex: none; color: var(--yamv-accent); display: grid; place-items: center; margin-right: 4px; }
+.menu .mi.hover { background: var(--yamv-hover-background); }
+.menu .mi .key { margin-left: auto; color: var(--yamv-text-muted); font-size: 12px; }
+.menu hr { border: 0; height: 1px; background: var(--yamv-line); margin: 4px 6px; }
+
+/* lane A: the "new lines" pill; lane B: the Following chip. Both drawn by the page itself. */
+.pill { position: absolute; z-index: 5; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 13px 0 10px;
+        border-radius: 15px; background: var(--yamv-accent); color: #fff; font: 600 12.5px "Inter V"; white-space: nowrap;
+        box-shadow: 0 8px 20px var(--pop-shadow), 0 1px 3px var(--pop-shadow); }
+.follow { position: absolute; z-index: 5; right: 18px; bottom: 14px; display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border-radius: 12px;
+          background: var(--yamv-page-background); border: 1px solid var(--yamv-line); color: var(--yamv-text-secondary); font: 600 11.5px "Inter V"; white-space: nowrap;
+          box-shadow: 0 4px 12px var(--pop-shadow); }
+.follow i { width: 7px; height: 7px; border-radius: 50%; background: var(--yamv-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--yamv-accent) 22%, transparent); }
+
+/* ---------- annotations: not UI ---------- */
+.note { position: absolute; z-index: 9; color: var(--anno); background: var(--anno-band); border: 1.5px solid var(--anno); border-radius: 6px; font: 650 15px "Inter V"; padding: 3px 9px; white-space: nowrap; }
+.mk { outline: 2.5px dashed var(--anno); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV: the Tail switch, three ways to follow a growing document</h1>
+<p class="page">Ruled: a document short enough to fit in the view is at both its top and its bottom, and on a reload the top pin wins, so a short file that grows stays at its top. A <b>Tail</b> switch the user turns on makes the view follow appended text instead, as <code>tail -f</code> does. Each lane answers the open parts together: where the switch lives, whether it is per document or per window, whether it survives a restart, what turns it off, and how you see that it is on.</p>
+<p class="page">Every frame is a Studio main window at its real size, scaled down. The open document, <b>nightly.md</b>, is a build log a script appends to every few seconds. Time runs down the page: first the window following the log, then the same window after you scroll up to read an earlier run while three more lines arrive below. The last rows show the switch up close, in light and dark. <span class="anno-key"></span>Orange marks are annotations, not UI.</p>
+<div class="rec"><b class="h">Recommended: lane A, a Tail button in the title bar, per document, remembered</b>
+It sits beside ⟷, the other way you set how this document is shown, so it is found without knowing a shortcut. The file is what grows, not the window, so the switch belongs to the document and comes back on with it after a restart. Scrolling up only pauses it: you can read back freely, the pill says new text arrived and takes you to it, and reaching the bottom picks the follow up again. Its cost is one more button in every window, and a paused button that differs from a lit one only by its fill.</div>
+
+<template id="ctl"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<section><div id="lanes"></div></section>
+
+<script>
+/* ---------- tokens (Studio, the default theme) ---------- */
+const STUDIO_L = { pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", quote: "#d0d7de", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  warning: "#9a6700", warningBackground: "#fff8c5", warningLine: "#e5d17b", codeBackground: "#f6f8fa", codeLine: "#e4e8ec" };
+const STUDIO_D = { pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", quote: "#3d444d", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  warning: "#d29922", warningBackground: "#bb800926", warningLine: "#9e6a03", codeBackground: "#161b22", codeLine: "#262c34" };
+const T = { light: STUDIO_L, dark: STUDIO_D };
+/* not tokens: popup shadow and the annotation colours */
+const EXTRA = {
+  light: "--pop-shadow:rgba(31,35,40,.2);--anno:#d9480f;--anno-band:rgba(255,255,255,.94)",
+  dark: "--pop-shadow:rgba(0,0,0,.6);--anno:#ff922b;--anno-band:rgba(15,19,24,.94)",
+};
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (half) => Object.entries(T[half]).map(([k, v]) => `${kebab(k)}:${v}`).join(";") + ";" + EXTRA[half];
+
+/* ---------- glyphs ---------- */
+const CTL = document.getElementById("ctl").innerHTML;
+const GLYPH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const OPEN = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 12.6V3.2h4.1l1.5 1.5h5.3v2.1M1.8 12.6 3.7 7h10.6l-1.9 5.6z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`;
+const MORE = `<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="3.4" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.6" cy="8" r="1.3" fill="currentColor"/></svg>`;
+const TAIL = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2.2v8.2M4.7 7.2 8 10.5l3.3-3.3" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.8 13.6h10.4" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`;
+const TAIL_SM = TAIL.replace('width="16" height="16"', 'width="11" height="11"');
+const DOWN = `<svg width="13" height="13" viewBox="0 0 16 16"><path d="M8 2.5v10.5M3.6 8.6 8 13l4.4-4.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const CHECK = `<svg width="12" height="12" viewBox="0 0 16 16"><path d="M2.8 8.4 6.4 12l6.8-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICO = `<svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+
+/* ---------- the log ---------- */
+const RUN = (n, day, sha, extra = []) => ({ n, day, lines: [
+  ["02:00:03", `Fetched <code>origin/main</code> at <b>${sha}</b>`], ["02:00:19", "Restored 42 packages"],
+  ["02:01:47", "Built Yamv.slnx: 0 warnings, 0 errors"], ["02:02:10", `Core tests: <span class="ok">318 passed</span>`],
+  ["02:03:55", `App tests: <span class="ok">94 passed</span>, 1 skipped`], ["02:04:02", "Page check: 12 pages, no diff"], ...extra] });
+const RUNS = [
+  RUN(40, "Oct 29", "8af4a6f", [["02:04:30", "Packed yamv-0.9.0-win-x64.zip"], ["02:04:44", `Done in 4 m 41 s`]]),
+  RUN(41, "Oct 30", "6e9e845", [["02:04:28", "Packed yamv-0.9.0-win-x64.zip"], ["02:04:40", `Done in 4 m 37 s`]]),
+  RUN(42, "Oct 31", "debe399"),
+];
+/* the three lines that arrive while you read, and the two that just arrived in the "following" frame */
+const JUST = [["02:04:31", "Packed yamv-0.9.0-win-x64.zip"], ["02:04:39", "Signed yamv.exe"]];
+const LATER = [["02:04:52", "Uploaded to the nightly feed"], ["02:04:55", "Pruned 3 old builds"], ["02:04:58", `Done in 4 m 55 s`]];
+function logDoc({ later = false, mark = true } = {}) {
+  const li = ([ts, t], cls = "") => `<li class="${cls}"><code class="ts">${ts}</code> ${t}</li>`;
+  let h = `<h1>Nightly build log</h1><p>Appended by <code>nightly.ps1</code>, one section per run.</p>`;
+  for (const r of RUNS) {
+    let lines = r.lines.map((l) => li(l)).join("");
+    if (r.n === 42) lines += JUST.map((l) => li(l, mark ? "new" : "")).join("") + (later ? LATER.map((l) => li(l)).join("") : "");
+    h += `<h2>Run ${r.n} · ${r.day}</h2><ul>${lines}</ul>`;
+  }
+  return h;
+}
+
+/* ---------- tree ---------- */
+const TAILMARK = `<span class="tailm">${TAIL_SM}Tail</span>`;
+const row = (name, cls = "", extra = "") => `<div class="row ${cls}">${ICO}<span class="nm">${name}</span>${extra}</div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+const head = (name, badge) => `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge ${badge === "dir" ? "dir" : ""}">${badge}</span></div>`;
+function tree(lane, o = {}) {
+  const c = lane === "c";
+  const yamv = head("yamv", "git") + row("README.md") + folder("docs/plans") + row("MAIN.md", "in") + folder("logs")
+    + row("nightly.md", `in sel ${o.markRow ? "mk" : ""}`, c ? TAILMARK + (o.hover ? `<span class="x">✕</span>` : "") : "");
+  const yaat = head("yaat", "git") + folder("docs") + row("ARCHITECTURE.md", "in") + row("agent-run.md", "in", c ? TAILMARK : "");
+  const dl = head("~\\Downloads", "dir") + row("notes.md");
+  return `<div class="grp">${yamv}</div><div class="grp">${yaat}</div><div class="grp">${dl}</div>`;
+}
+
+/* ---------- title bar tools: Open…, ⟷, (lane A: Tail), ⋯ ---------- */
+function tools(lane, o = {}) {
+  let h = `<span class="wbtn">${OPEN}</span><span class="wbtn">${GLYPH}</span>`;
+  if (lane === "a") h += `<span class="wbtn ${o.tail ?? "on"} ${o.mark ? "mk" : ""}">${TAIL}${o.tip ?? ""}</span>`;
+  h += `<span class="wbtn ${o.more ?? ""}">${MORE}${o.menu ?? ""}</span>`;
+  return h;
+}
+
+/* ---------- a window following the log, or scrolled up ---------- */
+/* o: { lane, half, w, h, treeW, state: "follow" | "up", over, toolsOpt, treeOpt, top } */
+function win(o) {
+  const follow = o.state === "follow";
+  const pos = follow ? "bottom:0" : `top:${o.top ?? -250}px`;
+  const thumb = follow ? `bottom:4px;height:${Math.round(o.h * 0.22)}px` : `top:${Math.round(o.h * 0.3)}px;height:${Math.round(o.h * 0.22)}px`;
+  const side = o.treeW === 0 ? "" : `<div class="side" style="width:${o.treeW ?? 230}px">${tree(o.lane, o.treeOpt ?? {})}</div>`;
+  return `<div class="win" style="width:${o.w}px;height:${o.h}px;${vars(o.half)}">
+    <div class="titlebar"><span class="name">nightly.md</span><span>yamv / logs</span><span class="spacer"></span>${tools(o.lane, o.toolsOpt ?? {})}${CTL}</div>
+    <div class="body"><div class="pane"><div class="col md" style="${pos}">${logDoc({ later: !follow, mark: follow && o.markNew !== false })}</div>
+      <span class="sb" style="${thumb}"></span>${o.paneOver ?? ""}</div>${side}</div>${o.over ?? ""}</div>`;
+}
+const note = (text, style) => `<div class="note" style="${style}">${text}</div>`;
+const PILL = (mk) => `<div class="pill ${mk ? "mk" : ""}">${DOWN}3 new lines</div>`;
+const FOLLOW = (mk) => `<div class="follow ${mk ? "mk" : ""}"><i></i>Following</div>`;
+const MENU_B = `<div class="menu" style="top:32px;right:0"><div class="mi hover"><span class="chk">${CHECK}</span>Tail this window<span class="key">Ctrl+T</span></div><hr>
+  <div class="mi"><span class="chk"></span>Theme settings…<span class="key">Ctrl+,</span></div></div>`;
+const CTX_C = `<div class="menu" style="left:118px;top:30px"><div class="mi"><span class="chk"></span>Reveal in Explorer</div><div class="mi"><span class="chk"></span>Copy path</div>
+  <div class="mi hover"><span class="chk">${CHECK}</span>Tail<span class="key">Ctrl+T</span></div><hr><div class="mi"><span class="chk"></span>Close<span class="key">Ctrl+W</span></div><div class="mi"><span class="chk"></span>Close group</div></div>`;
+
+/* ---------- the big frames ---------- */
+const W = 800, H = 520, Z = 0.7;
+const BIG = {
+  a: {
+    follow: (half) => win({ lane: "a", half, w: W, h: H, state: "follow", toolsOpt: { tail: "on", mark: true },
+      over: note("just appended", "left:64px;bottom:14px") }),
+    up: (half) => win({ lane: "a", half, w: W, h: H, state: "up", toolsOpt: { tail: "paused", mark: true }, paneOver: PILL(true),
+      over: note("paused: no fill", "right:214px;top:44px") }),
+  },
+  b: {
+    follow: (half) => win({ lane: "b", half, w: W, h: H, state: "follow", paneOver: FOLLOW(true),
+      over: note("just appended", "left:64px;bottom:14px") }),
+    up: (half) => win({ lane: "b", half, w: W, h: H, state: "up",
+      over: note("Tail is off; 3 lines arrived below and nothing says so", "right:12px;bottom:18px;width:206px;white-space:normal") }),
+  },
+  c: {
+    follow: (half) => win({ lane: "c", half, w: W, h: H, state: "follow", treeOpt: { markRow: true },
+      over: note("just appended", "left:64px;bottom:14px") }),
+    up: (half) => win({ lane: "c", half, w: W, h: H, state: "up", treeOpt: { markRow: true },
+      over: note("The mark is still lit; 3 lines arrived below and nothing says so", "right:12px;bottom:18px;width:206px;white-space:normal") }),
+  },
+};
+
+/* ---------- the switch up close ---------- */
+const DW = 520, DH = 290, DZ = 1.08;
+const DETAIL = {
+  a: {
+    on: (half) => win({ lane: "a", half, w: DW, h: DH, treeW: 0, state: "follow", markNew: false,
+      toolsOpt: { tail: "on", tip: `<div class="tip" style="top:33px;right:-36px">Tail (Ctrl+T)</div>` } }),
+    up: (half) => win({ lane: "a", half, w: DW, h: DH, treeW: 0, state: "up", top: -330,
+      toolsOpt: { tail: "paused", tip: `<div class="tip" style="top:33px;right:-36px">Tail paused · Ctrl+T turns it off</div>` }, paneOver: PILL(false) }),
+  },
+  b: {
+    on: (half) => win({ lane: "b", half, w: DW, h: DH, treeW: 0, state: "follow", markNew: false, toolsOpt: { more: "open", menu: MENU_B }, paneOver: FOLLOW(false) }),
+    up: (half) => win({ lane: "b", half, w: DW, h: DH, treeW: 0, state: "up", top: -330 }),
+  },
+  c: {
+    /* the row's context menu, opened up and to the left of the pointer on nightly.md */
+    on: (half) => win({ lane: "c", half, w: DW, h: DH, treeW: 236, state: "follow", markNew: false, treeOpt: { hover: true }, over: CTX_C }),
+    up: (half) => win({ lane: "c", half, w: DW, h: DH, treeW: 236, state: "up", top: -330 }),
+  },
+};
+
+/* ---------- lanes side by side, one row per state ---------- */
+function grid({ lanes, strips, label = 130 }) {
+  let h = `<div class="grid" style="grid-template-columns:${label}px repeat(${lanes.length}, minmax(0,1fr))"><div></div>`;
+  h += lanes.map((l) => `<div class="lane-h"><h3><span class="q">${l.q}</span>${l.title}${l.rec ? '<span class="rq">Recommended</span>' : ""}</h3>
+    <div class="facts">${l.facts.map((f) => `<span>${f}</span>`).join("")}</div><p class="cap">${l.cap}</p></div>`).join("");
+  for (const s of strips) {
+    if (s.title) h += `<div class="strip-h">${s.title}</div>`;
+    for (const r of s.rows) {
+      h += `<div class="t"><b>${r.t}</b><span>${r.ev}</span></div>`;
+      h += r.cells.map((c) => c === null ? "<div></div>" : `<div class="cell"><div class="zoom" style="zoom:${c.z ?? s.z}">${c.html}</div>${c.cap ? `<p class="fcap">${c.cap}</p>` : ""}</div>`).join("");
+    }
+  }
+  return h + "</div>";
+}
+
+const LANES = [
+  { q: "A", rec: true, title: "A Tail button beside ⟷", facts: ["Title bar", "Per document", "Remembered", "Scrolling up pauses it"],
+    cap: "The button is lit while the view follows. Scrolling up pauses it (the fill goes) and a <b>3 new lines</b> pill appears; the pill or reaching the bottom follows again, and only the button or Ctrl+T turns it off. <b>Worst case:</b> paused and lit differ only by the fill, so a glance at the bar can misread a paused document as following." },
+  { q: "B", title: "A Tail entry in the ⋯ menu", facts: ["⋯ menu + Ctrl+T", "Per window", "Off at every start", "Scrolling up turns it off"],
+    cap: "\"Tail this window\" is a checked entry in the ⋯ menu, and a <b>Following</b> chip sits at the page's bottom right while it is on. Scrolling up turns it off and the chip goes. <b>Worst case:</b> a user who scrolls up to read loses the follow without noticing, and getting it back is two clicks or a shortcut they must remember." },
+  { q: "C", title: "A Tail mark on the tree row", facts: ["Tree row + Ctrl+T", "Per document", "Remembered", "Only a click turns it off"],
+    cap: "The row's context menu (or Ctrl+T) sets Tail, and the row shows a <b>Tail</b> mark, so every document on Tail is visible at once. Scrolling up holds the view; reaching the bottom follows again. <b>Worst case:</b> the mark stays lit while the view stands still, so a user who scrolled up cannot tell new text is arriving below." },
+];
+function lanes() {
+  const big = (k, st, half) => BIG[k][st](half);
+  return grid({
+    lanes: LANES,
+    strips: [
+      { title: "Following the log", z: Z, rows: [
+        { t: "Following", ev: "Tail is on; two lines just arrived at the bottom and the view moved down to show them.", cells: [
+          { html: big("a", "follow", "light"), cap: "The Tail button is lit (dashed ring), between ⟷ and ⋯. Nothing else on screen." },
+          { html: big("b", "follow", "light"), cap: "The <b>Following</b> chip (dashed ring) is the only sign; the title bar is unchanged." },
+          { html: big("c", "follow", "light"), cap: "<b>nightly.md</b> and <b>agent-run.md</b> both carry the Tail mark: each document has its own switch." }] },
+        { t: "Scrolled up", ev: "You scroll up to read run 41. Three more lines are appended below while you read.", cells: [
+          { html: big("a", "up", "light"), cap: "The view stays where you put it. The button loses its fill (paused) and the pill counts the new lines; it is drawn by the page." },
+          { html: big("b", "up", "light"), cap: "The view stays where you put it. Tail is now off and the chip is gone; scrolling to the bottom does not turn it back on." },
+          { html: big("c", "up", "light"), cap: "The view stays where you put it. The mark is unchanged and nothing on the page says text arrived." }] },
+      ] },
+      { title: "The switch up close", z: DZ, rows: [
+        { t: "On", ev: "Hovered or opened, light.", cells: [
+          { html: DETAIL.a.on("light"), cap: "Tooltip \"Tail (Ctrl+T)\"; the lit fill is the same as the ⋯ button's pressed state, with an outline." },
+          { html: DETAIL.b.on("light"), cap: "The ⋯ menu gains a checked entry above Theme settings…, with its shortcut." },
+          { html: DETAIL.c.on("light"), cap: "The row's context menu has a checked Tail between Copy path and Close." }] },
+        { t: "On", ev: "The same, dark.", cells: [
+          { html: DETAIL.a.on("dark"), cap: "From the dark tokens." },
+          { html: DETAIL.b.on("dark"), cap: "From the dark tokens." },
+          { html: DETAIL.c.on("dark"), cap: "From the dark tokens." }] },
+        { t: "Scrolled up", ev: "Light, after three new lines.", cells: [
+          { html: DETAIL.a.up("light"), cap: "Paused: accent glyph, no fill. The tooltip says how to turn it off." },
+          { html: DETAIL.b.up("light"), cap: "Off: the page shows nothing; the ⋯ entry is unchecked." },
+          { html: DETAIL.c.up("light"), cap: "Still on: the mark stays as it was." }] },
+      ] },
+    ],
+  });
+}
+document.getElementById("lanes").innerHTML = lanes();
+</script>
+</body>
+</html>

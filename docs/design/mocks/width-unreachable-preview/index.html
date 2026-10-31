@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV unreachable width preview</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-normal.woff2") format("woff2"); font-weight: 100 800; }
+@font-face { font-family: "JetBrains Mono V"; src: url("../fonts/jetbrains-mono-italic.woff2") format("woff2"); font-weight: 100 800; font-style: italic; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1640px; color: #111; }
+h1.page { font: 600 30px "Inter V"; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 12px; font-size: 15.5px; max-width: 1540px; line-height: 1.5; }
+p.page code, .cap code, .fcap code, .facts code, .rec code { font: 12.5px "JetBrains Mono V"; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+.rec { margin: 18px 0 0; padding: 14px 18px; border-radius: 8px; background: rgba(0,0,0,.22); border-left: 4px solid #ffd8b0; color: #fff; font-size: 15px; line-height: 1.5; max-width: 1540px; }
+.rec b { color: #ffd8b0; }
+section { margin: 44px 0 0; padding-top: 28px; border-top: 1px solid rgba(255,255,255,.28); }
+section > h2 { font: 650 24px "Inter V"; color: #fff; margin: 0 0 6px; }
+section > h2 .q { display: inline-block; min-width: 38px; padding: 1px 9px; margin-right: 10px; border-radius: 5px; background: rgba(0,0,0,.28); font-size: 20px; text-align: center; }
+section > h2 .pick { font: 650 12px "Inter V"; letter-spacing: .06em; text-transform: uppercase; color: #1a0f00; background: #ffd8b0; border-radius: 4px; padding: 3px 8px; margin-left: 12px; vertical-align: 4px; }
+p.cap { color: #f1f3f5; margin: 0 0 18px; font-size: 15px; max-width: 1540px; line-height: 1.5; }
+p.cap .worst { color: #ffd8b0; font-weight: 600; }
+.main { display: flex; gap: 32px; align-items: flex-start; }
+.side-col { flex: 1; min-width: 0; }
+.facts { display: grid; grid-template-columns: 112px 1fr; gap: 8px 14px; font-size: 14px; line-height: 1.45; color: #f1f3f5; margin: 0 0 22px; }
+.facts dt { font: 600 11.5px "Inter V"; letter-spacing: .07em; text-transform: uppercase; color: #e3e6e9; padding-top: 3px; }
+.facts dd { margin: 0; }
+.lbl-h { font: 600 11.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin: 0 0 8px; }
+.seq-h { font: 600 11.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; margin: 26px 0 10px; }
+.seq { display: flex; gap: 16px; align-items: flex-start; }
+.step { width: 378px; flex: none; }
+.t { border-left: 3px solid rgba(255,255,255,.4); padding: 2px 0 4px 10px; margin-bottom: 8px; min-height: 64px; }
+.t b { display: block; font: 700 19px "Inter V"; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.t span { display: block; font-size: 12.5px; color: #eef0f2; line-height: 1.38; margin-top: 3px; }
+.zoom { width: max-content; flex: none; }
+.lights { display: flex; gap: 20px; align-items: flex-start; }
+.lights > div { width: 507px; flex: none; }
+.lights h3 { font: 600 16px "Inter V"; color: #fff; margin: 0 0 8px; }
+
+/* ---------- the app window: every colour is a Studio token ---------- */
+.win { position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 10px; flex: none;
+       box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); background: var(--yamv-page-background); color: var(--yamv-text);
+       font-family: "Inter V", sans-serif; font-size: 13px; will-change: transform; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; background: var(--yamv-chrome-background); border-bottom: 1px solid var(--yamv-line);
+            font: 500 12.5px "Inter V"; color: var(--yamv-text-muted); padding-left: 14px; white-space: nowrap; position: relative; }
+.titlebar .name { color: var(--yamv-text); font-weight: 600; margin-right: 10px; }
+.titlebar .name.ex { font-style: italic; color: var(--yamv-accent); }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--yamv-text-muted); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--yamv-text-muted); margin-right: 6px; flex: none; position: relative; }
+.wbtn + .wbtn { margin-left: -2px; }
+.wbtn.open { background: var(--yamv-selection-background); color: var(--yamv-accent); }
+.body { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+.col { box-sizing: content-box; margin: 0 auto; padding: 40px 44px 64px; }
+.side { flex: none; background: var(--yamv-sidebar-background); border-left: 1px solid var(--yamv-line); padding: 12px 8px; overflow: hidden; position: relative; }
+
+/* document */
+.md { font-family: "Inter V", sans-serif; font-size: 15.5px; line-height: 1.62; color: var(--yamv-text); }
+.md h1 { font-weight: 700; font-size: 2.05em; letter-spacing: -.025em; line-height: 1.15; margin: 0 0 .5em; color: var(--yamv-heading); }
+.md h2 { font-weight: 700; font-size: 1.32em; line-height: 1.25; margin: 1.3em 0 .55em; padding-bottom: .3em; border-bottom: 1px solid var(--yamv-line); color: var(--yamv-heading); }
+.md p { margin: 0 0 1em; }
+.md ul { margin: 0 0 1em; padding-left: 1.5em; }
+.md li { margin-bottom: .2em; }
+.md a { color: var(--yamv-accent); text-decoration: underline; text-decoration-color: var(--yamv-accent-soft); text-underline-offset: 3px; }
+.md code { font-family: "JetBrains Mono V"; font-size: .84em; background: var(--yamv-code-background); padding: .12em .38em; border-radius: 4px; }
+.md pre { background: var(--yamv-code-background); border: 1px solid var(--yamv-code-line); border-radius: 8px; padding: 14px 16px; font: 13px/1.6 "JetBrains Mono V"; margin: 0 0 1.2em; white-space: pre; overflow: hidden; }
+.md pre code { background: none; padding: 0; font-size: inherit; }
+.k { color: var(--yamv-syntax-keyword); } .s { color: var(--yamv-syntax-string); } .c { color: var(--yamv-syntax-comment); font-style: italic; } .n { color: var(--yamv-syntax-number); }
+
+/* A: the example badge above the example's first heading */
+.exbadge { display: inline-block; font: 650 10.5px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft);
+           border-radius: 4px; padding: 2px 7px; margin-bottom: 14px; }
+/* B: the example as a sheet on the chrome-coloured pane */
+.pane.desk { background: var(--yamv-chrome-background); display: flex; flex-direction: column; }
+.desk-lbl { width: max-content; margin: 16px auto 0; font: 650 10.5px "Inter V"; letter-spacing: .1em; text-transform: uppercase; color: var(--yamv-text-muted); }
+.sheet { box-sizing: content-box; margin: 8px auto 0; padding: 32px 44px 64px; background: var(--yamv-page-background); border: 1px solid var(--yamv-line); border-bottom: 0;
+         border-radius: 8px 8px 0 0; box-shadow: 0 8px 26px var(--toast-shadow); flex: 1; width: 100%; }
+
+/* tree */
+.grp { margin-bottom: 12px; }
+.grp-h { display: flex; align-items: center; gap: 7px; padding: 5px 8px; font-weight: 650; font-size: 12.5px; color: var(--yamv-text); white-space: nowrap; }
+.grp-h .chev { width: 10px; color: var(--yamv-text-muted); }
+.badge { font: 600 10px "Inter V"; letter-spacing: .04em; text-transform: uppercase; color: var(--yamv-accent); border: 1px solid var(--yamv-accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: auto; }
+.badge.dir { color: var(--yamv-text-muted); border-color: var(--yamv-line); }
+.row { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 8px; border-radius: 6px; color: var(--yamv-text-secondary); position: relative; white-space: nowrap; font-size: 13px; }
+.row.in { padding-left: 26px; }
+.row.folder { color: var(--yamv-text-muted); }
+.row .ico { width: 13px; flex: none; opacity: .7; }
+.row.sel { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 550; }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--yamv-accent); }
+
+/* ---------- the popover (its own window): card and arrow share one line rim and one shadow ---------- */
+.pop { position: absolute; top: 41px; right: 176px; width: 300px; z-index: 5; background: var(--yamv-page-background); color: var(--yamv-text); border: 1px solid var(--yamv-line);
+       padding: 13px 13px 11px; font-size: 12.5px; border-radius: 8px; filter: drop-shadow(0 10px 22px var(--pop-shadow)) drop-shadow(0 1px 3px var(--pop-shadow-near)); }
+.pop .arrow-rim { position: absolute; top: -9px; right: 5px; width: 16px; height: 8px; background: var(--yamv-line); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.pop .arrow { position: absolute; top: -8px; right: 6px; width: 14px; height: 8px; background: var(--yamv-page-background); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.pop .hd { display: flex; align-items: center; justify-content: space-between; }
+.pop .hd b { font-size: 13px; font-weight: 600; }
+.pop .val { font-variant-numeric: tabular-nums; color: var(--yamv-accent); font-weight: 600; font-size: 13px; }
+.track { position: relative; height: 4px; background: var(--yamv-line); border-radius: 2px; margin: 15px 8px 8px; }
+.track .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--yamv-accent); border-radius: 2px; }
+.track .thumb { position: absolute; top: -6px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--yamv-page-background); border: 2px solid var(--yamv-accent); }
+.track .thumb.held { box-shadow: 0 0 0 4px var(--yamv-accent-soft); }
+.ticks { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--yamv-text-muted); margin: 0 2px 11px; }
+.scope { font-size: 12px; color: var(--yamv-text-muted); border-top: 1px solid var(--yamv-line); padding-top: 10px; }
+.seg { display: flex; border: 1px solid var(--yamv-line); border-radius: 6px; overflow: hidden; margin: 6px 0 8px; }
+.seg span { flex: 1; text-align: center; padding: 5px 0; font-size: 11.5px; color: var(--yamv-text); border-right: 1px solid var(--yamv-line); white-space: nowrap; }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--yamv-selection-background); color: var(--yamv-selection-text); font-weight: 600; }
+.inh { font-size: 12px; color: var(--yamv-text-muted); margin: -2px 0 8px; }
+.inh code { font: 11px "JetBrains Mono V"; background: var(--yamv-code-background); padding: 1px 5px; border-radius: 3px; color: var(--yamv-text); }
+.links { display: flex; gap: 16px; font-size: 12px; color: var(--yamv-accent); }
+.links .off { opacity: .45; }
+
+/* ---------- toasts (the approved card, reload-and-drop lane A), here with an info mark ---------- */
+.toast { position: relative; overflow: hidden; display: flex; align-items: center; gap: 9px; background: var(--yamv-page-background); border: 1px solid var(--yamv-line); border-radius: 8px;
+         padding: 8px 10px 9px 12px; font: 13px "Inter V"; color: var(--yamv-text); white-space: nowrap; box-shadow: 0 10px 22px var(--toast-shadow), 0 1px 3px var(--toast-shadow); }
+.toast > svg { flex: none; color: var(--yamv-accent); }
+.toast code { font: 12px "JetBrains Mono V"; background: var(--yamv-code-background); padding: 1px 5px; border-radius: 4px; }
+.toast .x { color: var(--yamv-text-muted); font-size: 12px; margin-left: 8px; }
+.toast .timer { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--yamv-text-muted); opacity: .55; }
+.tstack { position: absolute; z-index: 6; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.tstack.bottom { bottom: 16px; }
+.tstack.top { top: 14px; right: auto; width: 704px; }
+.tdetail { padding: 16px 18px; background: var(--yamv-page-background); border-radius: 8px; width: max-content; }
+
+</style>
+</head>
+<body>
+<h1 class="page">YAMV-56: previewing a width that can't reach the document</h1>
+<p class="page"><code>docs/look.md</code> is open in the yamv group. Its folder <code>docs</code> holds its own 760 px, so when the user picks <code>yamv (repo)</code> in the ⟷ popover and drags the slider to 600 px, <code>look.md</code> would not move. Ruled: the pane shows an example document at the dragged width for a while, and a small toast says why the change won't reach <code>look.md</code>.</p>
+<p class="page">Each lane is a Studio dark main window drawn at its real size and scaled down: first mid-drag, larger, then a row of moments left to right in time. The last section shows the same mid-drag moment in Studio light. Lanes differ in what the example says, how it is marked as an example, when it appears and goes back, and the toast's words and place. The toast is the approved card with an accent info mark in place of the warning mark, since nothing failed.</p>
+<div class="rec"><b>Recommended: lane B.</b> The example sits on a sheet over the chrome colour, so it can't be taken for <code>look.md</code> even at a glance, and it reads in plain words about what you are setting. It stays a moment after you let go, so you see the width you saved instead of a flash, then hands the page back by itself. The toast stays in the bottom centre, where every other toast appears.</div>
+
+<template id="ctl"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<div data-lanes></div>
+
+<section>
+  <h2>Studio light · the same mid-drag moment</h2>
+  <p class="cap">Each lane at the moment the slider is held at 600 px on <code>yamv (repo)</code>.</p>
+  <div class="lights" data-lights></div>
+</section>
+
+<script>
+const LIGHT = { pageBackground: "#ffffff", text: "#1f2328", textSecondary: "#31373d", textMuted: "#656d76", heading: "#111418", accent: "#0969da", accentSoft: "#b6d4f5",
+  line: "#d8dee4", chromeBackground: "#f6f8fa", sidebarBackground: "#f6f8fa", selectionBackground: "#e3edfa", selectionText: "#0b3d7a", hoverBackground: "#eaeef2",
+  warning: "#9a6700", codeBackground: "#f6f8fa", codeLine: "#e4e8ec",
+  syntaxKeyword: "#cf222e", syntaxString: "#0a3069", syntaxComment: "#6e7781", syntaxNumber: "#0550ae" };
+const DARK = { pageBackground: "#0f1318", text: "#e6edf3", textSecondary: "#c9d1d9", textMuted: "#8b949e", heading: "#f0f6fc", accent: "#4493f8", accentSoft: "#1f3b5e",
+  line: "#2a3139", chromeBackground: "#0a0d11", sidebarBackground: "#0a0d11", selectionBackground: "#182a40", selectionText: "#e6edf3", hoverBackground: "#161b22",
+  warning: "#d29922", codeBackground: "#161b22", codeLine: "#262c34",
+  syntaxKeyword: "#ff7b72", syntaxString: "#a5d6ff", syntaxComment: "#8b949e", syntaxNumber: "#79c0ff" };
+/* not tokens: the popover and toast shadows */
+const EXTRA = {
+  light: "--pop-shadow:rgba(31,35,40,.26);--pop-shadow-near:rgba(31,35,40,.16);--toast-shadow:rgba(31,35,40,.18)",
+  dark: "--pop-shadow:rgba(0,0,0,.7);--pop-shadow-near:rgba(0,0,0,.55);--toast-shadow:rgba(0,0,0,.6)",
+};
+const T = { light: LIGHT, dark: DARK };
+const kebab = (n) => "--yamv-" + n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+const vars = (th) => Object.entries(T[th]).map(([k, v]) => `${kebab(k)}:${v}`).join(";") + ";" + EXTRA[th];
+
+const CTL = document.getElementById("ctl").innerHTML;
+const GLYPH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const OPEN = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 12.6V3.2h4.1l1.5 1.5h5.3v2.1M1.8 12.6 3.7 7h10.6l-1.9 5.6z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`;
+const MORE = `<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="12.5" cy="8" r="1.2" fill="currentColor"/></svg>`;
+const ICO = `<svg class="ico" viewBox="0 0 14 14"><path d="M3 1.5h5l3 3v8H3z" fill="none" stroke="currentColor"/></svg>`;
+const INFO = `<svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 7.3v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".95" fill="currentColor"/></svg>`;
+
+/* ---------- the window: 1180 x 680, tree 260, so the pane is 920 and its text space 832 ---------- */
+const W = 1180, H = 680, TREE = 260, SPACE = 832;
+const pct = (px) => px === "full" ? 100 : Math.round((px - 480) / (SPACE - 480) * 95);
+
+/* the user's document, at the 760 px saved for docs */
+const LOOK = `<h1>YAMV look</h1>
+<p>The chosen design. The mocks it was chosen from are kept beside it as reference. A UI change that departs from this page gets a mock first.</p>
+<h2>Themes</h2>
+<ul><li>All six looks ship as built-in themes, as three families with a light and a dark half each: <b>Paper</b>, <b>Studio</b> and <b>Ink</b>. Studio is the default.</li>
+<li>Appearance is <b>Match system</b>, <b>Light</b> or <b>Dark</b>.</li><li>Themes are JSON files that can be shared, and a user can add their own.</li></ul>
+<h2>Window</h2>
+<p>A custom title bar shows the document name in semibold, then its location inside its group in muted text. The document pane is on the left; its text column is centred at the content width, set per folder with the title bar's ⟷ popover. The tree is on the right.</p>
+<p>A failed operation the user started shows a toast in the window, never only a line in the log.</p>`;
+
+/* the example document, in plain words (B, C) or as filler (A) */
+const EXAMPLE = (px) => `<h1>Example document</h1>
+<p>This page is a sample, not one of your files. It shows how a document reads at the width you are setting, so you can judge the length of a line before you let go of the slider.</p>
+<h2>Lists and code</h2>
+<ul><li>A line that runs too long makes the eye lose its place on the way back.</li><li>A line that is too short breaks the reading every few words.</li></ul>
+<pre><code><span class="c">// a code block keeps to the column</span>
+<span class="k">const</span> width = <span class="n">${px}</span>;</code></pre>
+<p>Most readers settle between 60 and 75 characters a line, and a <a>link</a> or <code>inline code</code> reads the same at any width.</p>`;
+const LOREM = `<span class="exbadge">Example</span>
+<h1>Lorem ipsum</h1>
+<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.</p>
+<h2>Dolor sit amet</h2>
+<ul><li>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum.</li><li>Excepteur sint occaecat cupidatat non proident, sunt in culpa.</li></ul>
+<pre><code><span class="k">lorem</span>.ipsum(<span class="s">"dolor"</span>, <span class="n">42</span>);</code></pre>
+<p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo.</p>`;
+
+/* tree */
+const row = (name, cls = "") => `<div class="row ${cls}">${ICO}<span class="nm">${name}</span></div>`;
+const folder = (name) => `<div class="row folder"><span class="ico">▾</span>${name}</div>`;
+const head = (name, badge) => `<div class="grp-h"><span class="chev">▾</span>${name}<span class="badge ${badge === "dir" ? "dir" : ""}">${badge}</span></div>`;
+const TREE_HTML = `<div class="grp">${head("yamv", "git")}${row("README.md")}${folder("docs")}${row("ARCHITECTURE.md", "in")}${row("content-width.md", "in")}${row("look.md", "in sel")}${row("themes.md", "in")}</div>
+  <div class="grp">${head("yaat", "git")}${folder("docs")}${row("glossary.md", "in")}</div><div class="grp">${head("~\\Downloads", "dir")}${row("notes.md")}</div>`;
+
+/* popover: sel is the selected segment, px the readout, held draws the thumb as grabbed */
+function pop(p) {
+  const x = pct(p.px);
+  const segs = ["docs", "yamv (repo)", "All documents"].map((s, i) => `<span class="${i === p.sel ? "on" : ""}">${s}</span>`).join("");
+  const inh = p.inherited ? `<div class="inh">Inherited from <code>${p.inherited}</code></div>` : "";
+  return `<div class="pop"><span class="arrow-rim"></span><span class="arrow"></span>
+    <div class="hd"><b>Content width</b><span class="val">${p.px} px</span></div>
+    <div class="track"><div class="fill" style="width:${x}%"></div><div class="thumb ${p.held ? "held" : ""}" style="left:${x}%"></div></div><div class="ticks"><span>480</span><span>Full</span></div>
+    <div class="scope">Saved for<div class="seg">${segs}</div>${inh}<div class="links"><span class="${p.reset ? "" : "off"}">Reset to inherited</span><span>Clear all overrides here</span></div></div></div>`;
+}
+
+const toast = (text, t) => `<div class="toast">${INFO}<span>${text}</span><span class="x">✕</span>${t != null ? `<span class="timer" style="width:${t}%"></span>` : ""}</div>`;
+
+/*
+ * o.page: "doc" | "lorem" | "sheet" | "plain" (the example kinds), o.px: the example's width,
+ * o.pop: popover args or null, o.toast: [text, timer%, place] or null, o.title: [name, loc, isExample]
+ */
+function win(o, th) {
+  let pane;
+  if (o.page === "doc") pane = `<div class="pane"><div class="col md" style="max-width:760px">${LOOK}</div>`;
+  else if (o.page === "lorem") pane = `<div class="pane"><div class="col md" style="max-width:${o.px}px">${LOREM}</div>`;
+  else if (o.page === "sheet") pane = `<div class="pane desk"><div class="desk-lbl">Example · not one of your files</div><div class="sheet md" style="max-width:${o.px}px">${EXAMPLE(o.px)}</div>`;
+  else pane = `<div class="pane"><div class="col md" style="max-width:${o.px}px">${EXAMPLE(o.px)}</div>`;
+  if (o.toast) pane += `<div class="tstack ${o.toast[2] ?? "bottom"}">${toast(o.toast[0], o.toast[1])}</div>`;
+  pane += (o.anno ?? "") + "</div>";
+  const [name, loc, ex] = o.title ?? ["look.md", "yamv / docs", false];
+  return `<div class="win" style="width:${W}px;height:${H}px;${vars(th)}">
+    <div class="titlebar"><span class="name ${ex ? "ex" : ""}">${name}</span><span>${loc}</span><span class="spacer"></span><span class="wbtn">${OPEN}</span><span class="wbtn ${o.pop ? "open" : ""}">${GLYPH}</span><span class="wbtn">${MORE}</span>${CTL}</div>
+    <div class="body">${pane}<div class="side" style="width:${TREE}px">${TREE_HTML}</div></div>${o.pop ? pop(o.pop) : ""}</div>`;
+}
+
+/* ---------- the lanes ---------- */
+const DRAG = { sel: 1, px: 600, held: true };
+const PICKED = { sel: 1, px: 800, inherited: "All documents" };
+const SAVED = { sel: 1, px: 600, reset: true };
+const TA = "<code>docs</code> has its own width, so look.md stays at 760 px";
+const TB = "Example only: look.md keeps the width saved for <code>docs</code>";
+const TC = "For <code>yamv (repo)</code> only; look.md keeps 760 px from <code>docs</code>";
+const EXTITLE = (px) => ["Example document", `yamv (repo) at ${px} px · look.md is unchanged`, true];
+
+const LANES = [
+  { q: "A", title: "Filler text with an Example tag; back the moment you let go",
+    cap: `The example is lorem ipsum under a small <b>Example</b> tag, in the page's own look, and it shows only while the slider is held; the toast, bottom centre, says why and then fades on its own timer. <span class="worst">Worst case:</span> the width you saved is seen only with the button down, a short nudge flashes the filler for an instant, and Latin words make a line look shorter or longer than English would.`,
+    facts: [["Example", "Lorem ipsum: headings, a list, a code block, filler text."], ["Marked by", "A small accent <b>Example</b> tag above the first heading; the filler itself."],
+      ["Appears", "On the first move of the slider on a segment that can't reach look.md."], ["Goes back", "At once when the slider is let go."], ["Toast", "Bottom centre, the usual place. Cause and effect, no mention of the example."]],
+    main: { page: "lorem", px: 600, pop: DRAG, toast: [TA, 100] }, toastText: TA,
+    steps: [
+      ["0 s", "yamv (repo) is clicked: nothing on the page changes yet.", { page: "doc", pop: PICKED }],
+      ["0.4 s", "The slider is dragged to 600 px: the example replaces look.md.", { page: "lorem", px: 600, pop: DRAG, toast: [TA, 100] }],
+      ["2.0 s", "Let go: look.md is back at once; the toast's 5 s start.", { page: "doc", pop: SAVED, toast: [TA, 92] }],
+      ["7.0 s", "The toast has faded. 600 px is saved for yamv (repo).", { page: "doc", pop: SAVED }],
+    ] },
+  { q: "B", pick: true, title: "A plain-words sheet on the chrome colour; stays a moment after you let go",
+    cap: `The pane turns the chrome colour and the example is a page-coloured sheet as wide as the dragged column, under the line “Example · not one of your files”; it stays a moment after release, then look.md comes back by itself. <span class="worst">Worst case:</span> the sheet reads like a print preview, a new mode, and for that moment after release the user waits to see their own document again.`,
+    facts: [["Example", "“Example document”: a sentence saying it is a sample, headings, a list, a code block holding the width, a link and inline code."],
+      ["Marked by", "The pane changes colour, the example sits on a sheet whose edges are the column's, and a muted line above it names it."],
+      ["Appears", "On the first move of the slider on a segment that can't reach look.md."], ["Goes back", "A moment after the slider is let go, with a short fade; a new drag in that moment keeps it."],
+      ["Toast", "Bottom centre, the usual place. Leads with “Example only”."]],
+    main: { page: "sheet", px: 600, pop: DRAG, toast: [TB, 100] }, toastText: TB,
+    steps: [
+      ["0.4 s", "The slider is dragged to 600 px: the sheet replaces look.md.", { page: "sheet", px: 600, pop: DRAG, toast: [TB, 100] }],
+      ["2.0 s", "Let go: the sheet stays at the saved 600 px; the toast's 5 s start.", { page: "sheet", px: 600, pop: SAVED, toast: [TB, 100] }],
+      ["3.5 s", "A moment later the sheet fades and look.md is back.", { page: "doc", pop: SAVED, toast: [TB, 70] }],
+      ["7.0 s", "The toast has faded. 600 px is saved for yamv (repo).", { page: "doc", pop: SAVED }],
+    ] },
+  { q: "C", title: "The example takes the title bar; stays while the segment is picked",
+    cap: `The example looks like any document, but the title bar names it “Example document” in accent italics; it appears as soon as an unreachable segment is picked and stays until the popover closes or <code>docs</code> is picked again, with the toast at the top. <span class="worst">Worst case:</span> look.md is hidden for as long as the popover sits on that segment, the tree still marks look.md as shown, and the top toast covers the example's first lines.`,
+    facts: [["Example", "“Example document”, as in B, drawn as an ordinary page."], ["Marked by", "The title bar: “Example document” in accent italics, and the location says look.md is unchanged."],
+      ["Appears", "As soon as an unreachable segment is picked, before any drag, at that segment's width."], ["Goes back", "When the popover closes or a segment that reaches look.md is picked."],
+      ["Toast", "Top centre, near the popover. Names the segment; no timer while the example is up."]],
+    main: { page: "plain", px: 600, pop: DRAG, toast: [TC, null, "top"], title: EXTITLE(600) }, toastText: TC,
+    steps: [
+      ["0 s", "yamv (repo) is clicked: the example appears at once, at its 800 px.", { page: "plain", px: 800, pop: PICKED, toast: [TC, null, "top"], title: EXTITLE(800) }],
+      ["0.4 s", "The slider is dragged to 600 px: the example follows.", { page: "plain", px: 600, pop: DRAG, toast: [TC, null, "top"], title: EXTITLE(600) }],
+      ["2.0 s", "Let go: the example stays, at the saved 600 px.", { page: "plain", px: 600, pop: SAVED, toast: [TC, null, "top"], title: EXTITLE(600) }],
+      ["Later", "Esc, a click outside or docs picked: look.md is back and the toast goes with the example.", { page: "doc" }],
+    ] },
+];
+
+function laneHtml(l) {
+  const facts = l.facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  const steps = l.steps.map(([t, ev, o]) => `<div class="step"><div class="t"><b>${t}</b><span>${ev}</span></div><div class="zoom" style="zoom:0.32">${win(o, "dark")}</div></div>`).join("");
+  return `<section><h2><span class="q">${l.q}</span>${l.title}${l.pick ? '<span class="pick">recommended</span>' : ""}</h2><p class="cap">${l.cap}</p>
+    <div class="main"><div class="zoom" style="zoom:0.72">${win(l.main, "dark")}</div>
+      <div class="side-col"><dl class="facts">${facts}</dl>
+        <div class="lbl-h">The toast at full size, Studio dark and light</div>
+        <div class="zoom"><div class="tdetail" style="${vars("dark")}">${toast(l.toastText, 100)}</div></div>
+        <div class="zoom" style="margin-top:10px"><div class="tdetail" style="${vars("light")}">${toast(l.toastText, 100)}</div></div>
+      </div></div>
+    <div class="seq-h">Lane ${l.q} in time · Studio dark</div><div class="seq">${steps}</div></section>`;
+}
+
+document.querySelector("[data-lanes]").innerHTML = LANES.map(laneHtml).join("");
+document.querySelector("[data-lights]").innerHTML = LANES.map((l) => `<div><h3>Lane ${l.q}</h3><div class="zoom" style="zoom:0.43">${win(l.main, "light")}</div></div>`).join("");
+</script>
+</body>
+</html>

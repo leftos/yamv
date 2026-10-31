@@ -54,4 +54,7 @@ How wide the document's text column is. It is a viewer setting and not part of t
 
 ## A width that cannot reach the document
 
-- Dragging the slider on a segment whose width cannot reach the shown document (a narrower folder nearer the document holds its own width, so the document would not change) previews the width on a temporary example document, shown in place of the page, with a small toast ([look.md](look.md)) explaining why the change will not apply to the current document. The example document, when it appears and goes back, and the toast wording and place are decided in a mock first; this is not built yet.
+- Dragging the slider on a segment whose width cannot reach the shown document (a narrower folder nearer the document holds its own width, so the document would not change) previews the width on a temporary example document, shown in place of the page, with a small toast ([look.md](look.md)) explaining why the change will not apply to the current document; this is not built yet. The chosen design is lane B of the [mock](mocks/width-unreachable-preview/index.html):
+  - The pane turns the chrome colour and shows a sheet as wide as the dragged column, headed "Example · not one of your files", whose text says in plain words that it is a sample; its code block shows the width being dragged.
+  - It appears when such a drag starts and fades back to the document a moment after the release; a new drag in that moment keeps it.
+  - The toast sits bottom centre, where every toast appears, with an accent "i" mark (nothing failed): "Example only: {document name} keeps the width saved for `{folder}`".

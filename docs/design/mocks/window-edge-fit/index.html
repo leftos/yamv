@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV window edge fit</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 48px 64px; background: #8a8f96; font-family: "Inter V", sans-serif; width: 1520px; color: #111; }
+h1.page { font: 600 30px/36px "Inter V"; color: #fff; margin: 0 0 8px; }
+p.page { color: #eef0f2; margin: 0 0 10px; font-size: 15.5px; line-height: 24px; max-width: 1380px; }
+.rec { margin: 16px 0 10px; padding: 12px 16px; border-radius: 8px; background: rgba(0,0,0,.24); color: #fff; font-size: 15.5px; line-height: 23px; max-width: 1380px; }
+.rec b { color: #bfe0ff; }
+.legend { display: flex; gap: 22px; flex-wrap: wrap; color: #eef0f2; font-size: 13px; margin: 14px 0 26px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { display: inline-block; width: 18px; height: 12px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.legend i.ghost { background: repeating-linear-gradient(135deg, #6c7178 0 3px, #4a4e54 3px 6px); }
+
+.grid { display: grid; grid-template-columns: repeat(3, 440px); column-gap: 32px; }
+.lanehead { padding-bottom: 14px; }
+.lanehead h2 { font: 650 20px/26px "Inter V"; color: #fff; margin: 0 0 6px; }
+.lanehead h2 .tag { font: 600 11px "Inter V"; letter-spacing: .06em; text-transform: uppercase; color: #0b2a4a; background: #bfe0ff; border-radius: 4px; padding: 2px 7px; margin-left: 8px; vertical-align: 3px; }
+.lanehead p { margin: 0 0 4px; color: #f1f3f5; font-size: 13.5px; line-height: 20px; }
+.lanehead p.worst { color: #ffe1c2; }
+.rowhead { grid-column: 1 / -1; font: 600 11.5px/14px "Inter V"; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9;
+           margin: 22px 0 10px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.28); }
+.cell { display: flex; flex-direction: column; align-items: flex-start; }
+.cell canvas { display: block; box-shadow: 0 0 0 1px rgba(0,0,0,.4); }
+.cell .cap { color: #eef0f2; font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV-100: where a window lands when it is pushed back on screen</h1>
+<p class="page">When YAMV reopens a window whose saved place hangs off a screen edge, it moves the window back onto the screen. This page shows where the window ends up in each lane: pushed into the bottom-right corner, then into the top-left corner. Each corner is shown once at true size and in close-up, where every square is one screen pixel. The theme is Studio dark on a plain dark desktop.</p>
+<div class="rec"><b>Recommended: B, frame flush.</b> The window sits where Windows itself puts a window you snap into a corner: its thin outline runs along the screen edge and the top of the taskbar. A window you place yourself and one YAMV moves back look the same, and none of the window spills onto a screen next to it.</div>
+<div class="legend">
+  <span><i style="background:#1d2633"></i>desktop</span>
+  <span><i style="background:#202020"></i>taskbar</span>
+  <span><i style="background:#3a3c40"></i>beyond the screen (monitor bezel)</span>
+  <span><i style="background:#4d525a"></i>window's thin outline</span>
+  <span><i class="ghost"></i>close-ups only: part of the window you cannot see (off the screen or under the taskbar)</span>
+</div>
+
+<div class="grid" id="grid">
+  <div class="lanehead">
+    <h2>Today</h2>
+    <p>The right end of the title bar and its close button run off the screen; the left side stops short of the screen edge, leaving a strip of desktop.</p>
+    <p class="worst">Worst case: with a second screen to the right, a sliver of the window shows on that screen.</p>
+  </div>
+  <div class="lanehead">
+    <h2>A · Content flush</h2>
+    <p>The window's content meets the screen edges and the taskbar exactly; its thin outline falls just off the screen, and under the taskbar.</p>
+    <p class="worst">Worst case: with a second screen beside it, the outline shows on that screen as a hairline.</p>
+  </div>
+  <div class="lanehead">
+    <h2>B · Frame flush<span class="tag">recommended</span></h2>
+    <p>The window's thin outline meets the screen edges and the taskbar, as when you snap a window into a corner; the content starts just inside it.</p>
+    <p class="worst">Worst case: none of the window is hidden or spills over; the outline hugs the screen edge.</p>
+  </div>
+</div>
+
+<script>
+const Z = 6;
+const C = {
+  page: "#0f1318", text: "#e6edf3", text2: "#c9d1d9", muted: "#8b949e", heading: "#f0f6fc", line: "#2a3139", chrome: "#0a0d11", side: "#0a0d11",
+  sel: "#182a40", accent: "#4493f8",
+  desk: "#1d2633", bezel: "#3a3c40", taskbar: "#202020", taskbarTop: "#3b3b3b", border: "#4d525a",
+};
+const SW = 5120, SH = 1440, WB = 1392; // screen width and height, working-area bottom (the taskbar's top row)
+const CW = 400;
+const LANES = [
+  { id: "today", br: { cx: SW + 8 - CW, cy: WB - 240, ch: 240 }, tl: { cx: 8, cy: 0, ch: 200 } },
+  { id: "a", br: { cx: SW - CW, cy: WB - 240, ch: 240 }, tl: { cx: 0, cy: 0, ch: 200 } },
+  { id: "b", br: { cx: SW - 1 - CW, cy: WB - 1 - 240, ch: 240 }, tl: { cx: 1, cy: 0, ch: 200 } },
+];
+const VIEWS = { br: { x0: SW - 424, y0: WB - 296, w: 440, h: 358 }, tl: { x0: -16, y0: -12, w: 440, h: 250 } };
+const ROWS = [
+  { kind: "scene", scene: "br", head: "Pushed into the bottom-right corner · true size", cap: "As it looks on the screen" },
+  { kind: "zoom", scene: "br", head: "Its close button against the right edge · close-up", cap: "Title bar's right end", crop: { x: SW - 56, y: "top", w: 68, h: 48 }, labels: ["offRightTop"] },
+  { kind: "zoom", scene: "br", head: "Its bottom-right corner on the taskbar · close-up", cap: "Window corner, screen edge and taskbar", crop: { x: SW - 56, y: WB - 24, w: 68, h: 32 }, labels: ["taskbar", "offRightBottom"] },
+  { kind: "scene", scene: "tl", head: "Pushed into the top-left corner · true size", cap: "As it looks on the screen" },
+  { kind: "zoom", scene: "tl", head: "Its top-left corner · close-up", cap: "Window corner and title bar start", crop: { x: -12, y: -8, w: 68, h: 48 }, labels: ["offTop"] },
+];
+const dpr = window.devicePixelRatio || 1;
+
+function canvas(w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; }
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r); ctx.closePath();
+}
+
+// The window: the client (cx, cy, CW, ch) plus Windows' 1 px outline on its left, right and bottom, with Windows 11's rounded corners.
+function drawWindow(ctx, { cx, cy, ch }) {
+  const fx = cx - 1, fy = cy, fw = CW + 2, fh = ch + 1;
+  ctx.save();
+  roundRectPath(ctx, fx, fy, fw, fh, 8); ctx.clip();
+  ctx.fillStyle = C.page; ctx.fillRect(fx, fy, fw, fh);
+  // tree sidebar on the right
+  const sx = cx + CW - 140;
+  ctx.fillStyle = C.side; ctx.fillRect(sx, cy + 38, cx + CW + 1 - sx, ch - 38);
+  ctx.fillStyle = C.line; ctx.fillRect(sx, cy + 38, 1, ch - 38);
+  ctx.font = '650 12.5px "Inter V"'; ctx.fillStyle = C.text; ctx.fillText("yamv", sx + 26, cy + 62);
+  ctx.font = '400 13px "Inter V"'; ctx.fillStyle = C.text2;
+  ctx.fillText("README.md", sx + 26, cy + 88);
+  ctx.fillStyle = C.sel; ctx.fillRect(sx + 8, cy + 98, 124, 26);
+  ctx.fillStyle = C.accent; ctx.fillRect(sx + 8, cy + 104, 3, 14);
+  ctx.fillStyle = C.text; ctx.fillText("MAIN.md", sx + 26, cy + 115);
+  ctx.fillStyle = C.text2; ctx.fillText("notes.md", sx + 26, cy + 142);
+  // document
+  ctx.font = '700 21px "Inter V"'; ctx.fillStyle = C.heading; ctx.fillText("Release checklist", cx + 26, cy + 76);
+  ctx.font = '400 13.5px "Inter V"'; ctx.fillStyle = C.text;
+  ["YAMV ships as a single", "executable on Windows", "and an app bundle on", "macOS. Before tagging a", "release, walk through it."]
+    .forEach((t, i) => ctx.fillText(t, cx + 26, cy + 104 + i * 21));
+  // title bar
+  ctx.fillStyle = C.chrome; ctx.fillRect(fx, cy, fw, 38);
+  ctx.fillStyle = C.line; ctx.fillRect(fx, cy + 37, fw, 1);
+  ctx.font = '600 12.5px "Inter V"'; ctx.fillStyle = C.text; ctx.fillText("MAIN.md", cx + 14, cy + 23);
+  ctx.font = '500 12.5px "Inter V"'; ctx.fillStyle = C.muted; ctx.fillText("yamv / docs / plans", cx + 14 + ctx.measureText("MAIN.md").width + 14, cy + 23);
+  drawCaptionButtons(ctx, cx + CW, cy);
+  ctx.restore();
+  // the outline, over the client's edge on top, outside it on the other three sides
+  ctx.save();
+  ctx.strokeStyle = C.border; ctx.lineWidth = 1;
+  roundRectPath(ctx, fx + 0.5, fy + 0.5, fw - 1, fh - 1, 7.5); ctx.stroke();
+  ctx.restore();
+}
+
+function drawCaptionButtons(ctx, right, top) {
+  ctx.fillStyle = C.muted;
+  [0, 4, 8].forEach((d) => ctx.fillRect(right - 142 - 22 + d, top + 18, 2, 2)); // the ⋯ menu
+  ctx.strokeStyle = C.text; ctx.lineWidth = 1;
+  const mid = (i) => right - 142 + i * 47 + 23.5; // minimise, maximise, close: 47 + 47 + 48 wide
+  const gy = top + 14;
+  ctx.beginPath(); ctx.moveTo(Math.round(mid(0) - 5), gy + 5.5); ctx.lineTo(Math.round(mid(0) + 5), gy + 5.5); ctx.stroke();
+  ctx.strokeRect(Math.round(mid(1) - 5) + 0.5, gy + 0.5, 9, 9);
+  const x0 = Math.round(right - 48 + 24 - 5);
+  ctx.beginPath(); ctx.moveTo(x0, gy); ctx.lineTo(x0 + 10, gy + 10); ctx.moveTo(x0 + 10, gy); ctx.lineTo(x0, gy + 10); ctx.stroke();
+}
+
+function drawTaskbar(ctx) {
+  ctx.fillStyle = C.taskbar; ctx.fillRect(0, WB, SW, SH - WB);
+  ctx.fillStyle = C.taskbarTop; ctx.fillRect(0, WB, SW, 1);
+  ctx.fillStyle = "#ffffff"; ctx.font = '400 12px "Inter V"'; ctx.textAlign = "right";
+  ctx.fillText("10:42", SW - 16, WB + 20); ctx.fillText("31/10/2026", SW - 16, WB + 37);
+  ctx.textAlign = "left";
+  ctx.strokeStyle = "#d6d6d6"; ctx.lineWidth = 1.4;
+  const ix = SW - 150, iy = WB + 24;
+  ctx.beginPath(); ctx.arc(ix, iy + 4, 7, -2.4, -0.74); ctx.stroke(); // wifi
+  ctx.beginPath(); ctx.arc(ix, iy + 4, 3.5, -2.4, -0.74); ctx.stroke();
+  ctx.fillStyle = "#d6d6d6"; ctx.fillRect(ix + 16, iy - 3, 4, 6); // speaker
+  ctx.beginPath(); ctx.moveTo(ix + 20, iy - 3); ctx.lineTo(ix + 25, iy - 7); ctx.lineTo(ix + 25, iy + 7); ctx.lineTo(ix + 20, iy + 3); ctx.fill();
+  ctx.strokeRect(ix + 34.5, iy - 4.5, 14, 9); ctx.fillRect(ix + 49, iy - 2, 2, 4); ctx.fillRect(ix + 36, iy - 3, 9, 6); // battery
+  ctx.beginPath(); ctx.moveTo(ix - 34, iy + 2); ctx.lineTo(ix - 30, iy - 2); ctx.lineTo(ix - 26, iy + 2); ctx.stroke(); // ^ tray chevron
+}
+
+// One corner of the screen at true size. With ghost, the window's hidden pixels (off the screen, under the taskbar) are drawn faded too,
+// and the mask of those pixels is returned for the close-up's hatching.
+function renderScene(sceneId, lane, ghost) {
+  const v = VIEWS[sceneId];
+  const out = canvas(v.w, v.h), ctx = out.getContext("2d");
+  const win = canvas(v.w, v.h), wctx = win.getContext("2d");
+  wctx.translate(-v.x0, -v.y0); drawWindow(wctx, lane[sceneId]);
+  ctx.fillStyle = C.bezel; ctx.fillRect(0, 0, v.w, v.h);
+  ctx.save(); ctx.translate(-v.x0, -v.y0);
+  ctx.beginPath(); ctx.rect(0, 0, SW, SH); ctx.clip();
+  ctx.fillStyle = C.desk; ctx.fillRect(0, 0, SW, SH);
+  ctx.restore();
+  ctx.save(); ctx.translate(-v.x0, -v.y0); ctx.beginPath(); ctx.rect(0, 0, SW, WB); ctx.clip();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(win, 0, 0); ctx.restore();
+  ctx.save(); ctx.translate(-v.x0, -v.y0); ctx.beginPath(); ctx.rect(0, 0, SW, SH); ctx.clip(); drawTaskbar(ctx); ctx.restore();
+  if (!ghost) return { out };
+  const mask = canvas(v.w, v.h), mctx = mask.getContext("2d");
+  mctx.drawImage(win, 0, 0);
+  mctx.globalCompositeOperation = "destination-in";
+  mctx.translate(-v.x0, -v.y0);
+  mctx.beginPath(); mctx.rect(v.x0, v.y0, v.w, v.h); mctx.rect(0, 0, SW, WB); mctx.fill("evenodd");
+  ctx.globalAlpha = 0.5; ctx.drawImage(mask, 0, 0); ctx.globalAlpha = 1;
+  return { out, mask };
+}
+
+function sceneCell(sceneId, lane) {
+  const { out } = renderScene(sceneId, lane, false);
+  out.style.width = out.width / dpr + "px"; out.style.height = out.height / dpr + "px";
+  return out;
+}
+
+function zoomCell(row, lane) {
+  const v = VIEWS[row.scene];
+  const { out, mask } = renderScene(row.scene, lane, true);
+  const crop = { ...row.crop, y: row.crop.y === "top" ? lane[row.scene].cy - 6 : row.crop.y };
+  const k = Math.max(1, Math.round(Z * dpr));
+  const zc = canvas(crop.w * k, crop.h * k), z = zc.getContext("2d");
+  z.imageSmoothingEnabled = false;
+  const sx = crop.x - v.x0, sy = crop.y - v.y0;
+  z.drawImage(out, sx, sy, crop.w, crop.h, 0, 0, zc.width, zc.height);
+  const hatch = canvas(zc.width, zc.height), h = hatch.getContext("2d");
+  h.strokeStyle = "rgba(255,255,255,.38)"; h.lineWidth = Math.max(1, k / 4);
+  for (let d = -zc.height; d < zc.width; d += k) { h.beginPath(); h.moveTo(d, zc.height); h.lineTo(d + zc.height, 0); h.stroke(); }
+  h.globalCompositeOperation = "destination-in"; h.imageSmoothingEnabled = false;
+  h.drawImage(mask, sx, sy, crop.w, crop.h, 0, 0, zc.width, zc.height);
+  z.drawImage(hatch, 0, 0);
+  drawLabels(z, row.labels, crop, k);
+  zc.style.width = zc.width / dpr + "px"; zc.style.height = zc.height / dpr + "px";
+  return zc;
+}
+
+function drawLabels(z, labels, crop, k) {
+  const px = (x) => (x - crop.x) * k, py = (y) => (y - crop.y) * k;
+  z.font = `600 ${Math.round(11 * dpr)}px "Inter V"`; z.textAlign = "center"; z.textBaseline = "middle";
+  const label = (t, x, y, color) => { z.fillStyle = color; z.fillText(t, x, y); };
+  for (const l of labels) {
+    if (l === "offRightTop") { label("off", (px(SW) + px(crop.x + crop.w)) / 2, py(crop.y) + 1.6 * k, "#c9ccd1"); label("screen", (px(SW) + px(crop.x + crop.w)) / 2, py(crop.y) + 3.9 * k, "#c9ccd1"); }
+    if (l === "offRightBottom") { label("off", (px(SW) + px(crop.x + crop.w)) / 2, py(WB + 3.2), "#c9ccd1"); label("screen", (px(SW) + px(crop.x + crop.w)) / 2, py(WB + 6.2), "#c9ccd1"); }
+    if (l === "taskbar") { z.textAlign = "left"; label("taskbar", px(crop.x + 2), py(WB + 5), "#a9a9a9"); z.textAlign = "center"; }
+    if (l === "offTop") { label("off screen", px(crop.x + 44), py(-4), "#c9ccd1"); }
+  }
+}
+
+async function main() {
+  await Promise.all(['400 13px "Inter V"', '500 12.5px "Inter V"', '600 12.5px "Inter V"', '650 12.5px "Inter V"', '700 21px "Inter V"']
+    .map((f) => document.fonts.load(f)));
+  const grid = document.getElementById("grid");
+  for (const row of ROWS) {
+    const head = document.createElement("div"); head.className = "rowhead"; head.textContent = row.head; grid.appendChild(head);
+    for (const lane of LANES) {
+      const cell = document.createElement("div"); cell.className = "cell";
+      cell.appendChild(row.kind === "scene" ? sceneCell(row.scene, lane) : zoomCell(row, lane));
+      const cap = document.createElement("div"); cap.className = "cap"; cap.textContent = row.cap; cell.appendChild(cap);
+      grid.appendChild(cell);
+    }
+  }
+  document.body.dataset.ready = "1";
+}
+main();
+</script>
+</body>
+</html>

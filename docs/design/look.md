@@ -24,7 +24,9 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
   The title is "Open {name}?" and the buttons are Open and Cancel; the body says what it is and what will open it, e.g. "It's a PowerShell script (.ps1). YAMV doesn't show this type; it will open with the app Windows uses for it." An unlisted type reads "It's a .xyz file.", no extension "It's a file with no type.", a folder "It's a folder. YAMV doesn't show folders; it will open in Explorer." (Finder on a Mac, where a folder with an extension, such as a `.app`, is worded by that extension).
 
   Cancel has the focus. Esc and Enter cancel, Enter opens only with the focus on Open, and a click on the scrim does nothing. A document switch, minimising, closing the window or a newer link click cancels the card. It is its own window over the page, as the toast is.
-- **Tail** (the spec for a switch not built yet; the mock is pending): a document short enough to fit in the view is at both its top and its bottom, and on a reload the top pin wins, so a short file that grows stays at its top. A **Tail** switch the user turns on makes the view follow appended text instead, as `tail -f` does. Where the switch lives, whether it is per document or per window, whether it persists in `session.json` and what turns it off are decided in the mock.
+- **Tail** (the spec for a switch not built yet; [mock](mocks/tail-switch/index.html), lane A): a document short enough to fit in the view is at both its top and its bottom, and on a reload the top pin wins, so a short file that grows stays at its top. A **Tail** switch the user turns on makes the view follow appended text instead, as `tail -f` does.
+
+  The switch is a **Tail** button in the title-bar tools, between `⟷` and `⋯`, with Ctrl+T (⌘T on macOS). It is per document and remembered across restarts, and lit while following. Scrolling up only pauses it: the button loses its fill and a "↓ {n} new lines" pill appears over the page's bottom. The pill, or scrolling back to the bottom, resumes following; only the button or the shortcut turns it off.
 
 ## Tree
 
