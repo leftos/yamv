@@ -603,6 +603,7 @@
                       <Ellipse Canvas.Left="7.05" Canvas.Top="3.95" Width="1.9" Height="1.9" Fill="{DynamicResource YamvAccent}" />
                     </Canvas>
                   </Viewbox>
+                  <!-- csharpier-ignore -->
                   <TextBlock
                     x:Name="MissingNoteText"
                     FontSize="11.5"

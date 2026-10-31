@@ -109,7 +109,9 @@
           <Border Classes="fill" />
           <StackPanel>
             <Viewbox Classes="ico">
-              <Canvas Width="14" Height="14"><Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" /></Canvas>
+              <Canvas Width="14" Height="14">
+                <Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" />
+              </Canvas>
             </Viewbox>
             <TextBlock Text="README.md" />
           </StackPanel>
@@ -119,7 +121,9 @@
           <Border Width="3" Margin="0,5" CornerRadius="2" HorizontalAlignment="Left" Background="{DynamicResource YamvAccent}" />
           <StackPanel>
             <Viewbox Classes="ico">
-              <Canvas Width="14" Height="14"><Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" /></Canvas>
+              <Canvas Width="14" Height="14">
+                <Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" />
+              </Canvas>
             </Viewbox>
             <TextBlock Text="Release checklist.md" />
           </StackPanel>
@@ -128,7 +132,9 @@
           <Border Classes="fill" />
           <StackPanel>
             <Viewbox Classes="ico">
-              <Canvas Width="14" Height="14"><Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" /></Canvas>
+              <Canvas Width="14" Height="14">
+                <Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" />
+              </Canvas>
             </Viewbox>
             <TextBlock Text="notes.md" />
           </StackPanel>
@@ -137,7 +143,9 @@
           <Border Classes="fill" />
           <StackPanel>
             <Viewbox Classes="ico">
-              <Canvas Width="14" Height="14"><Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" /></Canvas>
+              <Canvas Width="14" Height="14">
+                <Path Data="M3,1.5 H8 L11,4.5 V12.5 H3 Z" StrokeThickness="1" />
+              </Canvas>
             </Viewbox>
             <TextBlock Text="plans.md" />
           </StackPanel>
@@ -161,8 +169,14 @@
           Inline elements sit on one line each: XAML turns the whitespace between them into a space. The inline code is a run
           with a background, padded with narrow no-break spaces, since a run has no padding and a container breaks the line box.
         -->
+        <!-- csharpier-ignore -->
         <TextBlock Classes="body" Margin="0,0,0,11.7"><Run Text="YAMV ships as one executable. Read " /><Run x:Name="Link" Text="the release notes" Foreground="{DynamicResource YamvAccent}" /><Run Text=" before tagging, then run " /><Run Text="&#x202F;publish.ps1&#x202F;" FontFamily="{DynamicResource YamvPreviewMonoFont}" FontSize="10.92" Background="{DynamicResource YamvCodeBackground}" /><Run Text=" from the repo root." /></TextBlock>
-        <Border Margin="0,18.9,0,8.6" Padding="0,0,0,5.15" BorderBrush="{DynamicResource YamvLine}" BorderThickness="{DynamicResource YamvPreviewH2Rule}">
+        <Border
+          Margin="0,18.9,0,8.6"
+          Padding="0,0,0,5.15"
+          BorderBrush="{DynamicResource YamvLine}"
+          BorderThickness="{DynamicResource YamvPreviewH2Rule}"
+        >
           <TextBlock Classes="heading" Text="Build" FontSize="17.16" LineHeight="21.45" />
         </Border>
         <Border
@@ -174,6 +188,7 @@
           BorderBrush="{DynamicResource YamvCodeLine}"
           ClipToBounds="True"
         >
+          <!-- csharpier-ignore -->
           <TextBlock Classes="mono" FontSize="10.8" LineHeight="17.28"><Run Text="// Publish both targets" FontStyle="Italic" Foreground="{DynamicResource YamvSyntaxComment}" /><LineBreak /><Run Text="foreach" Foreground="{DynamicResource YamvSyntaxKeyword}" /><Run Text=" (" /><Run Text="var" Foreground="{DynamicResource YamvSyntaxKeyword}" /><Run Text=" rid " /><Run Text="in" Foreground="{DynamicResource YamvSyntaxKeyword}" /><Run Text=" Rids)" /><LineBreak /><Run Text="    " /><Run Text="Publish" Foreground="{DynamicResource YamvSyntaxType}" /><Run Text="(rid, " /><Run Text="&quot;Release&quot;" Foreground="{DynamicResource YamvSyntaxString}" /><Run Text=", " /><Run Text="3" Foreground="{DynamicResource YamvSyntaxNumber}" /><Run Text=");" /></TextBlock>
         </Border>
         <Border Padding="13,1.3,0,1.3" BorderThickness="3,0,0,0" BorderBrush="{DynamicResource YamvQuote}">

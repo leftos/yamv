@@ -96,27 +96,16 @@
                   <Border Width="30" Height="20" CornerRadius="3" ClipToBounds="True">
                     <Grid x:Name="NoticeChipGrid" ColumnDefinitions="*,*">
                       <Panel x:Name="NoticeChipLight" Grid.Column="0">
-                        <Border
-                          x:Name="NoticeChipLightBar"
-                          Height="2"
-                          Margin="3,0,3,2"
-                          CornerRadius="1"
-                          VerticalAlignment="Bottom"
-                        />
+                        <Border x:Name="NoticeChipLightBar" Height="2" Margin="3,0,3,2" CornerRadius="1" VerticalAlignment="Bottom" />
                       </Panel>
                       <Panel x:Name="NoticeChipDark" Grid.Column="1">
-                        <Border
-                          x:Name="NoticeChipDarkBar"
-                          Height="2"
-                          Margin="3,0,3,2"
-                          CornerRadius="1"
-                          VerticalAlignment="Bottom"
-                        />
+                        <Border x:Name="NoticeChipDarkBar" Height="2" Margin="3,0,3,2" CornerRadius="1" VerticalAlignment="Bottom" />
                       </Panel>
                     </Grid>
                   </Border>
                 </Border>
                 <StackPanel VerticalAlignment="Center" Spacing="2">
+                  <!-- csharpier-ignore -->
                   <TextBlock x:Name="NoticeLine" FontSize="13" TextWrapping="Wrap" Foreground="{DynamicResource YamvText}"><Run x:Name="NoticeNameRun" FontWeight="SemiBold" /><Run x:Name="NoticeDetailRun" FontSize="12" FontWeight="Normal" Foreground="{DynamicResource YamvTextMuted}" /></TextBlock>
                   <TextBlock
                     x:Name="NoticePath"
@@ -151,13 +140,7 @@
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="x:String">
                         <DockPanel Margin="0,0,0,4">
-                          <TextBlock
-                            DockPanel.Dock="Left"
-                            Text="•"
-                            Width="12"
-                            FontSize="12"
-                            Foreground="{DynamicResource YamvTextSecondary}"
-                          />
+                          <TextBlock DockPanel.Dock="Left" Text="•" Width="12" FontSize="12" Foreground="{DynamicResource YamvTextSecondary}" />
                           <TextBlock
                             Text="{Binding}"
                             FontFamily="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace"
@@ -173,13 +156,7 @@
                 </StackPanel>
               </DockPanel>
             </Border>
-            <TextBlock
-              Text="A theme file can change:"
-              Margin="0,0,0,10"
-              FontSize="13"
-              LineHeight="19.5"
-              Foreground="{DynamicResource YamvText}"
-            />
+            <TextBlock Text="A theme file can change:" Margin="0,0,0,10" FontSize="13" LineHeight="19.5" Foreground="{DynamicResource YamvText}" />
             <StackPanel Margin="0,0,0,12" Spacing="4">
               <DockPanel>
                 <TextBlock DockPanel.Dock="Left" Text="•" Width="14" FontSize="13" Foreground="{DynamicResource YamvTextSecondary}" />
@@ -202,13 +179,7 @@
                 />
               </DockPanel>
             </StackPanel>
-            <Border
-              x:Name="NoticeSafe"
-              Padding="11,9"
-              Margin="0,0,0,10"
-              CornerRadius="8"
-              Background="{DynamicResource YamvCodeBackground}"
-            >
+            <Border x:Name="NoticeSafe" Padding="11,9" Margin="0,0,0,10" CornerRadius="8" Background="{DynamicResource YamvCodeBackground}">
               <DockPanel>
                 <Viewbox Width="14" Height="14" DockPanel.Dock="Left" Margin="0,2,9,0" VerticalAlignment="Top">
                   <Canvas Width="16" Height="16">

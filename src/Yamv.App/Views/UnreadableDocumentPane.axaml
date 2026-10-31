@@ -34,12 +34,7 @@
       >
         <Viewbox Width="22" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center">
           <Canvas Width="16" Height="16">
-            <Path
-              Data="M8 1.6 15 14H1z"
-              Stroke="{DynamicResource YamvWarning}"
-              StrokeThickness="1.4"
-              StrokeJoin="Round"
-            />
+            <Path Data="M8 1.6 15 14H1z" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.4" StrokeJoin="Round" />
             <Path Data="M8 6v4" Stroke="{DynamicResource YamvWarning}" StrokeThickness="1.5" StrokeLineCap="Round" />
             <Ellipse Canvas.Left="7.1" Canvas.Top="11.2" Width="1.8" Height="1.8" Fill="{DynamicResource YamvWarning}" />
           </Canvas>
@@ -75,13 +70,7 @@
         Margin="0,12,0,0"
       />
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,20,0,0">
-        <Button
-          x:Name="RetryButton"
-          Classes="pane"
-          Content="Retry"
-          Command="{Binding ReloadCommand}"
-          AutomationProperties.Name="Retry"
-        />
+        <Button x:Name="RetryButton" Classes="pane" Content="Retry" Command="{Binding ReloadCommand}" AutomationProperties.Name="Retry" />
         <Button
           x:Name="RemoveButton"
           Classes="pane"
