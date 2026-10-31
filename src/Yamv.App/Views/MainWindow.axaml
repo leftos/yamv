@@ -271,7 +271,7 @@
         </Popup>
         <!--
           The confirm card: a native popup over the web view, its scrim sized to the document pane, so the title bar and tree stay
-          as they are. It takes focus, so Enter and Esc reach it, and only the card's own answers close it.
+          as they are. It takes focus when shown; while it is up the page forwards Enter and Esc, so they reach it wherever focus is.
         -->
         <Popup
           x:Name="ConfirmPopup"

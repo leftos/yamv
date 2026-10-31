@@ -160,6 +160,29 @@ public sealed class DocumentViewScrollMessageTests
             return Task.CompletedTask;
         });
 
+    [Theory]
+    [InlineData(true, "window.yamv.setCardOpen(true)")]
+    [InlineData(false, "window.yamv.setCardOpen(false)")]
+    public void The_card_open_script_names_the_page_function_the_page_defines(bool open, string script) =>
+        Assert.Equal(script, DocumentView.CardOpenScript(open));
+
+    [Fact]
+    public Task A_page_that_loads_again_is_told_again_that_a_card_is_up() =>
+        Headless.RunAsync(async () =>
+        {
+            var log = new RecordingAppLog();
+            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"));
+            view.Handle(Parse("""{"type":"ready"}"""));
+            await view.SetCardOpenAsync(true);
+            int Told() => log.Entries.Count(entry => entry.Message.Contains("window.yamv.setCardOpen(true)", StringComparison.Ordinal));
+            int before = Told();
+
+            view.Handle(Parse("""{"type":"ready"}"""));
+
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(before + 1, Told());
+        });
+
     [Fact]
     public void Render_options_reach_the_page_under_the_names_it_reads()
     {

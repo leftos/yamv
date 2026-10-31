@@ -1359,6 +1359,20 @@ public sealed class MainWindowTests
         });
 
     [Fact]
+    public Task Closing_the_window_with_the_card_up_scripts_the_page_no_further() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            _ = fixture.AskCard();
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.Equal([true], fixture.Surface.CardOpens);
+        });
+
+    [Fact]
     public Task The_card_defaults_to_Cancel() =>
         Headless.RunAsync(async () =>
         {
@@ -1485,6 +1499,41 @@ public sealed class MainWindowTests
 
             Assert.False(fixture.Window.ConfirmPopup.IsOpen);
             Assert.False(await asked);
+        });
+
+    [Theory]
+    [InlineData("Escape", false)]
+    [InlineData("Enter", false)]
+    [InlineData("Enter", true)]
+    public Task A_key_the_page_forwards_cancels_the_card(string key, bool ctrl) =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+
+            fixture.Surface.RaiseKey(new KeyForwardedEventArgs(key, ctrl: ctrl, meta: false, shift: false, alt: false));
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+        });
+
+    [Fact]
+    public Task Opening_the_card_tells_the_page_and_closing_it_tells_it_again() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+
+            Assert.Equal([true], fixture.Surface.CardOpens);
+
+            fixture.Window.ConfirmCardQuestion!.Cancel();
+            fixture.Settle();
+            Assert.False(await asked);
+
+            Assert.Equal([true, false], fixture.Surface.CardOpens);
         });
 
     [Fact]

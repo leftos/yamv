@@ -23,9 +23,12 @@ public sealed class FakeDocumentSurface : IDocumentSurface
     /// <summary>Every width passed to <see cref="SetContentWidthAsync"/>, oldest first; null is Full.</summary>
     public List<double?> ContentWidths { get; } = [];
 
+    /// <summary>Every value passed to <see cref="SetCardOpenAsync"/>, oldest first.</summary>
+    public List<bool> CardOpens { get; } = [];
+
     /// <summary>
-    /// Every recorded call in the order it came: a <see cref="ShownDocument"/>, a <see cref="ContentWidthSet"/> or a
-    /// <see cref="ThemeCssSet"/>.
+    /// Every recorded call in the order it came: a <see cref="ShownDocument"/>, a <see cref="ContentWidthSet"/>, a
+    /// <see cref="ThemeCssSet"/> or a <see cref="CardOpenSet"/>.
     /// </summary>
     public List<object> Calls { get; } = [];
 
@@ -85,6 +88,13 @@ public sealed class FakeDocumentSurface : IDocumentSurface
         Calls.Add(new ContentWidthSet(px));
         await Completion();
         return !ScriptsFail;
+    }
+
+    public Task SetCardOpenAsync(bool open)
+    {
+        CardOpens.Add(open);
+        Calls.Add(new CardOpenSet(open));
+        return Task.CompletedTask;
     }
 
     private Task Completion()
@@ -157,3 +167,6 @@ public sealed record ContentWidthSet(double? Px);
 
 /// <summary>One <see cref="FakeDocumentSurface.SetThemeCssAsync"/> call.</summary>
 public sealed record ThemeCssSet(string Css);
+
+/// <summary>One <see cref="IDocumentSurface.SetCardOpenAsync"/> call.</summary>
+public sealed record CardOpenSet(bool Open);

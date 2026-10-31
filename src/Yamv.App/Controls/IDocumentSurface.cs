@@ -42,6 +42,12 @@ public interface IDocumentSurface
     Task<bool> SetContentWidthAsync(double? px);
 
     /// <summary>
+    /// Tells the page whether a confirm card is up over it, so it holds Escape and Enter and forwards them as keys while one
+    /// is. A page that loads again is told again.
+    /// </summary>
+    Task SetCardOpenAsync(bool open);
+
+    /// <summary>
     /// Scrolls the shown document to the element whose id is <paramref name="fragment"/>, without a render; the fragment is
     /// already decoded (by <c>LinkPolicy</c>). A missing id does nothing.
     /// </summary>

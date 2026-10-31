@@ -13,8 +13,8 @@ namespace Yamv.App.Controls;
 /// Shows rendered markdown in one native web view. The page template loads once; every document after that is
 /// swapped in by script. The page never navigates: links, new windows and shortcuts come back as events. When the
 /// native view is destroyed and created again (the control leaves the visual tree and comes back), the template loads
-/// again and the latest document, theme and content width are replayed into it. Every public member must be called on
-/// the UI thread, and every event is raised there.
+/// again and the latest document, theme, content width and confirm card flag are replayed into it. Every public member
+/// must be called on the UI thread, and every event is raised there.
 /// </summary>
 public sealed class DocumentView : UserControl, IDocumentSurface
 {
@@ -143,6 +143,19 @@ public sealed class DocumentView : UserControl, IDocumentSurface
 
     private static string ContentWidthScript(string width) => $"window.yamv.setContentWidth({Json(width)})";
 
+    /// <summary>
+    /// Tells the page whether a confirm card is up over it, so it holds Escape and Enter for the card. The page keeps the
+    /// flag, and a page that loads again is told again, so its keys keep working after a reload.
+    /// </summary>
+    public Task SetCardOpenAsync(bool open)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        return RunAsync(CallKind.CardOpen, "setCardOpen", CardOpenScript(open));
+    }
+
+    /// <summary>The script that tells the page whether a confirm card is up; a page that loads again replays it.</summary>
+    internal static string CardOpenScript(bool open) => $"window.yamv.setCardOpen({(open ? "true" : "false")})";
+
     /// <summary>The CSS value of a content width: <c>"760px"</c>, or <c>"none"</c> for full width.</summary>
     private static string CssWidth(double? px, string parameterName)
     {
@@ -248,9 +261,9 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         };
 
     /// <summary>
-    /// Runs <paramref name="script"/> once the page is ready. Until then calls queue in order; a newer show, theme or
-    /// content width takes the place of the queued one of its kind, whose task completes without running. The latest
-    /// call of each of those kinds is also kept, to replay into a page that loads again.
+    /// Runs <paramref name="script"/> once the page is ready. Until then calls queue in order; a newer show, theme,
+    /// content width or confirm card flag takes the place of the queued one of its kind, whose task completes without
+    /// running. The latest call of each of those kinds is also kept, to replay into a page that loads again.
     /// </summary>
     private Task<ScriptOutcome> RunAsync(CallKind kind, string name, string script)
     {
@@ -562,6 +575,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         Show,
         Theme,
         ContentWidth,
+        CardOpen,
         Other,
     }
 

@@ -282,6 +282,69 @@ try {
   keys = await pressLayout({ key: "[", code: "BracketLeft", ctrlKey: true, altKey: true });
   check("Ctrl+Alt+[ without AltGr is neither forwarded nor blocked", keys.forwarded.length === 0 && !keys.seen.at(-1).prevented, keys);
 
+  // A confirm card up over the page holds Escape and Enter, wherever focus sits, and posts each as a key. The page stops
+  // these two where it sees them, before the find field's own handler, so they are recorded at the window, where a
+  // listener added now runs after the page's and sees the page's preventDefault.
+  await page.evaluate(() => {
+    window.__cardKeys = [];
+    window.addEventListener("keydown", (event) => {
+      window.__cardKeys.push({ key: event.key, prevented: event.defaultPrevented });
+    }, true);
+  });
+  const pressCardKey = async (combo) => {
+    await clearMessages();
+    await page.evaluate(() => { window.__cardKeys = []; });
+    if (combo.startsWith("AltGraph+")) {
+      // Playwright cannot press AltGr, so the page gets the event it sends for it, as the checks above do.
+      await page.evaluate((key) => {
+        document.body.dispatchEvent(new KeyboardEvent("keydown", { key, modifierAltGraph: true, bubbles: true, cancelable: true }));
+      }, combo.slice("AltGraph+".length));
+    } else {
+      await page.keyboard.press(combo);
+    }
+    return {
+      forwarded: (await messages()).filter((message) => message.type === "key"),
+      seen: await page.evaluate(() => window.__cardKeys),
+    };
+  };
+  await page.evaluate(() => window.yamv.setCardOpen(true));
+  for (const combo of ["Escape", "Enter", "Control+Enter", "Shift+Escape", "AltGraph+Enter"]) {
+    const cardKey = combo.split("+").at(-1);
+    keys = await pressCardKey(combo);
+    check(
+      `${combo} with the card up is forwarded once and blocked`,
+      keys.forwarded.length === 1
+        && keys.forwarded[0].key === cardKey
+        && keys.forwarded[0].ctrl === combo.startsWith("Control+")
+        && keys.seen.at(-1).prevented,
+      keys,
+    );
+  }
+  await page.evaluate(() => {
+    window.yamv.setCardOpen(false);
+    document.getElementById("link").focus();
+  });
+  keys = await pressCardKey("Enter");
+  const openLinks = (await messages()).filter((message) => message.type === "link");
+  check("Enter on a focused link with no card up posts one link", openLinks.length === 1 && openLinks[0].href === "other.md", { keys, openLinks });
+  await page.evaluate(() => window.yamv.setCardOpen(true));
+  keys = await pressCardKey("Enter");
+  const cardLinks = (await messages()).filter((message) => message.type === "link");
+  check("Enter on a focused link with the card up posts no link", cardLinks.length === 0 && keys.forwarded.length === 1, { keys, cardLinks });
+  await page.evaluate(() => window.yamv.openFind());
+  keys = await pressCardKey("Escape");
+  const findBarStaysOpen = await page.evaluate(() => !document.getElementById("yamv-findbar").hidden);
+  check(
+    "Escape with the find bar open and the card up is forwarded and leaves the bar open",
+    keys.forwarded.length === 1 && keys.forwarded[0].key === "Escape" && findBarStaysOpen,
+    { keys, findBarStaysOpen },
+  );
+  await page.evaluate(() => {
+    window.yamv.setCardOpen(false);
+    window.yamv.clearFind();
+    document.getElementById("yamv-findbar").hidden = true;
+  });
+
   // The content width is the text measure: the column's box adds its 44 px side paddings.
   await page.setViewportSize({ width: 1200, height: 800 });
   const widthOf = () => page.evaluate(() => {

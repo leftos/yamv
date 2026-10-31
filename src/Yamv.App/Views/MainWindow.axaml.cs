@@ -60,6 +60,7 @@ public partial class MainWindow : Window
     private double _sidebarWidth = DefaultSidebarWidth;
     private bool _sidebarShown = true;
     private bool _opened;
+    private bool _closing;
     private bool _boundsUpdatePosted;
     private WindowBounds? _normalBounds;
     private double _reportedSidebarWidth;
@@ -588,6 +589,13 @@ public partial class MainWindow : Window
         {
             ConfirmCard.EndShow();
         }
+
+        // The page holds Escape and Enter for the card while it is up, wherever native focus sits; a closing window's page
+        // is told nothing, since it is going away with the card.
+        if (!_closing)
+        {
+            _ = _surface!.SetCardOpenAsync(card.IsOpen);
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -660,7 +668,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnKeyForwarded(object? sender, KeyForwardedEventArgs e) => RunShortcut(e.Key, e.Ctrl, e.Meta, e.Shift, e.Alt);
+    /// <summary>A key the page forwarded: with a card up, Escape and Enter answer the card before any shortcut runs.</summary>
+    private void OnKeyForwarded(object? sender, KeyForwardedEventArgs e)
+    {
+        if (_confirmCard!.IsOpen && e.Key is "Escape" or "Enter")
+        {
+            _confirmCard.Cancel();
+            return;
+        }
+
+        RunShortcut(e.Key, e.Ctrl, e.Meta, e.Shift, e.Alt);
+    }
 
     /// <summary>
     /// The key's name as the page forwards it, for the keys a shortcut uses; else null. <c>[</c> and <c>]</c> are the physical
@@ -1123,6 +1141,7 @@ public partial class MainWindow : Window
         }
 
         base.OnClosing(e);
+        _closing = !e.Cancel;
     }
 
     private void OnSidebarPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)

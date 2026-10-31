@@ -608,6 +608,13 @@
     }
   }
 
+  // Whether the host's confirm card is up over the page, which then keeps Escape and Enter for the card.
+  let cardOpen = false;
+
+  function setCardOpen(open) {
+    cardOpen = open === true;
+  }
+
   // ---------- find ----------
 
   function collectTextNodes() {
@@ -830,7 +837,22 @@
     return event.key;
   }
 
+  // A confirm card up over the page holds Escape and Enter wherever focus sits and with any modifier: neither clicks a
+  // focused link nor closes the find bar, and the host answers the card with the key it gets. True when it forwarded one.
+  function holdForCard(event) {
+    if (!cardOpen || (event.key !== "Escape" && event.key !== "Enter")) {
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    post({ type: "key", key: event.key, ctrl: event.ctrlKey, meta: event.metaKey, shift: event.shiftKey, alt: event.altKey });
+    return true;
+  }
+
   window.addEventListener("keydown", (event) => {
+    if (holdForCard(event)) {
+      return;
+    }
     // AltGr typing (Ctrl+Alt on Windows) and navigation or editing keys always reach the page as they are.
     if (event.getModifierState("AltGraph") || navigationKeys.has(event.key)) {
       return;
@@ -950,6 +972,6 @@
     post({ type: "error", where: "csp", message: `${event.effectiveDirective} blocked ${event.blockedURI || "inline code"}` });
   });
 
-  window.yamv = { render, setTheme, setContentWidth, find, clearFind, openFind, scrollToId };
+  window.yamv = { render, setTheme, setContentWidth, setCardOpen, find, clearFind, openFind, scrollToId };
   post({ type: "ready" });
 })();
