@@ -60,6 +60,13 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private List<string> _watchedDocuments = [];
     private string? _shownHtml;
     private double? _shownWidth;
+
+    /// <summary>How many width changes have written the store; a render that resolved its width before one reconciles the page.</summary>
+    private int _widthWrites;
+
+    /// <summary>How many times the shown width changed; a send that started before the latest change never restores an older one.</summary>
+    private int _shownWidthStamps;
+
     private ITimer? _graceTimer;
     private string? _gracePath;
     private List<DocumentItemViewModel> _documentRows = [];
@@ -237,11 +244,12 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Steps the shown document's width one grid value, writing the result to where that width comes from (the folder it is
-    /// inherited from, or the app default) and sending it to the page. With no document shown it does nothing; a write that
-    /// fails is logged and the page keeps its width. Each press steps once: a step starts after the width change queued before
-    /// it has written its width, and starts its page call without waiting for the page to answer. An open content-width
-    /// popover on the document reads its width again. <see cref="WhenRendersSettled"/> waits for the steps too.
+    /// Steps the shown document's width one grid value from the width its page shows, writing the result to where that width
+    /// comes from (the folder it is inherited from, or the app default) and sending it to the page. A page showing Full steps
+    /// from Full, and a document whose page is not the one shown steps from the stored width. With no document shown it does
+    /// nothing; a write that fails is logged and the page keeps its width. Each press steps once: a step starts after the width
+    /// change queued before it has written its width, and starts its page call without waiting for the page to answer. An open
+    /// content-width popover on the document reads its width again. <see cref="WhenRendersSettled"/> waits for the steps too.
     /// </summary>
     /// <param name="wider">True to step wider (Ctrl/Cmd+]), false to step narrower (Ctrl/Cmd+[).</param>
     /// <param name="paneWidth">The document pane's width in px; the step compares against the text space it leaves.</param>
@@ -1007,6 +1015,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     {
         RenderedDocument document;
         ContentWidth width;
+        int widthWrites = _widthWrites;
         try
         {
             (document, width) = await Task.Run(() => (_renderer.Render(_readText(path)), ResolveWidth(path)));
@@ -1036,7 +1045,14 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
 
         // Nothing may be awaited between the check above and this call: a document that is no longer the selection is never shown.
-        await _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, anchor, TakePendingFragment(generation), width.Px));
+        Task show = _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, anchor, TakePendingFragment(generation), width.Px));
+        if (widthWrites != _widthWrites)
+        {
+            // The store changed while this render resolved its width, so the page it just showed may not hold the stored one.
+            QueueWidthWork(SendShownWidthWhenChangedAsync);
+        }
+
+        await show;
     }
 
     /// <summary>The link fragment waiting for the render of <paramref name="generation"/>, or null; the slot is emptied either way.</summary>
@@ -1085,8 +1101,15 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             && _shownWidth == widthPx;
         _shownPath = path;
         _shownHtml = html;
-        _shownWidth = widthPx;
+        ShowWidth(widthPx);
         return !unchanged;
+    }
+
+    /// <summary>Records the width the page shows and stamps the change, so a send that started before it never reverts it.</summary>
+    private void ShowWidth(double? px)
+    {
+        _shownWidth = px;
+        _shownWidthStamps++;
     }
 
     /// <summary>
@@ -1171,14 +1194,13 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            double textSpace = ContentWidth.TextSpace(paneWidth);
-            (ContentWidth stepped, bool written) = await Task.Run(() =>
+            ContentWidth? shown = null;
+            if (SamePath(path, _shownPath))
             {
-                (ContentWidth width, WidthSource source) = _widths.Resolve(path);
-                ContentWidth next = wider ? width.StepUp(textSpace) : width.StepDown(textSpace);
-                bool saved = source.Folder is string folder ? _widths.Set(folder, next) : _widths.SetDefault(next);
-                return (next, saved);
-            });
+                shown = _shownWidth is double px ? ContentWidth.FromPx(px) : ContentWidth.Full;
+            }
+
+            (ContentWidth next, bool written) = await Task.Run(() => WriteSteppedWidth(path, shown, wider, ContentWidth.TextSpace(paneWidth)));
             if (!written)
             {
                 _log.LogWarning($"Cannot save the stepped content width of {path}; the page keeps its width.");
@@ -1186,14 +1208,16 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            if (_disposed || !SamePath(path, _shownPath))
+            NoteWidthWrite();
+            if (SamePath(path, _shownPath))
             {
-                return;
+                SendPageWidth(path, next.Px);
+            }
+            else
+            {
+                await SendShownWidthWhenChangedAsync();
             }
 
-            // Started here so page calls keep the queue's order, but not awaited: a page that never answers must not hold
-            // the queue.
-            _ = SendSteppedWidthAsync(path, stepped.Px);
             if (_contentWidthPopover is { } popover && SamePath(popover.DocumentPath, path))
             {
                 popover.Refresh();
@@ -1207,25 +1231,107 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task SendSteppedWidthAsync(string path, double? px)
+    /// <summary>
+    /// Writes the step's width to where the document's width comes from, from <paramref name="shown"/> when the page shows the
+    /// document, and returns the width and whether the store saved it; called off the UI thread.
+    /// </summary>
+    private (ContentWidth Next, bool Written) WriteSteppedWidth(string path, ContentWidth? shown, bool wider, double textSpace)
+    {
+        (ContentWidth width, WidthSource source) = _widths.Resolve(path);
+        ContentWidth start = shown ?? width;
+        ContentWidth next = wider ? start.StepUp(textSpace) : start.StepDown(textSpace);
+        bool written = source.Folder is string folder ? _widths.Set(folder, next) : _widths.SetDefault(next);
+        return (next, written);
+    }
+
+    /// <summary>
+    /// Sends the width the store now resolves to the page when it differs from the width the page shows: after a step's write,
+    /// which may have landed while another document, or a render that resolved the width before the write, was being shown.
+    /// </summary>
+    private async Task SendShownWidthWhenChangedAsync()
+    {
+        if (_disposed || _shownPath is not string shownPath)
+        {
+            return;
+        }
+
+        ContentWidth width;
+        try
+        {
+            width = await Task.Run(() => _widths.Resolve(shownPath).Width);
+        }
+        // Any failure of the store leaves the page at its width: the send is only a correction.
+        catch (Exception exception)
+        {
+            _log.LogError($"Cannot resolve the content width of {shownPath} to send it to the page.", exception);
+            return;
+        }
+
+        if (_disposed || !SamePath(shownPath, _shownPath) || width.Px == _shownWidth)
+        {
+            return;
+        }
+
+        SendPageWidth(shownPath, width.Px);
+    }
+
+    /// <summary>
+    /// Sends a committed width to the page and records it as what the page shows while <paramref name="path"/> is the shown
+    /// document, so the next step starts from it before the page answers. A disposed window, or one showing another document,
+    /// sends nothing: a width for one document never reaches a page that shows another. A send that a newer change replaced, or
+    /// that answers after one, never writes the shown width: only a failed send restores the value this one replaced, and only
+    /// while no newer change has stamped the shown width since.
+    /// </summary>
+    internal void SendPageWidth(string path, double? px)
+    {
+        if (_disposed || !SamePath(path, _shownPath))
+        {
+            return;
+        }
+
+        double? previous = _shownWidth;
+        ShowWidth(px);
+        _ = SendCommittedWidthAsync(path, px, _shownWidthStamps, previous);
+    }
+
+    /// <summary>Starts the page's width call; its failure is logged and toasted here, since nothing awaits it.</summary>
+    private async Task SendCommittedWidthAsync(string path, double? px, int sent, double? previous)
     {
         bool ran;
         try
         {
             ran = await _surface.SetContentWidthAsync(px);
         }
-        // The send is not awaited by anyone, so its failure is logged here or nowhere.
         catch (Exception exception)
         {
-            _log.LogError($"Cannot send the stepped content width of {path} to the page.", exception);
+            _log.LogError($"Cannot send the content width of {path} to the page.", exception);
             ran = false;
         }
 
-        if (!ran)
+        if (ran)
         {
-            Toasts.Show(ToastKind.Warning, WidthNotShownToast);
+            return;
         }
+
+        if (sent == _shownWidthStamps)
+        {
+            ShowWidth(previous);
+        }
+
+        Toasts.Show(ToastKind.Warning, WidthNotShownToast);
     }
+
+    /// <summary>
+    /// Records that a width change wrote the store, so a render that resolved its width before the write sends the stored width
+    /// once its show has landed.
+    /// </summary>
+    internal void NoteWidthWrite() => _widthWrites++;
+
+    /// <summary>
+    /// Queues the reconcile behind the width change that wrote the store: a shown document, or a sibling of the one whose width
+    /// changed, is brought to the width the store now resolves.
+    /// </summary>
+    internal void QueueShownWidthReconcile() => QueueWidthWork(SendShownWidthWhenChangedAsync);
 
     /// <summary>The width stored for <paramref name="path"/>, the app default when the store fails; called off the UI thread.</summary>
     private ContentWidth ResolveWidth(string path)

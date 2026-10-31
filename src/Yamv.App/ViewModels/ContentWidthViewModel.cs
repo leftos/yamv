@@ -199,7 +199,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         PlaceSlider(width);
         if (DragReachesDocument)
         {
-            SendToPage(width);
+            SendPreviewToPage(width);
         }
     }
 
@@ -325,7 +325,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
             _moved = false;
             if (DragReachesDocument)
             {
-                SendToPage(_storedWidth);
+                SendCommittedToPage(_storedWidth);
             }
         }
 
@@ -359,7 +359,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         Readout = ReadoutOf(width);
         if (DragReachesDocument)
         {
-            SendToPage(width);
+            SendPreviewToPage(width);
         }
     }
 
@@ -367,7 +367,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     {
         // Every line is inside the try, whose finally gives back the count EndDrag took.
         (ContentWidth Width, WidthSource Source) shown;
-        (bool saved, (ContentWidth Width, WidthSource Source) document) result;
+        (bool saved, bool wrote, (ContentWidth Width, WidthSource Source) document) result;
         try
         {
             string path = DocumentPath;
@@ -377,8 +377,8 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
                 // already there writes nothing, and shows the segment as another window left it even when it now inherits.
                 (ContentWidth stored, WidthSource source) = ResolveSegment(segment);
                 bool same = width == stored;
-                bool written = same || (segment.Folder is string folder ? Widths.Set(folder, width) : Widths.SetDefault(width));
-                return (same ? (stored, source) : (width, new WidthSource(segment.Folder)), (written, Widths.Resolve(path)));
+                bool wrote = !same && (segment.Folder is string folder ? Widths.Set(folder, width) : Widths.SetDefault(width));
+                return (same ? (stored, source) : (width, new WidthSource(segment.Folder)), (same || wrote, wrote, Widths.Resolve(path)));
             });
         }
         finally
@@ -390,6 +390,12 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         {
             OnSaveFailed($"Cannot save the content width {ReadoutOf(width)} for {segment.Label} of {DocumentPath}.", DocumentPath, result.document);
             return;
+        }
+
+        if (result.wrote)
+        {
+            _host.Window.NoteWidthWrite();
+            ReconcileShownDocument();
         }
 
         if (IsStale)
@@ -404,7 +410,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
 
         if (!HoldsSlider)
         {
-            SendToPage(result.document.Width);
+            SendCommittedToPage(result.document.Width);
         }
 
         await ReadClearAllCountAsync();
@@ -427,7 +433,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         {
             if (_host.Window.IsShowingContentWidthOf(path))
             {
-                SendToPage(document.Width);
+                SendCommittedToPage(document.Width);
             }
 
             return;
@@ -435,7 +441,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
 
         _moved = false;
         ShowSegment(_scopes, _storedWidth, document.Source);
-        SendToPage(document.Width);
+        SendCommittedToPage(document.Width);
     }
 
     private async Task ShowSegmentAsync(WidthScope segment)
@@ -471,6 +477,8 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
             return;
         }
 
+        _host.Window.NoteWidthWrite();
+        ReconcileShownDocument();
         if (IsStale)
         {
             return;
@@ -479,7 +487,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         ShowSegment(_host.ScopesFor(source), width, source);
         if (!HoldsSlider)
         {
-            SendToPage(width);
+            SendCommittedToPage(width);
         }
 
         await ReadClearAllCountAsync();
@@ -534,7 +542,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
                 // A newer popover has the page now: while its slider is held the page shows its drag, not the stored width.
                 if (!IsSupersededByNewerPopover() && _host.Window.IsShowingContentWidthOf(path))
                 {
-                    SendToPage(width);
+                    SendCommittedToPage(width);
                 }
             },
             $"resend the content width of {path}",
@@ -591,7 +599,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
             PlaceSlider(_storedWidth);
             if (DragReachesDocument)
             {
-                SendToPage(_storedWidth);
+                SendCommittedToPage(_storedWidth);
             }
         }
 
@@ -621,7 +629,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     {
         if (DragReachesDocument && _host.Window.IsShowingContentWidthOf(DocumentPath) && !IsSupersededByNewerPopover())
         {
-            SendToPage(_storedWidth);
+            SendCommittedToPage(_storedWidth);
         }
 
         ShowStaleToast();
@@ -725,9 +733,26 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         _footTimer = null;
     }
 
-    private void SendToPage(ContentWidth width) => _ = SendToPageAsync(width.Px);
+    /// <summary>Sends a width a drag or a slider key is previewing; it is transient, so the window records no shown width.</summary>
+    private void SendPreviewToPage(ContentWidth width) => _ = SendPreviewToPageAsync(width.Px);
 
-    private async Task SendToPageAsync(double? px)
+    /// <summary>Sends a width the store holds, which the window records as the width the page shows.</summary>
+    private void SendCommittedToPage(ContentWidth width) => _host.Window.SendPageWidth(DocumentPath, width.Px);
+
+    /// <summary>
+    /// Asks the window to bring the document it shows to the width the store resolves after this popover's write. A live popover
+    /// owns the page itself and sends the committed width, so this is for a write whose document stopped being the shown one (a
+    /// sibling in the same folder follows the change) or whose popover closed while the document stayed shown.
+    /// </summary>
+    private void ReconcileShownDocument()
+    {
+        if (!_host.Window.IsShowingContentWidthOf(DocumentPath) || (IsStale && !IsSupersededByNewerPopover()))
+        {
+            _host.Window.QueueShownWidthReconcile();
+        }
+    }
+
+    private async Task SendPreviewToPageAsync(double? px)
     {
         bool ran;
         try

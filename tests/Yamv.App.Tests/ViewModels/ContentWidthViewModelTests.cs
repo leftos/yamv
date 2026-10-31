@@ -1321,6 +1321,8 @@ public sealed class ContentWidthViewModelTests
         {
             await using var fixture = new Fixture();
             Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([DocA]);
+            await fixture.ViewModel.WhenRendersSettled();
             var store = new FaultyWidthStore(fixture.Widths);
             store.Faults.Add(nameof(IContentWidthStore.Remove));
             ContentWidthViewModel popover = CreatePopover(fixture, store);
@@ -1350,6 +1352,8 @@ public sealed class ContentWidthViewModelTests
             await using var fixture = new Fixture();
             Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
             var store = new FaultyWidthStore(fixture.Widths);
+            fixture.ViewModel.Open([DocA]);
+            await fixture.ViewModel.WhenRendersSettled();
             store.Faults.Add(nameof(IContentWidthStore.ClearAtOrBelow));
             ContentWidthViewModel popover = CreatePopover(fixture, store);
             await fixture.ViewModel.WhenRendersSettled();
@@ -1439,6 +1443,8 @@ public sealed class ContentWidthViewModelTests
             await using var fixture = new Fixture();
             Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
             var store = new FaultyWidthStore(fixture.Widths);
+            fixture.ViewModel.Open([DocA]);
+            await fixture.ViewModel.WhenRendersSettled();
             store.Faults.Add(nameof(IContentWidthStore.Set));
             ContentWidthViewModel popover = CreatePopover(fixture, store);
             if (!reaches)
@@ -1542,6 +1548,8 @@ public sealed class ContentWidthViewModelTests
         {
             await using var fixture = new Fixture();
             Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([DocA]);
+            await fixture.ViewModel.WhenRendersSettled();
             var store = new FaultyWidthStore(fixture.Widths);
             ContentWidthViewModel popover = CreatePopover(fixture, store);
             await fixture.ViewModel.WhenRendersSettled();

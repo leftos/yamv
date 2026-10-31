@@ -1940,10 +1940,7 @@ public sealed class DocumentWindowViewModelTests
             await fixture.ViewModel.WhenRendersSettled();
 
             Assert.Equal((ToastKind.Warning, "Couldn't apply the width; see the log"), Assert.Single(fixture.Toasts.Shown));
-            Assert.Contains(
-                fixture.Log.Entries,
-                entry => entry.Message.StartsWith("Cannot send the stepped content width", StringComparison.Ordinal)
-            );
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message.StartsWith("Cannot send the content width", StringComparison.Ordinal));
         });
 
     [Fact]
@@ -2041,6 +2038,412 @@ public sealed class DocumentWindowViewModelTests
 
             Assert.Equal(840, fixture.Widths.Get(docs)?.Px);
             Assert.Equal(new double?[] { 800, 840 }, fixture.Surface.ContentWidths);
+        });
+
+    [Fact]
+    public Task Stepping_starts_from_the_width_the_page_shows() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            // Another window widened the folder after this page rendered at 760.
+            var otherInstance = new WidthStore(fixture.WidthsFile, new RecordingAppLog());
+            Assert.True(otherInstance.Set(docs, ContentWidth.FromPx(1000)));
+
+            fixture.ViewModel.StepContentWidth(wider: false, WidePane);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(720, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new ContentWidthSet(720), fixture.Surface.Calls[^1]);
+        });
+
+    [Fact]
+    public Task Stepping_from_full_on_the_page_steps_down_from_full() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.Full));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            // Another window narrowed the folder after this page rendered Full.
+            var otherInstance = new WidthStore(fixture.WidthsFile, new RecordingAppLog());
+            Assert.True(otherInstance.Set(docs, ContentWidth.FromPx(760)));
+
+            fixture.ViewModel.StepContentWidth(wider: false, paneWidth: 1000);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            // Full steps down to the largest grid value below the pane's 912 px of text space.
+            Assert.Equal(880, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new ContentWidthSet(880), fixture.Surface.Calls[^1]);
+        });
+
+    [Fact]
+    public Task A_step_that_finishes_after_the_selection_moved_to_a_sibling_updates_the_sibling() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            var siblingShown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.Surface.OnShown = shown =>
+            {
+                if (SamePath(shown.DocumentPath, RepoDocB))
+                {
+                    siblingShown.TrySetResult();
+                }
+            };
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                fixture.ViewModel.QueueWidthWork(() => hold.Task);
+                fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+                fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+                await siblingShown.Task.WaitAsync(GateBackstop, TestContext.Current.CancellationToken);
+                hold.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+
+                Assert.Equal(800, fixture.Widths.Get(docs)?.Px);
+                Assert.Equal(new ContentWidthSet(800), fixture.Surface.Calls[^1]);
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+        });
+
+    [Fact]
+    public Task A_step_that_lands_after_a_render_resolved_its_width_reconciles_the_page() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                fixture.ViewModel.QueueWidthWork(() => hold.Task);
+                fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+                var stepDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                fixture.ViewModel.QueueWidthWork(() =>
+                {
+                    stepDone.TrySetResult();
+                    return Task.CompletedTask;
+                });
+
+                // The sibling's render resolves the folder's 760 px, and its show is held before the page applies it.
+                fixture.Surface.HoldNextCall = release;
+                fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+                await fixture.Surface.CallHeld.Task.WaitAsync(GateBackstop, TestContext.Current.CancellationToken);
+
+                hold.SetResult();
+                await stepDone.Task.WaitAsync(GateBackstop, TestContext.Current.CancellationToken);
+                release.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+
+                Assert.Equal(800, fixture.Widths.Get(docs)?.Px);
+                Assert.Equal(new ContentWidthSet(800), fixture.Surface.Calls[^1]);
+            }
+            finally
+            {
+                hold.TrySetResult();
+                release.TrySetResult();
+            }
+        });
+
+    [Fact]
+    public Task Stepping_starts_from_a_width_a_popover_save_put_on_the_page() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(800)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            ContentWidthViewModel? popover = await fixture.ViewModel.CreateContentWidthPopoverAsync(WidePane);
+            Assert.NotNull(popover);
+            await fixture.ViewModel.WhenRendersSettled();
+            popover.SliderPosition = ContentWidth.FromPx(1000).ToSlider(ContentWidth.TextSpace(WidePane));
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.Equal(1000, fixture.Widths.Get(docs)?.Px);
+
+            // Another window changed the folder after the popover put 1000 px on the page.
+            var otherInstance = new WidthStore(fixture.WidthsFile, new RecordingAppLog());
+            Assert.True(otherInstance.Set(docs, ContentWidth.FromPx(1200)));
+
+            fixture.ViewModel.StepContentWidth(wider: false, WidePane);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(960, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new ContentWidthSet(960), fixture.Surface.Calls[^1]);
+        });
+
+    [Fact]
+    public Task Two_presses_while_the_first_send_is_unanswered_step_twice() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                fixture.Surface.HoldNextCall = release;
+                fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+                await fixture.Surface.CallHeld.Task.WaitAsync(GateBackstop, TestContext.Current.CancellationToken);
+                fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+                release.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+
+                Assert.Equal(840, fixture.Widths.Get(docs)?.Px);
+                Assert.Equal(new double?[] { 800, 840 }, fixture.Surface.ContentWidths);
+            }
+            finally
+            {
+                release.TrySetResult();
+            }
+        });
+
+    [Fact]
+    public Task A_send_a_newer_show_replaced_does_not_overwrite_the_shown_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(800)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            // No RunContinuationsAsynchronously: releasing runs the send's answer while the test holds the UI thread, so the
+            // width the answer would write is in place before the next step reads it.
+            var release = new TaskCompletionSource();
+            try
+            {
+                fixture.Surface.HoldNextCall = release;
+                fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+                await fixture.Surface.CallHeld.Task.WaitAsync(GateBackstop, TestContext.Current.CancellationToken);
+
+                // Another window widens the folder, and a reload shows the document at that width.
+                Assert.True(new WidthStore(fixture.WidthsFile, new RecordingAppLog()).Set(docs, ContentWidth.FromPx(1000)));
+                fixture.ViewModel.Reload();
+                await fixture.ViewModel.WhenRendersSettled();
+
+                release.SetResult();
+                Dispatcher.UIThread.RunJobs();
+
+                fixture.ViewModel.StepContentWidth(wider: false, WidePane);
+                await fixture.ViewModel.WhenRendersSettled();
+
+                Assert.Equal(960, fixture.Widths.Get(docs)?.Px);
+                Assert.Equal(new ContentWidthSet(960), fixture.Surface.Calls[^1]);
+            }
+            finally
+            {
+                release.TrySetResult();
+            }
+        });
+
+    [Fact]
+    public Task A_failed_send_leaves_the_shown_width_at_its_previous_value() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(800)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.Surface.ScriptsFail = true;
+            fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.Equal(840, fixture.Widths.Get(docs)?.Px);
+            Assert.Contains(840d, fixture.Surface.ContentWidths);
+
+            fixture.Surface.ScriptsFail = false;
+            fixture.ViewModel.StepContentWidth(wider: false, WidePane);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            // The failed send left the page at 800 px, so the next step narrows from there.
+            Assert.Equal(760, fixture.Widths.Get(docs)?.Px);
+            Assert.Equal(new ContentWidthSet(760), fixture.Surface.Calls[^1]);
+        });
+
+    [Fact]
+    public Task A_popover_save_with_a_sibling_shown_brings_the_sibling_to_its_new_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([RepoDocA, RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            ContentWidthViewModel? popover = await fixture.ViewModel.CreateContentWidthPopoverAsync(WidePane);
+            Assert.NotNull(popover);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            var siblingShown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.Surface.OnShown = shown =>
+            {
+                if (SamePath(shown.DocumentPath, RepoDocB))
+                {
+                    siblingShown.TrySetResult();
+                }
+            };
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                fixture.ViewModel.QueueWidthWork(() => hold.Task);
+                popover.SliderPosition = ContentWidth.FromPx(1000).ToSlider(ContentWidth.TextSpace(WidePane));
+                popover.EndDrag();
+                fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+                await siblingShown.Task.WaitAsync(GateBackstop, TestContext.Current.CancellationToken);
+                hold.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+
+                Assert.Equal(1000, fixture.Widths.Get(docs)?.Px);
+                Assert.Equal(new ContentWidthSet(1000), fixture.Surface.Calls[^1]);
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+        });
+
+    [Fact]
+    public Task A_reload_of_the_same_html_during_a_drag_keeps_the_preview_on_the_page() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(800)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            ContentWidthViewModel? popover = await fixture.ViewModel.CreateContentWidthPopoverAsync(WidePane);
+            Assert.NotNull(popover);
+            await fixture.ViewModel.WhenRendersSettled();
+            int showsBefore = fixture.Surface.Shown.Count;
+
+            popover.SliderPosition = ContentWidth.FromPx(1000).ToSlider(ContentWidth.TextSpace(WidePane));
+            Assert.Equal(new ContentWidthSet(1000), fixture.Surface.Calls[^1]);
+
+            // A change report re-reads the document; its HTML and stored width are as they were, so the page keeps the preview.
+            await fixture.ReportAsync(RepoDocA);
+
+            Assert.Equal(showsBefore, fixture.Surface.Shown.Count);
+            Assert.Equal(new ContentWidthSet(1000), fixture.Surface.Calls[^1]);
+        });
+
+    [Fact]
+    public Task A_save_that_lands_after_the_popover_closed_brings_the_page_to_the_saved_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(760)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            ContentWidthViewModel? popover = await fixture.ViewModel.CreateContentWidthPopoverAsync(WidePane);
+            Assert.NotNull(popover);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                fixture.ViewModel.QueueWidthWork(() => hold.Task);
+                popover.SliderPosition = ContentWidth.FromPx(1000).ToSlider(ContentWidth.TextSpace(WidePane));
+                popover.EndDrag();
+                popover.Close();
+                hold.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+
+                Assert.Equal(1000, fixture.Widths.Get(docs)?.Px);
+                Assert.Equal(new ContentWidthSet(1000), fixture.Surface.Calls[^1]);
+
+                fixture.ViewModel.StepContentWidth(wider: false, WidePane);
+                await fixture.ViewModel.WhenRendersSettled();
+
+                Assert.Equal(960, fixture.Widths.Get(docs)?.Px);
+                Assert.Equal(new ContentWidthSet(960), fixture.Surface.Calls[^1]);
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+        });
+
+    [Fact]
+    public Task A_reset_that_lands_after_the_popover_closed_brings_the_page_to_the_reset_width() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            string docs = Path.Combine(Repo, "docs");
+            Assert.True(fixture.Widths.Set(docs, ContentWidth.FromPx(1000)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            ContentWidthViewModel? popover = await fixture.ViewModel.CreateContentWidthPopoverAsync(WidePane);
+            Assert.NotNull(popover);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                fixture.ViewModel.QueueWidthWork(() => hold.Task);
+                popover.ResetCommand.Execute(null);
+                popover.Close();
+                hold.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+
+                // The folder's own width is gone, so the document inherits the app default.
+                Assert.Null(fixture.Widths.Get(docs));
+                Assert.Equal(new ContentWidthSet(800), fixture.Surface.Calls[^1]);
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+        });
+
+    [Fact]
+    public Task A_step_that_lands_after_the_window_closed_sends_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Path.Combine(Repo, "docs"), ContentWidth.FromPx(800)));
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                fixture.ViewModel.QueueWidthWork(() => hold.Task);
+                fixture.ViewModel.StepContentWidth(wider: true, WidePane);
+                fixture.ViewModel.Dispose();
+                hold.SetResult();
+                await fixture.ViewModel.WhenRendersSettled();
+
+                Assert.Empty(fixture.Surface.ContentWidths);
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
         });
 
     [Fact]
