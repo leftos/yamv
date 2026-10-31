@@ -15,6 +15,7 @@ using Yamv.App.ViewModels;
 using Yamv.App.Views;
 using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
+using Yamv.Core.Links;
 using Yamv.Core.Platform;
 using Yamv.Core.Session;
 using Yamv.Core.Widths;
@@ -998,8 +999,10 @@ public sealed class MainWindowTests
             await fixture.ViewModel.WhenRendersSettled();
             fixture.Settle();
 
-            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath, StringComparer.OrdinalIgnoreCase);
-            Assert.Equal(fixture.DocB, fixture.Surface.Shown[^1].DocumentPath, StringComparer.OrdinalIgnoreCase);
+            string expected =
+                RealPath.Resolve(fixture.DocB)?.Path ?? throw new InvalidOperationException($"The test path '{fixture.DocB}' did not resolve.");
+            Assert.Equal(expected, fixture.ViewModel.SelectedPath, StringComparer.OrdinalIgnoreCase);
+            Assert.Equal(expected, fixture.Surface.Shown[^1].DocumentPath, StringComparer.OrdinalIgnoreCase);
             Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "error");
         });
 

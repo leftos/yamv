@@ -230,6 +230,7 @@ public sealed class FileActionsTests
     [InlineData(true)]
     public void OpenViewable_starts_a_viewable_file_with_no_verb_or_arguments(bool mac)
     {
+        Assert.SkipUnless(mac || OperatingSystem.IsWindows(), "Only Windows reads a drive-letter path as fully qualified.");
         string path = mac ? Path.Combine(Path.GetTempPath(), "yamv links", "a chart.PNG") : @"C:\yamv links\a chart.PNG";
         List<ProcessStartInfo> runs = [];
         var log = new RecordingAppLog();
