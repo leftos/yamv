@@ -138,10 +138,11 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
     public string? SliderCaption => IsSliderEnabled ? null : NarrowCaption;
 
     /// <summary>
-    /// Ends a drag (the pointer was released, or a key moved the slider): saves the slider's width for the selected segment,
-    /// so a segment that inherited its width gets its own. A save that finds the width already the selected segment's when
-    /// it runs saves nothing, and the page gets the document's width again. Until the save has run, a read or a change that
-    /// lands leaves the slider at the drag's width. Ending no drag does nothing.
+    /// Ends a drag (the pointer was released, or a key moved the slider): saves the slider's width for the segment selected
+    /// now, so a segment that inherited its width gets its own, and a Reset or a pick still queued when the drag ends does not
+    /// move the save. A save that finds the width already the segment's when it runs saves nothing, and the page gets the
+    /// document's width again. Until the save has run, a read or a change that lands leaves the slider at the drag's width.
+    /// Ending no drag does nothing.
     /// </summary>
     public void EndDrag()
     {
@@ -153,7 +154,8 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         _moved = false;
         _unsavedDrags++;
         ContentWidth width = _width;
-        _host.Window.QueueWidthWork(() => SaveAsync(width));
+        WidthScope segment = _scopes.Selected;
+        _host.Window.QueueWidthWork(() => SaveAsync(width, segment));
     }
 
     /// <summary>
@@ -309,19 +311,19 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         }
     }
 
-    private async Task SaveAsync(ContentWidth width)
+    private async Task SaveAsync(ContentWidth width, WidthScope segment)
     {
-        WidthScope segment = _scopes.Selected;
-        string path = DocumentPath;
-        // A read or a step that landed since the drag ended may have made the width the selected segment's already.
-        bool unchanged = width == _storedWidth;
+        // Every line is inside the try, whose finally gives back the count EndDrag took.
+        bool unchanged;
         (bool saved, (ContentWidth Width, WidthSource Source) document) result;
         try
         {
-            result = await Task.Run(() =>
+            string path = DocumentPath;
+            (unchanged, result) = await Task.Run(() =>
             {
-                bool written = unchanged || (segment.Folder is string folder ? Widths.Set(folder, width) : Widths.SetDefault(width));
-                return (written, Widths.Resolve(path));
+                bool same = IsStoredSegmentWidth(segment, width);
+                bool written = same || (segment.Folder is string folder ? Widths.Set(folder, width) : Widths.SetDefault(width));
+                return (same, (written, Widths.Resolve(path)));
             });
         }
         finally
@@ -331,7 +333,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
 
         if (!result.saved)
         {
-            OnSaveFailed($"Cannot save the content width {ReadoutOf(width)} for {segment.Label} of {path}.", path, result.document);
+            OnSaveFailed($"Cannot save the content width {ReadoutOf(width)} for {segment.Label} of {DocumentPath}.", DocumentPath, result.document);
             return;
         }
 
@@ -342,7 +344,10 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
 
         if (!unchanged)
         {
-            ShowSegment(_scopes.Select(segment, new WidthSource(segment.Folder)), width, result.document.Source);
+            // A Reset or Clear all queued before the release may have rebuilt the segments without a middle folder; the save
+            // puts it back as the source.
+            WidthScopes scopes = _scopes.Contains(segment) ? _scopes : _host.ScopesFor(new WidthSource(segment.Folder));
+            ShowSegment(scopes.Select(segment, new WidthSource(segment.Folder)), width, result.document.Source);
         }
 
         if (!HoldsSlider)
@@ -354,6 +359,21 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         {
             await ReadClearAllCountAsync();
         }
+    }
+
+    /// <summary>
+    /// True when the store holds <paramref name="width"/> where <paramref name="segment"/> takes its width from: the segment's
+    /// own width, or for a segment that inherits, the width it resolves to now. Read inside the save's work, so a width
+    /// another window wrote since this popover's last read still counts as a change. Called off the UI thread.
+    /// </summary>
+    private bool IsStoredSegmentWidth(WidthScope segment, ContentWidth width)
+    {
+        if (segment.Folder is not string folder)
+        {
+            return width == Widths.Default;
+        }
+
+        return Widths.Get(folder) is ContentWidth own ? width == own : width == Widths.ResolveFolder(folder).Width;
     }
 
     /// <summary>
@@ -444,7 +464,7 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
 
     /// <summary>
     /// Queues a send of the document's stored width to the page, which a drag may have moved. Nothing is queued, and nothing
-    /// sent, once the window no longer shows the document.
+    /// sent, once the window no longer shows the document, or a newer popover whose slider is held owns the page's width.
     /// </summary>
     private void QueueDocumentWidthResend()
     {
@@ -457,12 +477,20 @@ public sealed partial class ContentWidthViewModel : ViewModelBase
         _host.Window.QueueWidthWork(async () =>
         {
             ContentWidth width = await Task.Run(() => Widths.Resolve(path).Width);
-            if (_host.Window.IsShowingContentWidthOf(path))
+            // A newer popover has the page now: while its slider is held the page shows its drag, not the stored width.
+            if (!IsSupersededByNewerPopover() && _host.Window.IsShowingContentWidthOf(path))
             {
                 SendToPage(width);
             }
         });
     }
+
+    /// <summary>
+    /// True when the window shows a newer popover whose slider is held: its drag's preview or its pending save owns the page's
+    /// width, so the stored width this popover would send must not overwrite it.
+    /// </summary>
+    private bool IsSupersededByNewerPopover() =>
+        _host.Window.ContentWidthPopover is { } current && !ReferenceEquals(current, this) && current.HoldsSlider;
 
     /// <summary>
     /// Shows <paramref name="scopes"/>, whose selected segment's width is <paramref name="storedWidth"/>, for a document whose

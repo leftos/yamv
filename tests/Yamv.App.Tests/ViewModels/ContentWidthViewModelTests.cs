@@ -361,6 +361,47 @@ public sealed class ContentWidthViewModelTests
         });
 
     [Fact]
+    public Task A_save_after_another_window_changed_the_width_still_writes() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            double start = popover.SliderPosition;
+
+            // Another window narrows the document while this popover still shows the 760 px it read.
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(600)));
+            popover.SliderPosition = 0;
+            popover.SliderPosition = start;
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(760, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(760, fixture.Surface.ContentWidths[^1]);
+        });
+
+    [Fact]
+    public Task A_save_on_All_documents_after_another_window_changed_the_default_still_writes() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.SetDefault(ContentWidth.FromPx(760)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            Assert.True(popover.SelectedSegment?.IsAllDocuments);
+            double start = popover.SliderPosition;
+
+            // Another window changes the default while this popover still shows the 760 px it read.
+            Assert.True(fixture.Widths.SetDefault(ContentWidth.FromPx(600)));
+            popover.SliderPosition = 0;
+            popover.SliderPosition = start;
+            popover.EndDrag();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(760, fixture.Widths.Default.Px);
+            Assert.Equal(760, fixture.Surface.ContentWidths[^1]);
+        });
+
+    [Fact]
     public Task Closing_mid_drag_restores_the_page_and_writes_nothing() =>
         Headless.RunAsync(async () =>
         {
@@ -493,13 +534,13 @@ public sealed class ContentWidthViewModelTests
             Assert.Equal(Docs, popover.SelectedSegment?.Folder);
             WidthScope repo = popover.Segments[2];
             Assert.Equal(Repo, repo.Folder);
-            TaskCompletionSource hold = fixture.HoldQueue();
-
             popover.SelectSegmentCommand.Execute(repo);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.Equal(Repo, popover.SelectedSegment?.Folder);
+
             popover.SliderPosition = ContentWidth.AppDefault.ToSlider(WideTextSpace);
             Assert.Equal(ReadoutPx(ContentWidth.DefaultPx), popover.Readout);
             popover.EndDrag();
-            hold.SetResult();
             await fixture.ViewModel.WhenRendersSettled();
 
             Assert.Equal(Repo, popover.SelectedSegment?.Folder);
@@ -509,7 +550,7 @@ public sealed class ContentWidthViewModelTests
         });
 
     [Fact]
-    public Task A_read_queued_before_a_drags_save_leaves_the_slider_at_the_drag() =>
+    public Task A_selection_still_queued_at_the_release_leaves_the_drag_on_its_own_segment() =>
         Headless.RunAsync(async () =>
         {
             await using var fixture = new Fixture();
@@ -536,7 +577,9 @@ public sealed class ContentWidthViewModelTests
             }
 
             await fixture.ViewModel.WhenRendersSettled();
-            Assert.Equal(480, fixture.Widths.Get(Plans)?.Px);
+            Assert.Equal(Docs, popover.SelectedSegment?.Folder);
+            Assert.Equal(480, fixture.Widths.Get(Docs)?.Px);
+            Assert.Null(fixture.Widths.Get(Plans));
             Assert.Equal("480 px", popover.Readout);
             Assert.Equal(480, fixture.Surface.ContentWidths[^1]);
         });
@@ -645,13 +688,14 @@ public sealed class ContentWidthViewModelTests
         });
 
     [Fact]
-    public Task A_reset_queued_before_a_drags_save_sends_its_width_to_no_page() =>
+    public Task A_reset_queued_before_a_drags_save_keeps_the_drag_on_its_own_segment() =>
         Headless.RunAsync(async () =>
         {
             await using var fixture = new Fixture();
             Assert.True(fixture.Widths.Set(Repo, ContentWidth.FromPx(560)));
             Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
             ContentWidthViewModel popover = await fixture.OpenAsync(DocA);
+            Assert.Equal(Docs, popover.SelectedSegment?.Folder);
             TaskCompletionSource hold = fixture.HoldQueue();
 
             popover.ResetCommand.Execute(null);
@@ -660,10 +704,37 @@ public sealed class ContentWidthViewModelTests
             hold.SetResult();
             await fixture.ViewModel.WhenRendersSettled();
 
-            Assert.Null(fixture.Widths.Get(Docs));
-            Assert.Equal(480, fixture.Widths.Get(Repo)?.Px);
+            // The Reset emptied Docs and left Repo at its 560; the drag still saves to the segment it started on.
+            Assert.Equal(480, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(560, fixture.Widths.Get(Repo)?.Px);
             Assert.Equal(new double?[] { 480, 480 }, fixture.Surface.ContentWidths);
             Assert.Equal("480 px", popover.Readout);
+            Assert.Equal(Docs, popover.SelectedSegment?.Folder);
+        });
+
+    [Fact]
+    public Task A_reset_queued_before_a_drag_on_a_middle_folder_saves_and_shows_that_folder() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(720)));
+            ContentWidthViewModel popover = await fixture.OpenAsync(PlanDoc);
+            Assert.Equal(Docs, popover.SelectedSegment?.Folder);
+            TaskCompletionSource hold = fixture.HoldQueue();
+
+            popover.ResetCommand.Execute(null);
+            popover.SliderPosition = 0;
+            popover.EndDrag();
+            hold.SetResult();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            // The Reset rebuilt the segments without the source folder; the save puts it back, selected, with its width.
+            Assert.Equal(480, fixture.Widths.Get(Docs)?.Px);
+            Assert.Equal(Docs, popover.SelectedSegment?.Folder);
+            Assert.Equal("480 px", popover.Readout);
+            Assert.True(popover.CanReset);
+            Assert.True(popover.CanClearAll);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "error");
         });
 
     [Fact]
@@ -864,6 +935,32 @@ public sealed class ContentWidthViewModelTests
             Assert.True(older.IsStale);
             Assert.False(newer.IsStale);
             Assert.Same(newer, fixture.ViewModel.ContentWidthPopover);
+        });
+
+    [Fact]
+    public Task An_older_popovers_resend_does_not_overwrite_the_newer_popovers_preview() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            Assert.True(fixture.Widths.Set(Docs, ContentWidth.FromPx(760)));
+            ContentWidthViewModel older = await fixture.OpenAsync(DocA);
+            TaskCompletionSource beforeNewer = fixture.HoldQueue();
+
+            older.SliderPosition = 0;
+            Task<ContentWidthViewModel?> creating = fixture.ViewModel.CreateContentWidthPopoverAsync(WidePane);
+            TaskCompletionSource beforeResend = fixture.HoldQueue();
+            beforeNewer.SetResult();
+            ContentWidthViewModel? newer = await creating;
+            Assert.NotNull(newer);
+
+            newer.SliderPosition = 0;
+            beforeResend.SetResult();
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.True(older.IsStale);
+            Assert.False(newer.IsStale);
+            Assert.Equal(480, fixture.Surface.ContentWidths[^1]);
+            Assert.Equal(760, fixture.Widths.Get(Docs)?.Px);
         });
 
     [Fact]
