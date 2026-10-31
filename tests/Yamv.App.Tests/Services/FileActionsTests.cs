@@ -47,6 +47,28 @@ public sealed class FileActionsTests
     }
 
     [Fact]
+    public void Reveal_on_Windows_starts_the_Explorer_of_the_Windows_folder()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows starts Explorer from the Windows folder.");
+        string path = Path.Combine(Path.GetTempPath(), "yamv-reveal-" + Guid.NewGuid().ToString("N") + ".md");
+        File.WriteAllText(path, "# A");
+        try
+        {
+            WindowsActions().Reveal(path, RevealKind.File);
+
+            ProcessStartInfo start = Assert.Single(_started);
+            Assert.False(start.UseShellExecute);
+            Assert.Equal(Path.Combine(FakeWindowsFolder, "explorer.exe"), start.FileName);
+            Assert.Equal($"/select,\"{path}\"", start.Arguments);
+            Assert.Empty(_log.Entries);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Reveal_of_a_deleted_folder_starts_the_file_manager_on_its_parent()
     {
         string parent = Path.Combine(Path.GetTempPath(), "yamv-actions-" + Guid.NewGuid().ToString("N"));

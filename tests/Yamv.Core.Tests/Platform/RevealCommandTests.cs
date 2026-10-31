@@ -4,6 +4,8 @@ namespace Yamv.Core.Tests.Platform;
 
 public sealed class RevealCommandTests : IDisposable
 {
+    private const string WindowsFolder = @"C:\Windows";
+
     private readonly string _root = Path.Combine(Path.GetTempPath(), "yamv-reveal " + Guid.NewGuid().ToString("N"));
 
     public RevealCommandTests()
@@ -19,9 +21,9 @@ public sealed class RevealCommandTests : IDisposable
     [Fact]
     public void For_FileOnWindows_SelectsItInExplorer()
     {
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(DocA, RevealKind.File, isMac: false));
+        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(DocA, RevealKind.File, isMac: false, windowsFolder: WindowsFolder));
 
-        Assert.Equal("explorer.exe", command.Program);
+        Assert.Equal(Path.Combine(WindowsFolder, "explorer.exe"), command.Program);
         Assert.Equal($"/select,\"{DocA}\"", command.Arguments);
         Assert.Empty(command.ArgumentList);
     }
@@ -29,9 +31,9 @@ public sealed class RevealCommandTests : IDisposable
     [Fact]
     public void For_FolderOnWindows_OpensItInExplorer()
     {
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(Docs, RevealKind.Folder, isMac: false));
+        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(Docs, RevealKind.Folder, isMac: false, windowsFolder: WindowsFolder));
 
-        Assert.Equal("explorer.exe", command.Program);
+        Assert.Equal(Path.Combine(WindowsFolder, "explorer.exe"), command.Program);
         Assert.Equal($"\"{Docs}\"", command.Arguments);
         Assert.Empty(command.ArgumentList);
     }
@@ -39,7 +41,7 @@ public sealed class RevealCommandTests : IDisposable
     [Fact]
     public void For_FileOnMac_RevealsItInFinder()
     {
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(DocA, RevealKind.File, isMac: true));
+        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(DocA, RevealKind.File, isMac: true, windowsFolder: WindowsFolder));
 
         Assert.Equal("/usr/bin/open", command.Program);
         Assert.Null(command.Arguments);
@@ -49,7 +51,7 @@ public sealed class RevealCommandTests : IDisposable
     [Fact]
     public void For_FolderOnMac_OpensItInFinder()
     {
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(Docs, RevealKind.Folder, isMac: true));
+        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(Docs, RevealKind.Folder, isMac: true, windowsFolder: WindowsFolder));
 
         Assert.Equal("/usr/bin/open", command.Program);
         Assert.Null(command.Arguments);
@@ -63,7 +65,9 @@ public sealed class RevealCommandTests : IDisposable
         Directory.CreateDirectory(plain);
         try
         {
-            RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(plain, RevealKind.Folder, isMac: false));
+            RevealCommand command = Assert.IsType<RevealCommand>(
+                RevealCommand.For(plain, RevealKind.Folder, isMac: false, windowsFolder: WindowsFolder)
+            );
 
             Assert.Equal($"\"{plain}\"", command.Arguments);
         }
@@ -80,7 +84,7 @@ public sealed class RevealCommandTests : IDisposable
     {
         string gone = Path.Combine(Docs, "deep", "er", "gone.md");
 
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(gone, RevealKind.File, isMac));
+        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(gone, RevealKind.File, isMac, windowsFolder: WindowsFolder));
 
         if (isMac)
         {
@@ -95,7 +99,9 @@ public sealed class RevealCommandTests : IDisposable
     [Fact]
     public void For_MissingFolder_OpensItsNearestExistingFolder()
     {
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(Path.Combine(Docs, "gone"), RevealKind.Folder, isMac: false));
+        RevealCommand command = Assert.IsType<RevealCommand>(
+            RevealCommand.For(Path.Combine(Docs, "gone"), RevealKind.Folder, isMac: false, windowsFolder: WindowsFolder)
+        );
 
         Assert.Equal($"\"{Docs}\"", command.Arguments);
     }
@@ -107,13 +113,15 @@ public sealed class RevealCommandTests : IDisposable
 
         string path = Path.Combine(MissingDriveRoot(), "nowhere", "a.md");
 
-        Assert.Null(RevealCommand.For(path, RevealKind.File, isMac: false));
+        Assert.Null(RevealCommand.For(path, RevealKind.File, isMac: false, windowsFolder: WindowsFolder));
     }
 
     [Fact]
     public void For_FileBelowAnExistingFile_OpensTheFolderHoldingThatFile()
     {
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(Path.Combine(DocA, "b.md"), RevealKind.File, isMac: false));
+        RevealCommand command = Assert.IsType<RevealCommand>(
+            RevealCommand.For(Path.Combine(DocA, "b.md"), RevealKind.File, isMac: false, windowsFolder: WindowsFolder)
+        );
 
         Assert.Equal($"\"{Docs}\"", command.Arguments);
     }
@@ -123,7 +131,7 @@ public sealed class RevealCommandTests : IDisposable
     {
         string root = Path.GetPathRoot(Path.GetTempPath())!;
 
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(root, RevealKind.Folder, isMac: false));
+        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(root, RevealKind.Folder, isMac: false, windowsFolder: WindowsFolder));
 
         Assert.Equal(root, command.Arguments);
     }
@@ -134,7 +142,7 @@ public sealed class RevealCommandTests : IDisposable
         string root = Path.GetPathRoot(Path.GetTempPath())!;
         string gone = Path.Combine(root, "nowhere-" + Guid.NewGuid().ToString("N"), "a.md");
 
-        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(gone, RevealKind.File, isMac: false));
+        RevealCommand command = Assert.IsType<RevealCommand>(RevealCommand.For(gone, RevealKind.File, isMac: false, windowsFolder: WindowsFolder));
 
         Assert.Equal(root, command.Arguments);
     }

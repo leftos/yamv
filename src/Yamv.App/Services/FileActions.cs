@@ -132,7 +132,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
     public void Reveal(string path, RevealKind kind)
     {
         ArgumentNullException.ThrowIfNull(path);
-        if (RevealCommand.For(path, kind, seams.Platform == FilePlatform.MacOS) is not { } command)
+        if (RevealCommand.For(path, kind, seams.Platform == FilePlatform.MacOS, seams.WindowsFolder) is not { } command)
         {
             log.LogWarning($"Reveal: no folder of {LogText.Clean(path)} exists.");
             string folder = kind == RevealKind.File ? Path.GetDirectoryName(path) ?? path : path;

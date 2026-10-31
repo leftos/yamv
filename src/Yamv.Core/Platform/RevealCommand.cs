@@ -43,12 +43,14 @@ public sealed class RevealCommand
     /// <param name="path">The file or folder to reveal.</param>
     /// <param name="kind">Whether <paramref name="path"/> is a file or a folder.</param>
     /// <param name="isMac">True on macOS, false on Windows.</param>
-    public static RevealCommand? For(string path, RevealKind kind, bool isMac)
+    /// <param name="windowsFolder">The folder Windows is installed in, which holds Explorer; unused on macOS.</param>
+    public static RevealCommand? For(string path, RevealKind kind, bool isMac, string windowsFolder)
     {
         ArgumentNullException.ThrowIfNull(path);
+        string explorer = Path.Combine(windowsFolder, Explorer);
         if (kind == RevealKind.File && File.Exists(path))
         {
-            return isMac ? new RevealCommand(Open, null, ["-R", path]) : new RevealCommand(Explorer, $"/select,\"{path}\"", []);
+            return isMac ? new RevealCommand(Open, null, ["-R", path]) : new RevealCommand(explorer, $"/select,\"{path}\"", []);
         }
 
         if (NearestExistingFolder(path) is not string folder)
@@ -56,7 +58,7 @@ public sealed class RevealCommand
             return null;
         }
 
-        return isMac ? new RevealCommand(Open, null, [folder]) : new RevealCommand(Explorer, ExplorerFolderArgument(folder), []);
+        return isMac ? new RevealCommand(Open, null, [folder]) : new RevealCommand(explorer, ExplorerFolderArgument(folder), []);
     }
 
     /// <summary>
