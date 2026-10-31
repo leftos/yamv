@@ -4,20 +4,20 @@
 
 ## App shell
 
-### Window and launch (5/5 done)
+### Window and launch (6/7 done)
+- [ ] YAMV-100 Window placement: fit the saved window by its frame, not its client size
 
-### Features (9/16 done)
+### Features (10/18 done)
 - [/] YAMV-9 Extras: live reload, find, drag-drop and Open dialog, links
 - [ ] YAMV-50 Content width step: scrollbar in the pane measure, other instances, steps during a render, letter layouts
 - [/] YAMV-48 Toast for failed operations: never only a log line
-- [/] YAMV-63 Content width popover: stale cached width, store exceptions, Reset-before-EndDrag segment
 - [ ] YAMV-79 Content-width popover follows a window resize while open
 - [ ] YAMV-56 Width popover: preview an unreachable width on an example document, with a toast
 - [ ] YAMV-81 Tail switch: the view follows text appended to a document
+- [ ] YAMV-103 Open a clicked web or mail link off the UI thread
+- [ ] YAMV-104 A link to the shown document under another path spelling scrolls it instead of adding a row
 
-### Document read and panes (0/11 done)
-- [ ] YAMV-44 CSharpier: three .axaml files on main are unformatted; ThemePreview's reformat changes its text
-- [ ] YAMV-37 Document read: open with delete and write sharing so YAMV never blocks another program's save
+### Document read and panes (2/12 done)
 - [ ] YAMV-38 Missing and can't-read panes: keep the old page hidden until a recovered document's page is shown
 - [ ] YAMV-39 Can't-read pane: map the macOS file-in-use errno to "in use by another program"
 - [ ] YAMV-33 Tree menus: keyboard access, no UI-thread folder walk, pointer-clickable pane buttons in tests
@@ -27,15 +27,14 @@
 - [ ] YAMV-73 Live reload follow-ups from the 3a review: grace edges, UI-thread probe, test backstops
 - [ ] YAMV-77 Scroll anchor follow-ups: empty-text ties, Core-generated page fixtures, oversized render records
 - [ ] YAMV-82 Scroll anchor edges: raw-HTML find blocks, a bad session entry, test names
+- [ ] YAMV-101 Read theme, settings and session files with write and delete sharing
 
-### Theme settings hardening (0/11 done)
+### Theme settings hardening (2/11 done)
 - [ ] YAMV-31 Theme settings window: confirm and focus hardening, one default theme id
 - [ ] YAMV-40 ThemeBridge: remove its merged dictionary on dispose; expose IsDisposed for tests
 - [ ] YAMV-36 Token editor: open on the shown appearance's tab, copyable built-in values, focus visuals
 - [ ] YAMV-46 Theme Import/Export: notice name drift, export into the themes folder, picker exceptions, export temp file
-- [ ] YAMV-55 ThemeFolderWatcher: ObjectDisposedException escapes Start after a concurrent Dispose
 - [ ] YAMV-60 Theme settings: disk-change edge cases (broken in-use theme not held, Appearance dropped, Revert vs bar)
-- [ ] YAMV-75 Theme catalog repeats its invalid-file warning on every reload
 - [ ] YAMV-78 ThemeBridge: test that an Apply of another theme ends the kept bad streak
 - [ ] YAMV-68 Toast when the theme in use goes bad or is deleted outside the app
 - [ ] YAMV-85 Theme settings: bring the window forward before a shutdown's unsaved-changes confirm
@@ -58,12 +57,16 @@
 - [ ] YAMV-92 Theme settings host: close the built window when Show throws
 - [ ] YAMV-93 Content-width popover: a store exception on a read, Reset or Clear all gets the save's recovery
 - [ ] YAMV-94 Content-width popover: re-show the segment when a save finds another window already changed it
+- [ ] YAMV-98 Strip control and format characters from document text in log lines
+- [ ] YAMV-99 macOS: pin the default-app handler by the checked type when a link opens a file
 
 ## Single instance
 
 - [ ] YAMV-54 Single instance: every window in one process; file launches open viewer windows in it
   - [ ] YAMV-66 Merge feat/single-instance to main (#2)
   - [ ] YAMV-71 54-B1 follow-ups: pin the reply-bound coupling, finally hides the loop error, answer activate requests
+  - [ ] YAMV-96 Instance channel: TimeProvider seam in SignalAsync; tests wait on events, not wall clock
+  - [ ] YAMV-102 Check the theme window's native owner change on a real desktop (Windows hidden desktop, macOS)
 
 ## Ship v1
 
