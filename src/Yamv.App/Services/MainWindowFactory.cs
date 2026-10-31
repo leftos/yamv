@@ -87,7 +87,7 @@ public static class MainWindowFactory
             var state = new DocumentWindowState(persist: true, finder.FindWorkTreeRoot, File.Exists, GroupingOptions.ForCurrentPlatform);
             var services = new DocumentWindowServices(
                 widths,
-                File.ReadAllText,
+                DocumentText.Read,
                 TimeProvider.System,
                 log,
                 changes,
@@ -170,7 +170,7 @@ public static class MainWindowFactory
             var state = new DocumentWindowState(persist: false, finder.FindWorkTreeRoot, File.Exists, GroupingOptions.ForCurrentPlatform);
             var services = new DocumentWindowServices(
                 widths,
-                File.ReadAllText,
+                DocumentText.Read,
                 TimeProvider.System,
                 log,
                 changes,
