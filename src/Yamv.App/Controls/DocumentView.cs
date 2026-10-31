@@ -233,7 +233,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         }
         catch (JsonException exception)
         {
-            _log.LogWarning($"The page returned an unreadable find result: {json}", exception);
+            _log.LogWarning($"The page returned an unreadable find result: {LogText.Clean(json)}", exception);
             return new FindResult(0, 0);
         }
     }
@@ -463,13 +463,13 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         }
         catch (JsonException exception)
         {
-            _log.LogWarning($"Ignored a malformed page message: {e.Body}", exception);
+            _log.LogWarning($"Ignored a malformed page message: {LogText.Clean(e.Body)}", exception);
             return;
         }
 
         if (message?.Type is null)
         {
-            _log.LogWarning($"Ignored a page message without a type: {e.Body}");
+            _log.LogWarning($"Ignored a page message without a type: {LogText.Clean(e.Body)}");
             return;
         }
 
@@ -507,7 +507,9 @@ public sealed class DocumentView : UserControl, IDocumentSurface
                 RaiseLink(message.Href, Resolve(message.Href), message.Button ?? 0, LinkSource.Click);
                 break;
             case "link" when message.Href is not null:
-                _log.LogInfo($"A link from an older render dropped: '{message.Href}' (render {message.Generation}, now {_generation})");
+                _log.LogInfo(
+                    $"A link from an older render dropped: '{LogText.Clean(message.Href)}' (render {message.Generation}, now {_generation})"
+                );
                 break;
             case "key" when message.Key is not null:
                 KeyForwarded?.Invoke(this, new KeyForwardedEventArgs(message.Key, message.Ctrl, message.Meta, message.Shift, message.Alt));
@@ -518,13 +520,15 @@ public sealed class DocumentView : UserControl, IDocumentSurface
             case "find":
                 break;
             case "blocked":
-                _log.LogWarning($"Blocked image '{message.Src}' in {_documentUri}: {message.Reason}");
+                _log.LogWarning(
+                    $"Blocked image '{LogText.Clean(message.Src)}' in {LogText.Clean(_documentUri?.ToString())}: {LogText.Clean(message.Reason)}"
+                );
                 break;
             case "error":
-                _log.LogWarning($"Page error in {message.Where}: {message.Message}");
+                _log.LogWarning($"Page error in {LogText.Clean(message.Where)}: {LogText.Clean(message.Message)}");
                 break;
             default:
-                _log.LogWarning($"Ignored a page message of unknown type '{message.Type}'");
+                _log.LogWarning($"Ignored a page message of unknown type '{LogText.Clean(message.Type)}'");
                 break;
         }
     }

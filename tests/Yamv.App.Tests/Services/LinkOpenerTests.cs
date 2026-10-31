@@ -385,6 +385,34 @@ public sealed class LinkOpenerTests
         });
 
     [Fact]
+    public Task A_refused_link_with_a_line_break_in_its_href_logs_one_line() =>
+        Headless.RunAsync(async () =>
+        {
+            var fixture = new Fixture { Decision = new Ignore(IgnoreKind.Missing, "the file does not exist") };
+
+            await fixture.ClickAsync(Click("gone.md\nFORGED", new Uri(Path.Combine(Root, "gone.md")), Doc));
+
+            LogEntry entry = Assert.Single(fixture.Log.Entries);
+            Assert.DoesNotContain('\n', entry.Message);
+            Assert.Contains("gone.md\uFFFDFORGED", entry.Message, StringComparison.Ordinal);
+        });
+
+    [Fact]
+    public Task An_opened_link_with_a_line_break_in_its_href_logs_one_line() =>
+        Headless.RunAsync(async () =>
+        {
+            string target = Path.Combine(Root, "docs", "b.md");
+            var fixture = new Fixture { Decision = new OpenDocument(target, "B.md\nFORGED", null) };
+
+            await fixture.ClickAsync(Click("B.md\nFORGED", new Uri(target), Doc));
+
+            Assert.Equal((target, null), Assert.Single(fixture.Documents.Opened));
+            LogEntry entry = Assert.Single(fixture.Log.Entries);
+            Assert.DoesNotContain('\n', entry.Message);
+            Assert.Contains("B.md\uFFFDFORGED", entry.Message, StringComparison.Ordinal);
+        });
+
+    [Fact]
     public Task A_viewable_file_opens_with_the_default_app() =>
         Headless.RunAsync(async () =>
         {

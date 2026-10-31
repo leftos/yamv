@@ -123,7 +123,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         string? path = file.TryGetLocalPath();
         if (path is null)
         {
-            log.LogWarning($"Export: {file.Name} has no local path; nothing is exported.");
+            log.LogWarning($"Export: {LogText.Clean(file.Name)} has no local path; nothing is exported.");
         }
 
         return path;
@@ -134,7 +134,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         ArgumentNullException.ThrowIfNull(path);
         if (RevealCommand.For(path, kind, seams.Platform == FilePlatform.MacOS) is not { } command)
         {
-            log.LogWarning($"Reveal: no folder of {path} exists.");
+            log.LogWarning($"Reveal: no folder of {LogText.Clean(path)} exists.");
             string folder = kind == RevealKind.File ? Path.GetDirectoryName(path) ?? path : path;
             toasts?.Show(ToastKind.Warning, $"{ToastValue.Code(folder)} no longer exists");
             return;
@@ -158,7 +158,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
-            log.LogWarning($"Reveal: could not start {command.Program} for {path}.", exception);
+            log.LogWarning($"Reveal: could not start {command.Program} for {LogText.Clean(path)}.", exception);
             string fileManager = seams.Platform == FilePlatform.MacOS ? "Finder" : "Explorer";
             string name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } fileName ? fileName : path;
             toasts?.Show(ToastKind.Warning, $"Couldn't open {fileManager} for {ToastValue.Code(name)}");
@@ -296,7 +296,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
-            log.LogWarning($"{logPrefix} could not open {path}.", exception);
+            log.LogWarning($"{logPrefix} could not open {LogText.Clean(path)}.", exception);
             throw new IOException($"Could not open {path} in its default app.", exception);
         }
     }
@@ -314,13 +314,13 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         ProcessOutcome outcome = seams.Run(start, MacOpenTimeout);
         if (outcome.TimedOut)
         {
-            log.LogWarning($"{logPrefix} open did not finish within {MacOpenTimeout.TotalSeconds:0} s for {path}.");
+            log.LogWarning($"{logPrefix} open did not finish within {MacOpenTimeout.TotalSeconds:0} s for {LogText.Clean(path)}.");
             return;
         }
 
         if (outcome.ExitCode != 0)
         {
-            log.LogWarning($"{logPrefix} open exited {outcome.ExitCode} for {path}: {outcome.StandardError.Trim()}");
+            log.LogWarning($"{logPrefix} open exited {outcome.ExitCode} for {LogText.Clean(path)}: {LogText.Clean(outcome.StandardError.Trim())}");
             throw new IOException($"Could not open {path} in its default app: {outcome.StandardError.Trim()}");
         }
     }
@@ -382,7 +382,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
             }
             else
             {
-                log.LogWarning($"Pick: {name} has no local path and is not opened.");
+                log.LogWarning($"Pick: {LogText.Clean(name)} has no local path and is not opened.");
                 refused.Add(name);
             }
         }

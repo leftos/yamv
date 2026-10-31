@@ -1,5 +1,5 @@
-using System.Globalization;
 using System.Text;
+using Yamv.Core.Diagnostics;
 
 namespace Yamv.App.ViewModels;
 
@@ -38,7 +38,7 @@ public static class ToastValue
     public static string Plain(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        List<Rune> runes = [.. value.EnumerateRunes().Select(Safe)];
+        List<Rune> runes = [.. LogText.Clean(value).EnumerateRunes()];
         if (runes.Count == 0)
         {
             runes.Add(Rune.ReplacementChar);
@@ -56,16 +56,4 @@ public static class ToastValue
 
         return text.ToString();
     }
-
-    /// <summary>
-    /// <paramref name="rune"/>, or U+FFFD when it could break the line or reorder the text. <see cref="string.EnumerateRunes"/>
-    /// already gives U+FFFD for an unpaired surrogate.
-    /// </summary>
-    private static Rune Safe(Rune rune) =>
-        Rune.GetUnicodeCategory(rune) switch
-        {
-            UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator =>
-                Rune.ReplacementChar,
-            _ => rune,
-        };
 }

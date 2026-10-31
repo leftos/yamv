@@ -1,4 +1,5 @@
 using System.Buffers;
+using Yamv.Core.Diagnostics;
 using Yamv.Core.Documents;
 
 namespace Yamv.Core.Links;
@@ -75,13 +76,13 @@ public static class LinkPolicy
             {
                 "http" or "https" => new OpenExternal(uri, []),
                 "mailto" => MailtoDecision(uri),
-                _ => new Ignore(IgnoreKind.Scheme, $"the scheme '{uri.Scheme}' is not one YAMV opens"),
+                _ => new Ignore(IgnoreKind.Scheme, $"the scheme '{LogText.Clean(uri.Scheme)}' is not one YAMV opens"),
             };
         }
 
         if (!string.IsNullOrEmpty(uri.Host))
         {
-            return new Ignore(IgnoreKind.NetworkShare, $"a file: link may not name a host, and '{uri.Host}' names one");
+            return new Ignore(IgnoreKind.NetworkShare, $"a file: link may not name a host, and '{LogText.Clean(uri.Host)}' names one");
         }
 
         return DecideLocal(uri, context, normalising);
@@ -103,21 +104,21 @@ public static class LinkPolicy
 
         if (RealPath.IsUncOrDevice(path))
         {
-            return new Ignore(ShareOrDeviceKind(path), $"'{path}' names a network share or a device");
+            return new Ignore(ShareOrDeviceKind(path), $"'{LogText.Clean(path)}' names a network share or a device");
         }
 
         if (path.AsSpan(Path.GetPathRoot(path)?.Length ?? 0).ContainsAny(ForbiddenNameCharacters))
         {
             return new Ignore(
                 IgnoreKind.NotPlainPath,
-                $"'{path}' holds a character no file name may hold, such as a ':' naming an alternate data stream"
+                $"'{LogText.Clean(path)}' holds a character no file name may hold, such as a ':' naming an alternate data stream"
             );
         }
 
         ResolvedPath? real = context.Resolve(path);
         if (real is null || RealPath.IsUncOrDevice(real.Path) || !RealPath.IsLocalFullyQualified(real.Path))
         {
-            return new Ignore(IgnoreKind.NotPlainPath, $"'{path}' does not resolve to a local path");
+            return new Ignore(IgnoreKind.NotPlainPath, $"'{LogText.Clean(path)}' does not resolve to a local path");
         }
 
         if (OperatingSystem.IsWindows() && WindowsRewriteRefusal(path, real.Path, normalising) is { } rewrite)
@@ -137,13 +138,13 @@ public static class LinkPolicy
     {
         if (!real.Exists)
         {
-            return new Ignore(IgnoreKind.Missing, $"'{path}' does not exist");
+            return new Ignore(IgnoreKind.Missing, $"'{LogText.Clean(path)}' does not exist");
         }
 
         ResolvedPath? root = context.Resolve(context.GroupRoot);
         if (root is null || !IsInside(root.Path, real.Path))
         {
-            return new Ignore(IgnoreKind.OutsideRoot, $"'{path}' is outside the document's group root");
+            return new Ignore(IgnoreKind.OutsideRoot, $"'{LogText.Clean(path)}' is outside the document's group root");
         }
 
         bool viewable = !real.IsDirectory && IsViewable(path) && IsViewable(real.Path);
@@ -158,7 +159,7 @@ public static class LinkPolicy
     {
         if (RealPath.IsUncOrDevice(localPath))
         {
-            return new Ignore(ShareOrDeviceKind(localPath), $"'{localPath}' names a network share or a device");
+            return new Ignore(ShareOrDeviceKind(localPath), $"'{LogText.Clean(localPath)}' names a network share or a device");
         }
 
         return RealPath.IsLocalFullyQualified(localPath)
@@ -182,13 +183,13 @@ public static class LinkPolicy
             .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
         if (segments.Any(segment => segment.EndsWith('.') || segment.EndsWith(' ')))
         {
-            return new Ignore(IgnoreKind.TrailingDotOrSpace, $"'{path}' has a name ending in a dot or space, which Windows rewrites");
+            return new Ignore(IgnoreKind.TrailingDotOrSpace, $"'{LogText.Clean(path)}' has a name ending in a dot or space, which Windows rewrites");
         }
 
         string? full = Normalise(realPath, normalising);
         return full is not null && string.Equals(full, realPath, StringComparison.Ordinal)
             ? null
-            : new Ignore(IgnoreKind.NotPlainPath, $"'{path}' is a path Windows would rewrite");
+            : new Ignore(IgnoreKind.NotPlainPath, $"'{LogText.Clean(path)}' is a path Windows would rewrite");
     }
 
     /// <summary>

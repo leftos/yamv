@@ -47,7 +47,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Add a JSON file format | `src/Yamv.Core/Session/SessionJsonContext.cs` → `SessionStore.cs` (its `Normalize`) → `tests/Yamv.Core.Tests/Session/SessionStoreTests.cs`; `src/Yamv.Core/Widths/WidthsFile.cs` is the multi-writer example | |
 | Show a failure of a user-started action (a toast) | `src/Yamv.App/Services/IToasts.cs` → `ViewModels/ToastValue.cs` → `ToastCenter.cs` → `ToastItem.cs` → `Views/ToastHost.axaml` + `.axaml.cs` (and `ToastText`) → `Views/MainWindow.axaml` (`ToastPopup`) + `.axaml.cs` (`RunLogged`) → `Platform/ToastClickThrough.cs` → `ViewModels/DocumentWindowViewModel.cs` (`RenderAsync`, `StepContentWidthAsync`, `DocumentWindowServices`) → `ViewModels/ContentWidthViewModel.cs` → `Services/FileActions.cs` → `Services/LinkOpener.cs` → `Services/MainWindowFactory.cs` → `tests/Yamv.App.Tests/Services/FileActionsTests.cs` + `Services/LinkOpenerTests.cs` + `Fakes/RecordingToasts.cs` + `ViewModels/ToastCenterTests.cs` + `Views/ToastHostTests.cs` | [look.md](design/look.md) |
 | Change the format command or the commit hooks | `prek.toml` → `tools/hooks/csharpier-wrapper.ps1`, `tools/hooks/dotnet-format-wrapper.ps1` → `.csharpierignore` → `CLAUDE.md` Commands |
-| Change the app log or how a log line is written | `src/Yamv.Core/Diagnostics/FileAppLog.cs` → `IAppLog.cs` (no test file covers `FileAppLog` yet; `tests/Yamv.Core.Tests/` has none under `Diagnostics/`) | |
+| Change the app log or how a log line is written | `src/Yamv.Core/Diagnostics/FileAppLog.cs` → `IAppLog.cs` → `LogText.cs` → the sites that log document-derived values: `src/Yamv.Core/Links/LinkPolicy.cs`, `src/Yamv.App/Services/LinkOpener.cs`, `Controls/DocumentView.cs`, `Services/FileActions.cs` → `tests/Yamv.Core.Tests/Diagnostics/` | |
 
 ## Layers
 
@@ -56,6 +56,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
   One main instance per user is held by a lock file (flock on Unix) plus a named pipe (a socket file on Unix) derived from the lock path, which later launches signal over; a named mutex is not used, because its behaviour differs on macOS.
 
   Session saving (`Session/`): `SessionSaver` writes `session.json` through `SessionStore` 500 ms after a change (a `Debouncer`, so two saves never run at once) and at once on `Flush`; a failed save is logged and retried by the next.
+
+  Logging (`Diagnostics/`): `IAppLog` is the app's log and `FileAppLog` writes it to a file. `LogText.Clean` replaces control, format, line and paragraph separator characters and unpaired surrogates with U+FFFD. A value taken from a document, a link, a file name or an external program is cleaned where it is put into a log line (the link, page-message and file-action sites), and `FileAppLog.Write` cleans every message again as a backstop and writes an exception's text line by line, each line cleaned and indented four spaces, so such text can never forge or split a log line.
 
   `WindowPlacement` picks the screen (`ScreenArea`) a saved rectangle overlaps most, in physical pixels, and clamps the rectangle there; `WindowBounds.Scaling` is the screen scale it was saved at. `Input/Shortcuts` matches a key to a `ShortcutCommand` (Ctrl/Cmd+W, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl/Cmd+B, Ctrl/Cmd+R, Ctrl/Cmd+O, Ctrl/Cmd+[ and ], which step the width narrower and wider, and Ctrl/Cmd+, which opens the theme settings window).
 
@@ -363,6 +365,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
   `tests/Yamv.Core.Tests/Documents/DocumentFileTypesTests.cs` covers the shared document-type list, and `tests/Yamv.Core.Tests/Links/` the link policy and `RealPath`. `ViewModels/DropOverlayViewModelTests.cs` covers the overlay's states and grace on a fake clock, `Services/LinkOpenerTests.cs` also the drop route and the confirm card's answers, `Links/ConfirmTextTests.cs` the card's words, `ViewModels/ConfirmCardViewModelTests.cs` its keys and answers, and `DocumentFileTypesTests.cs` also `Sort` and `DropHint`. `Controls/DocumentViewScrollMessageTests.cs` also covers the `link` message (the generation check, the source and the document path), and `ViewModels/ToastValueTests.cs` covers `ToastValue.Code` (and `Plain`), through which every link or path value enters toast text (backtick, control and separator characters replaced, 64-rune cap).
 
   `tests/Yamv.Core.Tests/Documents/DocumentFileWatcherTests.cs` covers the document watcher over fake `IFolderEvents` and `IFolderProbe` (`Theming/FolderEventsFakes.cs`) and a fake clock and pool.
+
+  `tests/Yamv.Core.Tests/Diagnostics/` covers `LogText.Clean` (`LogTextTests.cs`) and `FileAppLog`'s cleaning and line-by-line exception text (`FileAppLogTests.cs`).
 
   `tests/Yamv.Core.Tests/Settings/SettingsStoreTests.cs` covers the settings store and `SettingsWriterTests.cs` its writer, `SettingsWatcherTests.cs` its watcher.
 

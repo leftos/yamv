@@ -453,6 +453,16 @@ public sealed class FileActionsTests
     }
 
     [Fact]
+    public void A_picked_file_name_with_a_line_break_cannot_break_the_log_line()
+    {
+        List<string> paths = Actions().KeepLocal([("evil\nFORGED.md", null)]);
+
+        Assert.Empty(paths);
+        LogEntry entry = Assert.Single(_log.Entries);
+        Assert.Equal(("warning", "Pick: evil\uFFFDFORGED.md has no local path and is not opened."), (entry.Level, entry.Message));
+    }
+
+    [Fact]
     public void Several_picked_files_with_no_local_path_are_refused_once_with_their_count()
     {
         List<string> paths = Actions().KeepLocal([("a.md", null), ("b.md", null), ("c.md", null)]);

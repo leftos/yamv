@@ -96,7 +96,7 @@ internal sealed class LinkOpener : IDisposable
         }
         catch (Exception exception)
         {
-            _log.LogError($"Link: could not handle {e?.Href}.", exception);
+            _log.LogError($"Link: could not handle {LogText.Clean(e?.Href)}.", exception);
             _toasts.Show(ToastKind.Warning, LinkFailedToast);
         }
     }
@@ -117,13 +117,13 @@ internal sealed class LinkOpener : IDisposable
 
         if (link.Source != LinkSource.Click)
         {
-            _log.LogInfo($"Link from a {SourceName(link.Source)} ignored: {link.Href}");
+            _log.LogInfo($"Link from a {SourceName(link.Source)} ignored: {LogText.Clean(link.Href)}");
             return;
         }
 
         if (link.DocumentPath is not string documentPath || _documents.GroupRootOf(documentPath) is not string groupRoot)
         {
-            _log.LogInfo($"Link ignored: the document that held it is no longer open: {link.Href}");
+            _log.LogInfo($"Link ignored: the document that held it is no longer open: {LogText.Clean(link.Href)}");
             return;
         }
 
@@ -136,7 +136,7 @@ internal sealed class LinkOpener : IDisposable
         }
         catch (Exception exception)
         {
-            _log.LogError($"Link: could not decide what {link.Href} opens.", exception);
+            _log.LogError($"Link: could not decide what {LogText.Clean(link.Href)} opens.", exception);
             if (IsNewest(click, link))
             {
                 _toasts.Show(ToastKind.Refusal, NotPlainPathText(link.Href));
@@ -188,7 +188,7 @@ internal sealed class LinkOpener : IDisposable
         _droppedPaths.Clear();
         if (_disposed)
         {
-            _log.LogInfo($"Link: a drop arrived after the window closed; nothing opened: {string.Join(", ", paths)}");
+            _log.LogInfo($"Link: a drop arrived after the window closed; nothing opened: {LogText.Clean(string.Join(", ", paths))}");
             return;
         }
 
@@ -212,13 +212,13 @@ internal sealed class LinkOpener : IDisposable
     {
         if (_disposed)
         {
-            _log.LogInfo($"Link decided after the window closed; nothing opened: {link.Href}");
+            _log.LogInfo($"Link decided after the window closed; nothing opened: {LogText.Clean(link.Href)}");
             return false;
         }
 
         if (click != _newestClick)
         {
-            _log.LogInfo($"Link superseded by a newer click; nothing opened: {link.Href}");
+            _log.LogInfo($"Link superseded by a newer click; nothing opened: {LogText.Clean(link.Href)}");
             return false;
         }
 
@@ -233,7 +233,7 @@ internal sealed class LinkOpener : IDisposable
             case OpenExternal external:
                 return OpenExternalAsync(external, link);
             case OpenDocument document:
-                _log.LogInfo($"Link: opening the document {document.Path} (linked as {document.LinkPath}).");
+                _log.LogInfo($"Link: opening the document {LogText.Clean(document.Path)} (linked as {LogText.Clean(document.LinkPath)}).");
                 _documents.OpenLinkedDocument(document.Path, document.Fragment);
                 return Task.CompletedTask;
             case OpenWithDefaultApp app:
@@ -244,7 +244,7 @@ internal sealed class LinkOpener : IDisposable
                 Refuse(ignore, link, context.GroupRoot);
                 return Task.CompletedTask;
             default:
-                _log.LogError($"Link: no action for a {decision.GetType().Name} decision on {link.Href}; nothing opened.");
+                _log.LogError($"Link: no action for a {decision.GetType().Name} decision on {LogText.Clean(link.Href)}; nothing opened.");
                 _toasts.Show(ToastKind.Warning, LinkFailedToast);
                 return Task.CompletedTask;
         }
@@ -254,18 +254,20 @@ internal sealed class LinkOpener : IDisposable
     {
         if (external.DroppedFields.Count > 0)
         {
-            _log.LogInfo($"Link: left out the mailto fields {string.Join(", ", external.DroppedFields)} of {link.Href}");
+            _log.LogInfo(
+                $"Link: left out the mailto fields {LogText.Clean(string.Join(", ", external.DroppedFields))} of {LogText.Clean(link.Href)}"
+            );
         }
 
         Uri uri = external.Uri;
         if (!uri.IsAbsoluteUri || uri.IsFile || uri.Scheme is not ("http" or "https" or "mailto"))
         {
-            _log.LogError($"Link: refused to hand {uri.OriginalString} to the browser: not an http, https or mailto URI.");
+            _log.LogError($"Link: refused to hand {LogText.Clean(uri.OriginalString)} to the browser: not an http, https or mailto URI.");
             _toasts.Show(ToastKind.Warning, LinkFailedToast);
             return;
         }
 
-        _log.LogInfo($"Link: opening {uri.AbsoluteUri} in the browser.");
+        _log.LogInfo($"Link: opening {LogText.Clean(uri.AbsoluteUri)} in the browser.");
         bool opened;
         try
         {
@@ -273,13 +275,13 @@ internal sealed class LinkOpener : IDisposable
         }
         catch (Exception exception)
         {
-            _log.LogWarning($"Link: the browser could not open {uri.AbsoluteUri}.", exception);
+            _log.LogWarning($"Link: the browser could not open {LogText.Clean(uri.AbsoluteUri)}.", exception);
             opened = false;
         }
 
         if (!opened)
         {
-            _log.LogWarning($"Link: the browser did not open {uri.AbsoluteUri}.");
+            _log.LogWarning($"Link: the browser did not open {LogText.Clean(uri.AbsoluteUri)}.");
             _toasts.Show(ToastKind.Warning, "Couldn't open the link in your browser");
         }
     }
@@ -303,10 +305,10 @@ internal sealed class LinkOpener : IDisposable
 
         string name = ToastValue.Plain(FolderName(confirm.Path));
         var text = ConfirmText.For(confirm.Path, name, confirm.IsDirectory, OperatingSystem.IsMacOS());
-        _log.LogInfo($"Link: asking before opening {confirm.Path}.");
+        _log.LogInfo($"Link: asking before opening {LogText.Clean(confirm.Path)}.");
         if (!await _seams.Confirm(text.Title, text.Body))
         {
-            _log.LogInfo($"Link: {confirm.Path} not opened; the user cancelled.");
+            _log.LogInfo($"Link: {LogText.Clean(confirm.Path)} not opened; the user cancelled.");
             return;
         }
 
@@ -330,7 +332,7 @@ internal sealed class LinkOpener : IDisposable
 
         if (current != confirm)
         {
-            _log.LogWarning($"Link: {confirm.Path} changed while the card was up; nothing opened.");
+            _log.LogWarning($"Link: {LogText.Clean(confirm.Path)} changed while the card was up; nothing opened.");
             _toasts.Show(ToastKind.Warning, LinkFailedToast);
             return;
         }
@@ -349,7 +351,7 @@ internal sealed class LinkOpener : IDisposable
 
         if (!_documents.IsShown(link.DocumentPath!))
         {
-            _log.LogInfo($"Link: {confirm.Path} not asked; the document was left.");
+            _log.LogInfo($"Link: {LogText.Clean(confirm.Path)} not asked; the document was left.");
             return false;
         }
 
@@ -362,7 +364,7 @@ internal sealed class LinkOpener : IDisposable
     /// <param name="open">The file action that opens it.</param>
     private async Task StartDefaultAppAsync(LinkDecision decision, string path, Action open)
     {
-        _log.LogInfo($"Link: opening {path} in its default app.");
+        _log.LogInfo($"Link: opening {LogText.Clean(path)} in its default app.");
         try
         {
             await _seams.Run(() =>
@@ -373,14 +375,14 @@ internal sealed class LinkOpener : IDisposable
         }
         catch (Exception exception)
         {
-            _log.LogWarning($"Link: could not open {path} in its default app.", exception);
+            _log.LogWarning($"Link: could not open {LogText.Clean(path)} in its default app.", exception);
             _toasts.Show(ToastKind.Warning, $"Couldn't open {ToastValue.Code(Path.GetFileName(path))}");
         }
     }
 
     private void Refuse(Ignore ignore, LinkActivatedEventArgs link, string groupRoot)
     {
-        _log.LogInfo($"Link ignored: {ignore.Reason}: {link.Href}");
+        _log.LogInfo($"Link ignored: {ignore.Reason}: {LogText.Clean(link.Href)}");
         string href = link.Href;
         (ToastKind Kind, string Text)? toast = ignore.Kind switch
         {
@@ -397,7 +399,7 @@ internal sealed class LinkOpener : IDisposable
         };
         if (toast is not { } shown)
         {
-            _log.LogError($"Link: no toast for an ignored link of kind {ignore.Kind}: {href}");
+            _log.LogError($"Link: no toast for an ignored link of kind {ignore.Kind}: {LogText.Clean(href)}");
             _toasts.Show(ToastKind.Warning, LinkFailedToast);
             return;
         }

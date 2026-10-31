@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace Yamv.Core.Diagnostics;
 
@@ -23,7 +24,18 @@ public sealed class FileAppLog(string filePath) : IAppLog
     private void Write(string level, string message, Exception? exception)
     {
         string stamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture);
-        string line = exception is null ? $"{stamp} {level} {message}\n" : $"{stamp} {level} {message}\n{exception}\n";
+        string line = $"{stamp} {level} {LogText.Clean(message)}\n";
+        if (exception is not null)
+        {
+            var details = new StringBuilder(line);
+            foreach (string exceptionLine in exception.ToString().ReplaceLineEndings("\n").Split('\n'))
+            {
+                details.Append("    ").Append(LogText.Clean(exceptionLine)).Append('\n');
+            }
+
+            line = details.ToString();
+        }
+
         lock (_gate)
         {
             try

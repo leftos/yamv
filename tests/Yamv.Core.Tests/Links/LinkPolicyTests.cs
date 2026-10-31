@@ -567,6 +567,18 @@ public sealed class LinkPolicyTests
     public void Decide_RelativeUri_IsIgnored() =>
         Assert.Equal(IgnoreKind.NotPlainPath, Assert.IsType<Ignore>(LinkPolicy.Decide(new Uri("docs/a.md", UriKind.Relative), Context)).Kind);
 
+    [Fact]
+    public void A_refusal_reason_replaces_a_bidi_control_in_the_path()
+    {
+        string link = Path.Combine(Root, "no\u202Epe.png");
+
+        Ignore decision = Assert.IsType<Ignore>(LinkPolicy.Decide(FileUri(link), Mapping(link, MissingPath(link))));
+
+        Assert.Equal(IgnoreKind.Missing, decision.Kind);
+        Assert.Contains("no\uFFFDpe.png", decision.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain('\u202E', decision.Reason);
+    }
+
     private static ResolvedPath ExistingFile(string path) => new(path, Exists: true, IsDirectory: false);
 
     private static ResolvedPath MissingPath(string path) => new(path, Exists: false, IsDirectory: false);

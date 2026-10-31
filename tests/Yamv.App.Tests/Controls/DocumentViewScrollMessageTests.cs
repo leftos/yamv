@@ -143,6 +143,39 @@ public sealed class DocumentViewScrollMessageTests
         });
 
     [Fact]
+    public Task A_dropped_link_line_strips_line_breaks_from_its_href() =>
+        Headless.RunAsync(() =>
+        {
+            var log = new RecordingAppLog();
+            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"));
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-link-doc", "a.md")));
+
+            view.Handle(Parse("""{"type":"link","href":"other\r\nFORGED.md","button":0,"generation":0}"""));
+
+            LogEntry entry = Assert.Single(log.Entries, logged => logged.Message.Contains("older render", StringComparison.Ordinal));
+            Assert.DoesNotContain('\r', entry.Message);
+            Assert.DoesNotContain('\n', entry.Message);
+            Assert.Contains("other\uFFFD\uFFFDFORGED.md", entry.Message, StringComparison.Ordinal);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_page_error_line_strips_line_breaks_from_the_page_message() =>
+        Headless.RunAsync(() =>
+        {
+            var log = new RecordingAppLog();
+            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"));
+
+            view.Handle(Parse("""{"type":"error","where":"render","message":"a\nFORGED"}"""));
+
+            LogEntry entry = Assert.Single(log.Entries);
+            Assert.Equal("warning", entry.Level);
+            Assert.DoesNotContain('\n', entry.Message);
+            Assert.Contains("Page error in render: a\uFFFDFORGED", entry.Message, StringComparison.Ordinal);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
     public Task A_file_link_with_a_host_is_raised_not_dropped() =>
         Headless.RunAsync(() =>
         {
