@@ -64,8 +64,11 @@ public sealed class RevealCommand
     /// bare because a quoted <c>"C:\"</c> ends in <c>\"</c>, which a command line can read as an escaped quote.
     /// </summary>
     /// <param name="folder">An existing folder.</param>
-    internal static string ExplorerFolderArgument(string folder) =>
-        Path.GetPathRoot(folder) == folder && !folder.Contains(' ', StringComparison.Ordinal) ? folder : $"\"{folder}\"";
+    public static string ExplorerFolderArgument(string folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        return Path.GetPathRoot(folder) == folder && !folder.Contains(' ', StringComparison.Ordinal) ? folder : $"\"{folder}\"";
+    }
 
     /// <summary>The path itself when it is an existing folder, else its nearest ancestor folder that exists, else null.</summary>
     /// <param name="path">A file or folder path, which need not exist.</param>

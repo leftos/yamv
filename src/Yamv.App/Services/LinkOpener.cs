@@ -13,6 +13,10 @@ internal interface ILinkDocuments
     /// <param name="documentPath">The document that holds the link.</param>
     string? GroupRootOf(string documentPath);
 
+    /// <summary>Whether <paramref name="documentPath"/> is the selected document.</summary>
+    /// <param name="documentPath">The document that holds the link.</param>
+    bool IsShown(string documentPath);
+
     /// <summary>Opens <paramref name="path"/> in the window and selects it, scrolled to <paramref name="fragment"/> when given.</summary>
     /// <param name="path">The document's real path, as the link policy decided it; it need not exist.</param>
     /// <param name="fragment">The heading to scroll to, already decoded; null for none.</param>
@@ -25,12 +29,14 @@ internal interface ILinkDocuments
 /// <param name="Decide">Decides what a link opens; <see cref="LinkPolicy.Decide(Uri?, LinkContext)"/> outside tests.</param>
 /// <param name="Run">Runs blocking work off the UI thread; <c>Task.Run</c> outside tests.</param>
 /// <param name="Time">The clock a drop's batch waits on.</param>
+/// <param name="Confirm">Shows the confirm card with a title and a body; true when the user chose Open.</param>
 internal sealed record LinkOpenerSeams(
     Func<Uri, Task<bool>> OpenInBrowser,
     Func<IFileActions> FileActions,
     Func<Uri?, LinkContext, LinkDecision> Decide,
     Func<Func<LinkDecision>, Task<LinkDecision>> Run,
-    TimeProvider Time
+    TimeProvider Time,
+    Func<string, string, Task<bool>> Confirm
 );
 
 /// <summary>How a file dropped on the page, which reaches a <see cref="LinkOpener"/> as a new-window link, leaves it.</summary>
@@ -141,7 +147,7 @@ internal sealed class LinkOpener : IDisposable
 
         if (IsNewest(click, link))
         {
-            await ActAsync(decision, link, groupRoot);
+            await ActAsync(decision, link, context, click);
         }
     }
 
@@ -220,7 +226,7 @@ internal sealed class LinkOpener : IDisposable
     }
 
     /// <summary>Does the one thing <paramref name="decision"/> names.</summary>
-    private Task ActAsync(LinkDecision decision, LinkActivatedEventArgs link, string groupRoot)
+    private Task ActAsync(LinkDecision decision, LinkActivatedEventArgs link, LinkContext context, int click)
     {
         switch (decision)
         {
@@ -233,11 +239,9 @@ internal sealed class LinkOpener : IDisposable
             case OpenWithDefaultApp app:
                 return OpenWithDefaultAppAsync(app);
             case Confirm confirm:
-                _log.LogInfo($"Link: {confirm.Path} needs the user's confirmation, which YAMV can't ask yet; nothing opened.");
-                _toasts.Show(ToastKind.Refusal, $"YAMV doesn't open {ToastValue.Code(Path.GetFileName(confirm.Path))} from a link yet");
-                return Task.CompletedTask;
+                return ConfirmAsync(confirm, link, context, click);
             case Ignore ignore:
-                Refuse(ignore, link, groupRoot);
+                Refuse(ignore, link, context.GroupRoot);
                 return Task.CompletedTask;
             default:
                 _log.LogError($"Link: no action for a {decision.GetType().Name} decision on {link.Href}; nothing opened.");
@@ -280,22 +284,97 @@ internal sealed class LinkOpener : IDisposable
         }
     }
 
-    private async Task OpenWithDefaultAppAsync(OpenWithDefaultApp app)
+    private Task OpenWithDefaultAppAsync(OpenWithDefaultApp app)
     {
-        _log.LogInfo($"Link: opening {app.Path} in its default app.");
         IFileActions fileActions = _seams.FileActions();
+        return StartDefaultAppAsync(app, app.Path, () => fileActions.OpenViewable(app.Path));
+    }
+
+    /// <summary>
+    /// Asks before opening <paramref name="confirm"/>'s path, and opens it only on an answer of Open to the newest click, with its
+    /// document still shown. The name is sanitised here, since the whole sentence is longer than a sanitised value may be.
+    /// </summary>
+    private async Task ConfirmAsync(Confirm confirm, LinkActivatedEventArgs link, LinkContext context, int click)
+    {
+        if (!MayAsk(confirm, link, click))
+        {
+            return;
+        }
+
+        string name = ToastValue.Plain(FolderName(confirm.Path));
+        var text = ConfirmText.For(confirm.Path, name, confirm.IsDirectory, OperatingSystem.IsMacOS());
+        _log.LogInfo($"Link: asking before opening {confirm.Path}.");
+        if (!await _seams.Confirm(text.Title, text.Body))
+        {
+            _log.LogInfo($"Link: {confirm.Path} not opened; the user cancelled.");
+            return;
+        }
+
+        if (MayAsk(confirm, link, click))
+        {
+            await OpenIfUnchangedAsync(confirm, link, context, click);
+        }
+    }
+
+    /// <summary>
+    /// Decides the link again and opens <paramref name="confirm"/>'s path only when the answer is the same, since the card can
+    /// stand for as long as the user leaves it.
+    /// </summary>
+    private async Task OpenIfUnchangedAsync(Confirm confirm, LinkActivatedEventArgs link, LinkContext context, int click)
+    {
+        LinkDecision current = await _seams.Run(() => _seams.Decide(link.ResolvedUri, context));
+        if (!MayAsk(confirm, link, click))
+        {
+            return;
+        }
+
+        if (current != confirm)
+        {
+            _log.LogWarning($"Link: {confirm.Path} changed while the card was up; nothing opened.");
+            _toasts.Show(ToastKind.Warning, LinkFailedToast);
+            return;
+        }
+
+        IFileActions fileActions = _seams.FileActions();
+        await StartDefaultAppAsync(confirm, confirm.Path, () => fileActions.OpenConfirmed(confirm.Path, confirm.IsDirectory));
+    }
+
+    /// <summary>Whether <paramref name="confirm"/> may still act: its click is the newest and its document is still shown.</summary>
+    private bool MayAsk(Confirm confirm, LinkActivatedEventArgs link, int click)
+    {
+        if (!IsNewest(click, link))
+        {
+            return false;
+        }
+
+        if (!_documents.IsShown(link.DocumentPath!))
+        {
+            _log.LogInfo($"Link: {confirm.Path} not asked; the document was left.");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Runs <paramref name="open"/> off the UI thread; a failure is logged and shown in a toast.</summary>
+    /// <param name="decision">The decision being acted on.</param>
+    /// <param name="path">The path being opened, named in the log and the toast.</param>
+    /// <param name="open">The file action that opens it.</param>
+    private async Task StartDefaultAppAsync(LinkDecision decision, string path, Action open)
+    {
+        _log.LogInfo($"Link: opening {path} in its default app.");
         try
         {
             await _seams.Run(() =>
             {
-                fileActions.OpenViewable(app.Path);
-                return app;
+                open();
+                return decision;
             });
         }
         catch (Exception exception)
         {
-            _log.LogWarning($"Link: could not open {app.Path} in its default app.", exception);
-            _toasts.Show(ToastKind.Warning, $"Couldn't open {ToastValue.Code(Path.GetFileName(app.Path))}");
+            _log.LogWarning($"Link: could not open {path} in its default app.", exception);
+            _toasts.Show(ToastKind.Warning, $"Couldn't open {ToastValue.Code(Path.GetFileName(path))}");
         }
     }
 
@@ -338,7 +417,6 @@ internal sealed class LinkOpener : IDisposable
         return colon >= 0 ? link.Href[..colon] : link.Href;
     }
 
-    /// <summary>The group folder's name; a drive or volume root is shown whole.</summary>
-    private static string FolderName(string groupRoot) =>
-        Path.GetFileName(Path.TrimEndingDirectorySeparator(groupRoot)) is { Length: > 0 } name ? name : groupRoot;
+    /// <summary>The last name in <paramref name="path"/>, a file's or a folder's; a drive or volume root is shown whole.</summary>
+    private static string FolderName(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } name ? name : path;
 }

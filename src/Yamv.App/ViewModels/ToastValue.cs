@@ -12,8 +12,6 @@ public static class ToastValue
     /// <summary>The runes kept from the start of a cut value; the rest of <see cref="MaxRunes"/> after the <c>…</c> come from its end.</summary>
     private const int HeadRunes = 32;
 
-    private static readonly Rune Backtick = new('`');
-
     /// <summary>U+02CB, the modifier letter grave accent a backtick shows as.</summary>
     private static readonly Rune BacktickStandIn = new(0x02CB);
 
@@ -29,6 +27,17 @@ public static class ToastValue
     public static string Code(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
+        string backtickStandIn = BacktickStandIn.ToString();
+        return "`" + Plain(value).Replace("`", backtickStandIn, StringComparison.Ordinal) + "`";
+    }
+
+    /// <summary>
+    /// <paramref name="value"/> as plain text it cannot break out of: sanitised and cut as <see cref="Code"/> does, with its
+    /// backticks kept and none added.
+    /// </summary>
+    public static string Plain(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
         List<Rune> runes = [.. value.EnumerateRunes().Select(Safe)];
         if (runes.Count == 0)
         {
@@ -39,31 +48,24 @@ public static class ToastValue
             runes = [.. runes.Take(HeadRunes), Ellipsis, .. runes.TakeLast(MaxRunes - HeadRunes - 1)];
         }
 
-        var text = new StringBuilder("`");
+        var text = new StringBuilder();
         foreach (Rune rune in runes)
         {
             text.Append(rune.ToString());
         }
 
-        return text.Append('`').ToString();
+        return text.ToString();
     }
 
     /// <summary>
-    /// <paramref name="rune"/>, or its stand-in when it could break the span. <see cref="string.EnumerateRunes"/> already gives
-    /// U+FFFD for an unpaired surrogate.
+    /// <paramref name="rune"/>, or U+FFFD when it could break the line or reorder the text. <see cref="string.EnumerateRunes"/>
+    /// already gives U+FFFD for an unpaired surrogate.
     /// </summary>
-    private static Rune Safe(Rune rune)
-    {
-        if (rune == Backtick)
-        {
-            return BacktickStandIn;
-        }
-
-        return Rune.GetUnicodeCategory(rune) switch
+    private static Rune Safe(Rune rune) =>
+        Rune.GetUnicodeCategory(rune) switch
         {
             UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator =>
                 Rune.ReplacementChar,
             _ => rune,
         };
-    }
 }

@@ -35,7 +35,7 @@ namespace Yamv.App.Views;
 [SuppressMessage(
     "Reliability",
     "CA1001:Types that own disposable fields should be disposable",
-    Justification = "A window is not disposed; its link opener and drop overlay are disposed when the window closes (OnClosed)."
+    Justification = "A window is not disposed; its link opener, drop overlay and confirm card are disposed when the window closes (OnClosed)."
 )]
 public partial class MainWindow : Window
 {
@@ -55,6 +55,7 @@ public partial class MainWindow : Window
     private readonly IAppLog? _log;
     private readonly LinkOpener? _linkOpener;
     private readonly DropOverlayViewModel? _dropOverlay;
+    private readonly ConfirmCardViewModel? _confirmCard;
     private bool? _dragHasDocument;
     private double _sidebarWidth = DefaultSidebarWidth;
     private bool _sidebarShown = true;
@@ -91,6 +92,7 @@ public partial class MainWindow : Window
         _surface = surface;
         _log = log;
         FileActions = new AvaloniaFileActions(log, viewModel.Toasts, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
+        _confirmCard = new ConfirmCardViewModel();
         _linkOpener = new LinkOpener(
             viewModel,
             viewModel.Toasts,
@@ -100,7 +102,8 @@ public partial class MainWindow : Window
                 () => FileActions!,
                 LinkPolicy.Decide,
                 decide => Task.Run(decide),
-                viewModel.Time
+                viewModel.Time,
+                _confirmCard.AskAsync
             ),
             new LinkDropRoute(() => _dropOverlay!.DragSignalledRecently, OpenDropped)
         );
@@ -120,7 +123,13 @@ public partial class MainWindow : Window
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.CloseRequested += OnCloseRequested;
         surface.KeyForwarded += OnKeyForwarded;
+        surface.LinkActivated += OnLinkActivatedCancelCard;
         surface.LinkActivated += _linkOpener.OnLinkActivated;
+        ConfirmPopup.PlacementTarget = DocumentColumn;
+        ConfirmCard.DataContext = _confirmCard;
+        ConfirmCard.Answered += OnConfirmCardAnswered;
+        _confirmCard.PropertyChanged += OnConfirmCardPropertyChanged;
+        DocumentColumn.SizeChanged += OnDocumentColumnSizeChanged;
         _dropOverlay = new DropOverlayViewModel(viewModel.Time);
         _dropOverlay.PropertyChanged += OnDropOverlayPropertyChanged;
         surface.DragOverChanged += OnPageDragOverChanged;
@@ -186,6 +195,15 @@ public partial class MainWindow : Window
     /// <c>Window: drop overlay shown</c>. The hidden-desktop capture sets it to check the overlay against its mock.
     /// </summary>
     internal DevDropOverlay DropOverlayWhenShown { get; set; }
+
+    /// <summary>
+    /// Whether the window opens the confirm card for <c>setup.ps1</c> once it has shown its first document, writing
+    /// <c>Window: confirm card shown</c>. The hidden-desktop capture sets it to check the card against its mock.
+    /// </summary>
+    internal bool ConfirmCardWhenShown { get; set; }
+
+    /// <summary>The window's confirm card, which tests ask through.</summary>
+    internal ConfirmCardViewModel? ConfirmCardQuestion => _confirmCard;
 
     /// <summary>
     /// What the window does with its ⋯ menu once it has shown its first document: nothing, open the menu (writing
@@ -273,6 +291,7 @@ public partial class MainWindow : Window
             if (WindowState == WindowState.Minimized)
             {
                 _dropOverlay?.Ended();
+                _confirmCard?.Cancel();
             }
 
             UpdateDropPopup();
@@ -501,11 +520,81 @@ public partial class MainWindow : Window
         DropPopup.IsOpen = open;
     }
 
+    /// <summary>A newer click takes over from the card; the opener then refuses the old click's answer whatever it was.</summary>
+    private void OnLinkActivatedCancelCard(object? sender, LinkActivatedEventArgs e)
+    {
+        if (e?.Source == LinkSource.Click)
+        {
+            _confirmCard!.Cancel();
+        }
+    }
+
+    private void OnConfirmCardPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ConfirmCardViewModel.IsOpen))
+        {
+            UpdateConfirmPopup();
+        }
+    }
+
+    /// <summary>The user answered the card, so keyboard focus goes back to the document it covered.</summary>
+    private void OnConfirmCardAnswered(object? sender, bool open)
+    {
+        _confirmCard!.Answer(open);
+        if (DocumentHost.Content is InputElement document)
+        {
+            document.Focus();
+        }
+    }
+
+    private void OnDocumentColumnSizeChanged(object? sender, SizeChangedEventArgs e) => SizeConfirmCard();
+
+    private void SizeConfirmCard()
+    {
+        ConfirmCard.Width = DocumentColumn.Bounds.Width;
+        ConfirmCard.Height = DocumentColumn.Bounds.Height;
+    }
+
+    /// <summary>
+    /// Keeps the popup on the card, with Cancel focused, closing the width popover and the ⋯ menu when it opens. A card asked for
+    /// while the window is minimized or closed has nothing to show on, so it is cancelled.
+    /// </summary>
+    private void UpdateConfirmPopup()
+    {
+        ConfirmCardViewModel card = _confirmCard!;
+        if (card.IsOpen && (!_opened || WindowState == WindowState.Minimized))
+        {
+            card.Cancel();
+            return;
+        }
+
+        if (card.IsOpen && !ConfirmPopup.IsOpen)
+        {
+            CloseWidthPopover(refocusDocument: false);
+            MorePopup.IsOpen = false;
+            SizeConfirmCard();
+        }
+
+        ConfirmPopup.IsOpen = card.IsOpen;
+        if (card.IsOpen)
+        {
+            ConfirmCard.StartShow(_viewModel!.Time);
+        }
+        else
+        {
+            ConfirmCard.EndShow();
+        }
+    }
+
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(DocumentWindowViewModel.ShowTree) or nameof(DocumentWindowViewModel.SidebarHidden))
         {
             UpdateSidebar();
+        }
+        else if (e.PropertyName == nameof(DocumentWindowViewModel.SelectedPath))
+        {
+            _confirmCard!.Cancel();
         }
     }
 
@@ -538,6 +627,15 @@ public partial class MainWindow : Window
     /// <summary>Runs a window shortcut before any control sees the key, so focus navigation never takes Ctrl+Tab.</summary>
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
+        // A key typed in the card tunnels through the window too. The popup keeps its own focus, so the card can hold focus while
+        // the key goes to the tree; only the key's source tells them apart.
+        if (_confirmCard!.IsOpen && e.Key is Key.Escape or Key.Enter && !(e.Source is Visual source && ConfirmCard.IsVisualAncestorOf(source)))
+        {
+            _confirmCard.Cancel();
+            e.Handled = true;
+            return;
+        }
+
         if (KeyName(e) is not string key)
         {
             return;
@@ -1200,6 +1298,16 @@ public partial class MainWindow : Window
         _log!.LogInfo("Window: drop overlay shown");
     }
 
+    /// <summary>Opens the confirm card with the words of the approved mock's file, and writes the line the capture waits for.</summary>
+    private async Task ShowDevConfirmCardAsync()
+    {
+        var text = ConfirmText.For("setup.ps1", "setup.ps1", isFolder: false, OperatingSystem.IsMacOS());
+        _ = _confirmCard!.AskAsync(text.Title, text.Body);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        _log!.LogInfo($"Window: confirm card transparency given {TopLevel.GetTopLevel(ConfirmCard)?.ActualTransparencyLevel}");
+        _log.LogInfo("Window: confirm card shown");
+    }
+
     /// <summary>Writes <c>Window: shown</c> once the first document has been shown, or at once for the empty state or missing pane.</summary>
     private async Task LogShownAsync()
     {
@@ -1226,6 +1334,11 @@ public partial class MainWindow : Window
             {
                 await ShowDevDropOverlayAsync();
             }
+
+            if (ConfirmCardWhenShown)
+            {
+                await ShowDevConfirmCardAsync();
+            }
         }
         // The log line is a dev aid; a failure is logged rather than lost in a discarded task.
         catch (Exception exception)
@@ -1241,6 +1354,10 @@ public partial class MainWindow : Window
         MorePopup.IsOpen = false;
         ToastPopup.IsOpen = false;
         DropPopup.IsOpen = false;
+        _confirmCard!.Dispose();
+        _confirmCard.PropertyChanged -= OnConfirmCardPropertyChanged;
+        ConfirmCard.Answered -= OnConfirmCardAnswered;
+        DocumentColumn.SizeChanged -= OnDocumentColumnSizeChanged;
         ToastPopup.Opened -= OnToastPopupOpened;
         ToastPopup.Closed -= OnToastPopupClosed;
         if (_toasts is not null)
@@ -1258,6 +1375,7 @@ public partial class MainWindow : Window
         _viewModel!.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.CloseRequested -= OnCloseRequested;
         _surface!.KeyForwarded -= OnKeyForwarded;
+        _surface.LinkActivated -= OnLinkActivatedCancelCard;
         _surface.LinkActivated -= _linkOpener!.OnLinkActivated;
         _surface.DragOverChanged -= OnPageDragOverChanged;
         _dropOverlay!.PropertyChanged -= OnDropOverlayPropertyChanged;

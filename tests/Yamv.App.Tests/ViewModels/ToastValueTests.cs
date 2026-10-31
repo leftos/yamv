@@ -71,5 +71,25 @@ public sealed class ToastValueTests
         Assert.DoesNotContain(inner.EnumerateRunes(), rune => rune == Rune.ReplacementChar);
     }
 
+    [Fact]
+    public void Plain_replaces_control_and_format_runes()
+    {
+        string value = "a" + C(0x0A) + "b" + C(0x202E) + "c" + C(0x2028) + "d";
+
+        Assert.Equal("a" + Replacement + "b" + Replacement + "c" + Replacement + "d", ToastValue.Plain(value));
+    }
+
+    [Fact]
+    public void Plain_cuts_a_long_value_as_Code_does()
+    {
+        string value = new string('s', 32) + new string('m', 40) + new string('e', 31);
+
+        Assert.Equal(new string('s', 32) + Ellipsis + new string('e', 31), ToastValue.Plain(value));
+        Assert.Equal(ToastValue.Code(value)[1..^1], ToastValue.Plain(value));
+    }
+
+    [Fact]
+    public void Plain_keeps_a_backtick() => Assert.Equal("a`b", ToastValue.Plain("a`b"));
+
     private static string C(int code) => ((char)code).ToString();
 }

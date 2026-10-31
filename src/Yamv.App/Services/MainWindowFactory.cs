@@ -28,6 +28,17 @@ public static class MainWindowFactory
         && Environment.GetEnvironmentVariable(ToastsVariable) == "1";
 
     /// <summary>
+    /// Set to 1 in a run with its own data folder, it makes the main window open the confirm card once it has shown, for a
+    /// hidden-desktop capture.
+    /// </summary>
+    internal const string ConfirmCardVariable = "YAMV_DEV_CONFIRM_CARD";
+
+    /// <summary>True when <see cref="ConfirmCardVariable"/> is 1 and the run has its own data folder, so the owner's app never shows it.</summary>
+    private static bool DevConfirmCardAsked() =>
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
+        && Environment.GetEnvironmentVariable(ConfirmCardVariable) == "1";
+
+    /// <summary>
     /// Set to ok or no in a run with its own data folder, it makes the main window show that form of the drop overlay once it has
     /// shown, for a hidden-desktop capture.
     /// </summary>
@@ -121,6 +132,7 @@ public static class MainWindowFactory
             {
                 ToastsWhenShown = DevToastsAsked(),
                 DropOverlayWhenShown = DevDropOverlayAsked(),
+                ConfirmCardWhenShown = DevConfirmCardAsked(),
             };
             RestoreLayout(window, session);
             var saver = new MainWindowSession(window, viewModel, store, TimeProvider.System, log);

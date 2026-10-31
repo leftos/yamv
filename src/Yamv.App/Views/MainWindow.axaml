@@ -269,6 +269,22 @@
         >
           <views:DropOverlay x:Name="DropOverlay" />
         </Popup>
+        <!--
+          The confirm card: a native popup over the web view, its scrim sized to the document pane, so the title bar and tree stay
+          as they are. It takes focus, so Enter and Esc reach it, and only the card's own answers close it.
+        -->
+        <Popup
+          x:Name="ConfirmPopup"
+          ShouldUseOverlayLayer="False"
+          IsLightDismissEnabled="False"
+          TakesFocusFromNativeControl="True"
+          WindowManagerAddShadowHint="False"
+          Placement="AnchorAndGravity"
+          PlacementAnchor="TopLeft"
+          PlacementGravity="BottomRight"
+        >
+          <views:ConfirmCard x:Name="ConfirmCard" />
+        </Popup>
       </Panel>
       <GridSplitter
         Grid.Column="1"

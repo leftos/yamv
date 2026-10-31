@@ -7,6 +7,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Microsoft.Extensions.Time.Testing;
@@ -1283,6 +1284,264 @@ public sealed class MainWindowTests
         });
 
     [Fact]
+    public Task Switching_documents_cancels_the_card() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA, fixture.DocB);
+            Task<bool> asked = fixture.AskCard();
+            Assert.True(fixture.Window.ConfirmPopup.IsOpen);
+
+            fixture.ViewModel.SelectNext();
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+        });
+
+    [Fact]
+    public Task Minimising_cancels_the_card() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+
+            fixture.Window.WindowState = WindowState.Minimized;
+            fixture.Settle();
+            fixture.Window.WindowState = WindowState.Normal;
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+        });
+
+    [Fact]
+    public Task Closing_the_window_cancels_the_card() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+        });
+
+    [Fact]
+    public Task The_card_defaults_to_Cancel() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+            ConfirmCard card = fixture.Window.ConfirmCard;
+
+            Assert.Same(card.CancelButton, CardTop(card).FocusManager?.GetFocusedElement());
+            Assert.Contains("def", card.CancelButton.Classes);
+            Assert.DoesNotContain("def", card.OpenButton.Classes);
+            Assert.Equal("Open a.ps1?", card.Heading.Text);
+            Assert.Equal("It's a script.", card.Sentence.Text);
+            Assert.Equal(fixture.Window.DocumentColumn.Bounds.Width, card.Width);
+            Assert.Equal(fixture.Window.DocumentColumn.Bounds.Height, card.Height);
+
+            fixture.ClickEvent(card.CancelButton);
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+        });
+
+    [Theory]
+    [InlineData(Key.Escape, PhysicalKey.Escape)]
+    [InlineData(Key.Enter, PhysicalKey.Enter)]
+    public Task Esc_and_Enter_cancel(Key key, PhysicalKey physical) =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+
+            CardTop(fixture.Window.ConfirmCard).KeyPress(key, RawInputModifiers.None, physical, null);
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+        });
+
+    [Fact]
+    public Task Enter_on_Open_opens() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+            ConfirmCard card = fixture.Window.ConfirmCard;
+            TopLevel top = CardTop(card);
+
+            top.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, null);
+            fixture.Settle();
+            Assert.Same(card.OpenButton, top.FocusManager?.GetFocusedElement());
+            Assert.Contains("def", card.OpenButton.Classes);
+            Assert.DoesNotContain("def", card.CancelButton.Classes);
+
+            top.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.True(await asked);
+        });
+
+    [Fact]
+    public Task A_second_click_on_Open_right_after_the_card_shows_does_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCardForClicks();
+
+            fixture.ClickInCard(fixture.Window.ConfirmCard.OpenButton);
+
+            Assert.True(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(asked.IsCompleted);
+        });
+
+    [Fact]
+    public Task Open_takes_a_click_once_the_double_click_time_has_passed() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCardForClicks();
+
+            fixture.PassDoubleClickTime();
+            fixture.ClickInCard(fixture.Window.ConfirmCard.OpenButton);
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.True(await asked);
+        });
+
+    [Fact]
+    public Task A_reshown_card_guards_Open_again() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> first = fixture.AskCardForClicks();
+            fixture.PassDoubleClickTime();
+            fixture.Window.ConfirmCardQuestion!.Cancel();
+            fixture.Settle();
+            Assert.False(await first);
+
+            Task<bool> second = fixture.AskCard();
+            fixture.ClickInCard(fixture.Window.ConfirmCard.OpenButton);
+
+            Assert.True(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(second.IsCompleted);
+        });
+
+    [Fact]
+    public Task Esc_cancels_the_card_with_focus_on_the_tree() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+            fixture.Window.Tree.Focus();
+            fixture.Settle();
+
+            fixture.Window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+        });
+
+    [Fact]
+    public Task A_space_held_from_before_the_card_cannot_press_Open() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+            ConfirmCard card = fixture.Window.ConfirmCard;
+            TopLevel top = CardTop(card);
+            top.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, null);
+            fixture.Settle();
+            Assert.Same(card.OpenButton, top.FocusManager?.GetFocusedElement());
+
+            top.KeyRelease(Key.Space, RawInputModifiers.None, PhysicalKey.Space, null);
+            fixture.Settle();
+
+            Assert.True(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(asked.IsCompleted);
+        });
+
+    [Fact]
+    public Task Space_on_Cancel_cancels() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> asked = fixture.AskCard();
+            TopLevel top = CardTop(fixture.Window.ConfirmCard);
+
+            top.KeyPress(Key.Space, RawInputModifiers.None, PhysicalKey.Space, null);
+            top.KeyRelease(Key.Space, RawInputModifiers.None, PhysicalKey.Space, null);
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+        });
+
+    [Fact]
+    public Task A_second_card_starts_on_Cancel() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Task<bool> first = fixture.AskCard();
+            ConfirmCard card = fixture.Window.ConfirmCard;
+            CardTop(card).KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, null);
+            fixture.Settle();
+            Assert.True(card.OpenButton.IsFocused);
+            fixture.Window.ConfirmCardQuestion!.Cancel();
+            fixture.Settle();
+            Assert.False(await first);
+
+            _ = fixture.AskCard();
+
+            Assert.Same(card.CancelButton, CardTop(card).FocusManager?.GetFocusedElement());
+            Assert.Contains("def", card.CancelButton.Classes);
+            Assert.DoesNotContain("def", card.OpenButton.Classes);
+        });
+
+    [Fact]
+    public Task A_newer_click_closes_the_card() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            var web = new Uri("https://example.com/");
+            Task<bool> asked = fixture.AskCard();
+
+            // No open document holds these links, so the opener drops them and the selection never changes.
+            fixture.Surface.RaiseLink(new LinkActivatedEventArgs("https://example.com/", web, 0, LinkSource.Navigation, null));
+            fixture.Settle();
+            Assert.True(fixture.Window.ConfirmPopup.IsOpen);
+
+            fixture.Surface.RaiseLink(new LinkActivatedEventArgs("https://example.com/", web, 0, LinkSource.Click, null));
+            fixture.Settle();
+
+            Assert.False(fixture.Window.ConfirmPopup.IsOpen);
+            Assert.False(await asked);
+            Assert.Equal(fixture.DocA, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
     public Task A_clicked_link_in_the_window_reaches_the_opener() =>
         Headless.RunAsync(async () =>
         {
@@ -1349,6 +1608,9 @@ public sealed class MainWindowTests
                 _ => [row],
             }
         );
+
+    /// <summary>The popup window holding <paramref name="card"/>.</summary>
+    private static TopLevel CardTop(ConfirmCard card) => TopLevel.GetTopLevel(card) ?? throw new InvalidOperationException("The card is not shown.");
 
     /// <summary>
     /// A shown main window over temp files: a repo with <c>docs/a.md</c>, <c>docs/b.md</c>, <c>docs/design/look.md</c> and
@@ -1501,6 +1763,47 @@ public sealed class MainWindowTests
             Window.MouseDown(point, MouseButton.Left);
             Settle();
             Window.MouseUp(point, MouseButton.Left);
+            Settle();
+        }
+
+        /// <summary>Puts the confirm card up, as a link needing an answer does.</summary>
+        public Task<bool> AskCard()
+        {
+            Task<bool> asked = Window.ConfirmCardQuestion!.AskAsync("Open a.ps1?", "It's a script.");
+            Settle();
+            return asked;
+        }
+
+        /// <summary>
+        /// Puts the confirm card up with its buttons able to take a pointer, whose fills are the theme resources
+        /// <c>YamvPageBackground</c> and <c>YamvHoverBackground</c>, which the test app never sets.
+        /// </summary>
+        public Task<bool> AskCardForClicks()
+        {
+            Window.Resources["YamvPageBackground"] = Brushes.White;
+            Window.Resources["YamvHoverBackground"] = Brushes.White;
+            return AskCard();
+        }
+
+        /// <summary>Presses and releases the mouse over <paramref name="button"/>, a button of the shown card.</summary>
+        public void ClickInCard(Button button)
+        {
+            TopLevel top = CardTop(Window.ConfirmCard);
+            Point? middle = button.TranslatePoint(new Point(button.Bounds.Width / 2, button.Bounds.Height / 2), top);
+            Point point = middle ?? throw new InvalidOperationException("The button is not in the card's popup.");
+            top.MouseMove(point);
+            Settle();
+            top.MouseDown(point, MouseButton.Left);
+            Settle();
+            top.MouseUp(point, MouseButton.Left);
+            Settle();
+        }
+
+        /// <summary>Lets the double click time pass on the window's clock.</summary>
+        public void PassDoubleClickTime()
+        {
+            IPlatformSettings settings = Application.Current?.PlatformSettings ?? throw new InvalidOperationException("No platform settings.");
+            Time.Advance(settings.GetDoubleTapTime(PointerType.Mouse));
             Settle();
         }
 

@@ -309,6 +309,10 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <param name="documentPath">The document that holds a link.</param>
     public string? GroupRootOf(string documentPath) => _state.GroupOf(documentPath)?.Path;
 
+    /// <summary>Whether <paramref name="documentPath"/> is the selected document.</summary>
+    /// <param name="documentPath">The path the document was shown with, as the surface reports it.</param>
+    public bool IsShown(string documentPath) => string.Equals(SelectedPath, documentPath, StringComparison.Ordinal);
+
     /// <summary>
     /// Opens a document a link named in this window and selects it as <see cref="Open"/> does, a missing file becoming a
     /// missing row; its first show scrolls to <paramref name="fragment"/>. A link to the shown document scrolls it without a

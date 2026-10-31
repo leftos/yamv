@@ -38,6 +38,14 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
 
     private const string JsonExtension = ".json";
 
+    private const string ConfirmedLogPrefix = "Open confirmed link:";
+
+    /// <summary>
+    /// The program extensions the Windows shell tries on a path with no extension of its own, before the path itself: opening
+    /// <c>foo</c> ran <c>foo.cmd</c> beside it, while opening <c>foo.txt</c> left <c>foo.txt.cmd</c> alone.
+    /// </summary>
+    private static readonly string[] ProgramExtensions = [".pif", ".com", ".exe", ".bat", ".cmd", ".lnk"];
+
     /// <summary>The document pickers' filters, in the order the picker lists them, built from <see cref="DocumentFileTypes"/>.</summary>
     private static readonly IReadOnlyList<FilePickerFileType> DocumentFilters =
     [
@@ -183,25 +191,47 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         OpenInDefaultApp(path, "Open link:");
     }
 
-    /// <summary>
-    /// Whether a link may open <paramref name="path"/>: fully qualified, with no control character, of a viewable type, and on
-    /// Windows rooted at a drive letter (so never a share or device path), with no <c>:</c> after the root (an alternate data
-    /// stream) and no name ending in a dot or a space, which Windows would rewrite.
-    /// </summary>
-    private static bool IsViewablePath(string path, bool windows)
+    public void OpenConfirmed(string path, bool isDirectory)
     {
-        if (!Path.IsPathFullyQualified(path) || path.Any(character => character < ' '))
+        ArgumentNullException.ThrowIfNull(path);
+        bool windows = seams.Platform == FilePlatform.Windows;
+        if (!IsPlainLocalPath(path, windows))
         {
-            return false;
+            throw new ArgumentException($"Only a fully qualified local path can be opened from a link: {path}", nameof(path));
         }
 
-        if (windows && !IsPlainWindowsPath(path))
+        if (isDirectory && windows)
         {
-            return false;
+            OpenFolderOnWindows(path);
+            return;
         }
 
-        return LinkPolicy.ViewableExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+        OpenInDefaultApp(path, ConfirmedLogPrefix);
     }
+
+    /// <summary>
+    /// Opens the folder in the Explorer of the Windows folder, past the shell, which may run a program named like the folder
+    /// instead.
+    /// </summary>
+    /// <param name="path">The folder to open, already checked.</param>
+    private void OpenFolderOnWindows(string path)
+    {
+        string explorer = Path.Combine(seams.WindowsFolder, "explorer.exe");
+        var start = new ProcessStartInfo(explorer, RevealCommand.ExplorerFolderArgument(path)) { UseShellExecute = false };
+        StartOnWindows(start, path, ConfirmedLogPrefix);
+    }
+
+    /// <summary>Whether a link may open <paramref name="path"/> without asking: a plain local path of a viewable type.</summary>
+    private static bool IsViewablePath(string path, bool windows) =>
+        IsPlainLocalPath(path, windows) && LinkPolicy.ViewableExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether <paramref name="path"/> is one a link may name: fully qualified, with no control character, and on Windows rooted at
+    /// a drive letter (so never a share or device path), with no <c>:</c> after the root (an alternate data stream) and no name
+    /// ending in a dot or a space, which Windows would rewrite.
+    /// </summary>
+    private static bool IsPlainLocalPath(string path, bool windows) =>
+        Path.IsPathFullyQualified(path) && !path.Any(character => character < ' ') && (!windows || IsPlainWindowsPath(path));
 
     /// <summary>
     /// Whether <paramref name="path"/> starts at a drive root such as <c>C:\</c>, has no <c>:</c> after it, and has no name
@@ -218,12 +248,22 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
     /// <summary>Opens <paramref name="path"/> in its default app, with no verb and no arguments.</summary>
     /// <param name="path">The file to open, already checked.</param>
     /// <param name="logPrefix">What the log lines start with, naming the action.</param>
+    /// <exception cref="IOException">No app would open the file, or it has no extension and Windows might run a program beside it.</exception>
     private void OpenInDefaultApp(string path, string logPrefix)
     {
         FilePlatform platform = seams.Platform;
         if (platform == FilePlatform.Other)
         {
             throw new PlatformNotSupportedException($"Opening {path} in its default app is not supported on this platform.");
+        }
+
+        if (
+            platform == FilePlatform.Windows
+            && Path.GetExtension(path).Length == 0
+            && ProgramExtensions.Any(extension => seams.FileExists(path + extension))
+        )
+        {
+            throw new IOException($"{path} has a program of the same name beside it, which Windows might run instead.");
         }
 
         var command = OpenFileCommand.For(path, platform == FilePlatform.MacOS);
@@ -242,11 +282,11 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         RunOpen(start, path, logPrefix);
     }
 
-    /// <summary>Starts the shell open, whose failure is the window's: no app is associated with the file.</summary>
-    /// <param name="start">The shell open to start.</param>
+    /// <summary>Starts the open, whose failure is the window's: no app is associated with the file.</summary>
+    /// <param name="start">The open to start.</param>
     /// <param name="path">The file being opened, named in the message.</param>
     /// <param name="logPrefix">What the log line starts with.</param>
-    /// <exception cref="IOException">The shell refused to start.</exception>
+    /// <exception cref="IOException">It refused to start.</exception>
     private void StartOnWindows(ProcessStartInfo start, string path, string logPrefix)
     {
         try
@@ -402,6 +442,18 @@ internal interface IFileActions
     /// <exception cref="IOException">No app would open the file.</exception>
     void OpenViewable(string path);
 
+    /// <summary>
+    /// Opens <paramref name="path"/>, a file or folder a link named and the user agreed to open, in whatever app the system
+    /// associates with it, with no verb and no arguments; a folder on Windows opens in Explorer, past the shell.
+    /// </summary>
+    /// <param name="path">
+    /// A fully qualified local path of any type; not a share or device path, and on Windows no name in it ends in a dot or a space.
+    /// </param>
+    /// <param name="isDirectory">Whether <paramref name="path"/> is a folder, as the link policy resolved it.</param>
+    /// <exception cref="ArgumentException">The path is not one a link may open.</exception>
+    /// <exception cref="IOException">No app would open the file, or on Windows it has no extension and a program of its name sits beside it.</exception>
+    void OpenConfirmed(string path, bool isDirectory);
+
     /// <summary>Puts <paramref name="text"/> on the clipboard.</summary>
     /// <param name="owner">The window whose clipboard is used.</param>
     /// <param name="text">The text to copy.</param>
@@ -427,13 +479,24 @@ internal enum FilePlatform
 /// <param name="StandardError">What it wrote to its error stream.</param>
 internal sealed record ProcessOutcome(bool TimedOut, int ExitCode, string StandardError);
 
-/// <summary>The two things a test replaces: the platform the actions run on, and the way a process is run and waited for.</summary>
+/// <summary>
+/// What a test replaces: the platform the actions run on, the way a process is run and waited for, whether a file exists, and
+/// the Windows folder.
+/// </summary>
 /// <param name="Platform">The desktop the actions run on.</param>
 /// <param name="Run">Starts a process, waits up to the timeout for it, and reports what it said.</param>
-internal sealed record FileActionSeams(FilePlatform Platform, Func<ProcessStartInfo, TimeSpan, ProcessOutcome> Run)
+/// <param name="FileExists">Whether a file exists at a path.</param>
+/// <param name="WindowsFolder">The folder Windows is installed in, which holds Explorer; empty elsewhere.</param>
+internal sealed record FileActionSeams(
+    FilePlatform Platform,
+    Func<ProcessStartInfo, TimeSpan, ProcessOutcome> Run,
+    Func<string, bool> FileExists,
+    string WindowsFolder
+)
 {
-    /// <summary>This machine's desktop, and a real process run and waited for.</summary>
-    public static FileActionSeams Default { get; } = new(ThisPlatform, RunProcess);
+    /// <summary>This machine's desktop, disk and Windows folder, and a real process run and waited for.</summary>
+    public static FileActionSeams Default { get; } =
+        new(ThisPlatform, RunProcess, File.Exists, Environment.GetFolderPath(Environment.SpecialFolder.Windows));
 
     private static FilePlatform ThisPlatform =>
         OperatingSystem.IsWindows() ? FilePlatform.Windows

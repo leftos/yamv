@@ -1,0 +1,105 @@
+<UserControl
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="using:Yamv.App.ViewModels"
+  x:Class="Yamv.App.Views.ConfirmCard"
+  x:DataType="vm:ConfirmCardViewModel"
+  FontFamily="{DynamicResource YamvUiFont}"
+>
+  <UserControl.Styles>
+    <!-- The card's buttons: 30 px high, radius 6. The default one, which Enter answers, wears the accent ring. -->
+    <Style Selector="Button.dlg">
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Padding" Value="14,0" />
+      <Setter Property="Foreground" Value="{DynamicResource YamvText}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvLine}" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="FocusAdorner" Value="{x:Null}" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Panel>
+            <Border Name="Ring" Margin="-2" CornerRadius="8" BorderThickness="2" BorderBrush="{DynamicResource YamvAccentSoft}" />
+            <Border
+              Name="Back"
+              CornerRadius="6"
+              BorderThickness="1"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              Padding="{TemplateBinding Padding}"
+            >
+              <ContentPresenter Content="{TemplateBinding Content}" VerticalAlignment="Center" Foreground="{TemplateBinding Foreground}" />
+            </Border>
+          </Panel>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.dlg /template/ Border#Ring">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Button.dlg /template/ Border#Back">
+      <Setter Property="Background" Value="{DynamicResource YamvPageBackground}" />
+    </Style>
+    <Style Selector="Button.dlg:pointerover /template/ Border#Back">
+      <Setter Property="Background" Value="{DynamicResource YamvHoverBackground}" />
+    </Style>
+    <Style Selector="Button.dlg.def">
+      <Setter Property="BorderBrush" Value="{DynamicResource YamvAccent}" />
+    </Style>
+    <Style Selector="Button.dlg.def /template/ Border#Ring">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+  </UserControl.Styles>
+  <!-- The scrim takes every click on the pane and does nothing with it. -->
+  <Panel x:Name="Scrim">
+    <Border
+      x:Name="Card"
+      MaxWidth="404"
+      Margin="12"
+      VerticalAlignment="Center"
+      Padding="20,18,20,16"
+      CornerRadius="10"
+      BorderThickness="1"
+      Background="{DynamicResource YamvPageBackground}"
+      BorderBrush="{DynamicResource YamvLine}"
+    >
+      <StackPanel>
+        <DockPanel Margin="0,0,0,8">
+          <Viewbox Width="18" Height="18" Margin="0,0,10,0">
+            <Canvas Width="16" Height="16">
+              <Path Data="M8.2,14.2 H3 V1.8 H8.6 L11.6,4.8 V7.4" Stroke="{DynamicResource YamvAccent}" StrokeThickness="1.35" StrokeJoin="Round" />
+              <Path
+                Data="M9.6,14.2 L14.2,9.6 M10.6,9.6 H14.2 V13.2"
+                Stroke="{DynamicResource YamvAccent}"
+                StrokeThickness="1.35"
+                StrokeLineCap="Round"
+                StrokeJoin="Round"
+              />
+            </Canvas>
+          </Viewbox>
+          <TextBlock
+            x:Name="Heading"
+            Text="{Binding Title}"
+            FontSize="16"
+            FontWeight="SemiBold"
+            Foreground="{DynamicResource YamvHeading}"
+            VerticalAlignment="Center"
+            TextTrimming="CharacterEllipsis"
+          />
+        </DockPanel>
+        <TextBlock
+          x:Name="Sentence"
+          Text="{Binding Body}"
+          FontSize="13"
+          LineHeight="19.5"
+          Foreground="{DynamicResource YamvTextSecondary}"
+          TextWrapping="Wrap"
+          Margin="0,0,0,16"
+        />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+          <Button x:Name="OpenButton" Classes="dlg" Content="Open" />
+          <Button x:Name="CancelButton" Classes="dlg def" Content="Cancel" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+  </Panel>
+</UserControl>

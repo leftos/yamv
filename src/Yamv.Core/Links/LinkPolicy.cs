@@ -147,7 +147,7 @@ public static class LinkPolicy
         }
 
         bool viewable = !real.IsDirectory && IsViewable(path) && IsViewable(real.Path);
-        return viewable ? new OpenWithDefaultApp(real.Path) : new Confirm(real.Path);
+        return viewable ? new OpenWithDefaultApp(real.Path) : new Confirm(real.Path, real.IsDirectory);
     }
 
     /// <summary>

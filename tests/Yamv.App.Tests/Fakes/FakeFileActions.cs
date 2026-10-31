@@ -103,6 +103,26 @@ internal sealed class FakeFileActions : IFileActions
         Viewed.Add(path);
     }
 
+    /// <summary>Every path a link opened once the user agreed, oldest first.</summary>
+    public List<string> Confirmed { get; } = [];
+
+    /// <summary>Whether each path in <see cref="Confirmed"/> was opened as a folder, oldest first.</summary>
+    public List<bool> ConfirmedAsDirectory { get; } = [];
+
+    /// <summary>When set, <see cref="OpenConfirmed"/> throws it instead of recording the path.</summary>
+    public Exception? ConfirmFailure { get; set; }
+
+    public void OpenConfirmed(string path, bool isDirectory)
+    {
+        if (ConfirmFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        Confirmed.Add(path);
+        ConfirmedAsDirectory.Add(isDirectory);
+    }
+
     public Task CopyTextAsync(TopLevel owner, string text)
     {
         if (CopyFailure is { } failure)

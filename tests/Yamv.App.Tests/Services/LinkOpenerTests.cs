@@ -417,17 +417,170 @@ public sealed class LinkOpenerTests
         });
 
     [Fact]
-    public Task A_confirm_decision_opens_nothing_and_toasts() =>
+    public Task A_link_of_an_unlisted_type_asks_before_opening() =>
         Headless.RunAsync(async () =>
         {
             string script = Path.Combine(Root, "tools", "setup.ps1");
-            var fixture = new Fixture { Decision = new Confirm(script) };
+            var fixture = new Fixture { Decision = new Confirm(script, IsDirectory: false) };
 
-            await fixture.ClickAsync(Click("../tools/setup.ps1", new Uri(script), Doc));
+            Task handled = fixture.ClickUpToTheCard(script);
+
+            (string title, string body, _) = Assert.Single(fixture.Cards);
+            Assert.Equal("Open setup.ps1?", title);
+            Assert.Equal(ConfirmText.For(script, "setup.ps1", isFolder: false, OperatingSystem.IsMacOS()).Body, body);
+            Assert.False(handled.IsCompleted);
+            fixture.AssertNothingOpened();
+            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == $"Link: asking before opening {script}.");
+            fixture.Answer(open: false);
+            await fixture.DrainAsync(handled);
+        });
+
+    [Fact]
+    public Task Answering_open_opens_the_checked_path() =>
+        Headless.RunAsync(async () =>
+        {
+            string script = Path.Combine(Root, "tools", "setup.ps1");
+            var fixture = new Fixture { Decision = new Confirm(script, IsDirectory: false) };
+
+            Task handled = fixture.ClickUpToTheCard(script);
+            fixture.Answer(open: true);
+            await fixture.DrainAsync(handled);
+
+            Assert.Equal([script], fixture.Files.Confirmed);
+            Assert.Empty(fixture.Files.Viewed);
+            Assert.Empty(fixture.Toasts.Shown);
+        });
+
+    [Fact]
+    public Task A_folder_link_opens_as_a_folder() =>
+        Headless.RunAsync(async () =>
+        {
+            string folder = Path.Combine(Root, "assets");
+            var fixture = new Fixture { Decision = new Confirm(folder, IsDirectory: true) };
+
+            Task handled = fixture.ClickUpToTheCard(folder);
+            fixture.Answer(open: true);
+            await fixture.DrainAsync(handled);
+
+            Assert.Equal([folder], fixture.Files.Confirmed);
+            Assert.Equal([true], fixture.Files.ConfirmedAsDirectory);
+        });
+
+    [Fact]
+    public Task Cancelling_opens_nothing_and_shows_no_toast() =>
+        Headless.RunAsync(async () =>
+        {
+            string script = Path.Combine(Root, "tools", "setup.ps1");
+            var fixture = new Fixture { Decision = new Confirm(script, IsDirectory: false) };
+
+            Task handled = fixture.ClickUpToTheCard(script);
+            fixture.Answer(open: false);
+            await fixture.DrainAsync(handled);
 
             fixture.AssertNothingOpened();
-            Assert.Equal((ToastKind.Refusal, "YAMV doesn't open `setup.ps1` from a link yet"), Assert.Single(fixture.Toasts.Shown));
-            Assert.Equal(1, fixture.Runs);
+            Assert.Empty(fixture.Toasts.Shown);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == $"Link: {script} not opened; the user cancelled.");
+        });
+
+    [Fact]
+    public Task A_newer_click_while_the_card_is_up_opens_nothing_from_the_old_one() =>
+        Headless.RunAsync(async () =>
+        {
+            string script = Path.Combine(Root, "tools", "setup.ps1");
+            var web = new Uri("https://example.com/");
+            var fixture = new Fixture { DecideBy = uri => uri == web ? new OpenExternal(web, []) : new Confirm(script, IsDirectory: false) };
+
+            Task handled = fixture.ClickUpToTheCard(script);
+            await fixture.ClickAsync(Click("https://example.com/", web, Doc));
+            fixture.Answer(open: true);
+            await fixture.DrainAsync(handled);
+
+            Assert.Equal([web], fixture.Browser);
+            Assert.Empty(fixture.Files.Confirmed);
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "info" && entry.Message.Contains("superseded", StringComparison.Ordinal));
+        });
+
+    [Fact]
+    public Task A_failed_confirmed_open_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            string script = Path.Combine(Root, "tools", "setup.ps1");
+            var fixture = new Fixture { Decision = new Confirm(script, IsDirectory: false) };
+            fixture.Files.ConfirmFailure = new IOException("No app.");
+
+            Task handled = fixture.ClickUpToTheCard(script);
+            fixture.Answer(open: true);
+            await fixture.DrainAsync(handled);
+
+            Assert.Equal((ToastKind.Warning, "Couldn't open `setup.ps1`"), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Level == "warning" && entry.Exception is IOException);
+            fixture.AssertNothingOpened();
+        });
+
+    [Fact]
+    public Task A_name_with_a_control_character_is_sanitised_in_the_card() =>
+        Headless.RunAsync(async () =>
+        {
+            string script = Path.Combine(Root, "tools", "set\u202Eup.ps1");
+            var fixture = new Fixture { Decision = new Confirm(script, IsDirectory: false) };
+
+            Task handled = fixture.ClickUpToTheCard(script);
+
+            (string title, _, _) = Assert.Single(fixture.Cards);
+            Assert.Equal("Open set\uFFFDup.ps1?", title);
+            fixture.Answer(open: false);
+            await fixture.DrainAsync(handled);
+        });
+
+    [Fact]
+    public Task A_double_extension_shows_its_real_type() =>
+        Headless.RunAsync(async () =>
+        {
+            string file = Path.Combine(Root, "tools", "report.pdf.exe");
+            var fixture = new Fixture { Decision = new Confirm(file, IsDirectory: false) };
+
+            Task handled = fixture.ClickUpToTheCard(file);
+
+            (string title, string body, _) = Assert.Single(fixture.Cards);
+            Assert.Equal("Open report.pdf.exe?", title);
+            Assert.StartsWith("It's a program (.exe).", body, StringComparison.Ordinal);
+            fixture.Answer(open: false);
+            await fixture.DrainAsync(handled);
+        });
+
+    [Fact]
+    public Task A_document_switch_before_the_card_shows_asks_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            string script = Path.Combine(Root, "tools", "setup.ps1");
+            var fixture = new Fixture { Decision = new Confirm(script, IsDirectory: false) };
+
+            Task handled = fixture.Opener.HandleAsync(Click("link", new Uri(script), Doc));
+            fixture.Documents.Shown = false;
+            await fixture.DrainAsync(handled);
+
+            Assert.Empty(fixture.Cards);
+            fixture.AssertNothingOpened();
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == $"Link: {script} not asked; the document was left.");
+        });
+
+    [Fact]
+    public Task A_file_changed_while_the_card_was_up_opens_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            string script = Path.Combine(Root, "tools", "setup.ps1");
+            LinkDecision current = new Confirm(script, IsDirectory: false);
+            var fixture = new Fixture { DecideBy = _ => current };
+
+            Task handled = fixture.ClickUpToTheCard(script);
+            current = new Confirm(script, IsDirectory: true);
+            fixture.Answer(open: true);
+            await fixture.DrainAsync(handled);
+
+            fixture.AssertNothingOpened();
+            Assert.Equal((ToastKind.Warning, LinkOpener.LinkFailedToast), Assert.Single(fixture.Toasts.Shown));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == $"Link: {script} changed while the card was up; nothing opened.");
         });
 
     [Theory]
@@ -595,7 +748,12 @@ public sealed class LinkOpenerTests
         /// <summary>When set, <see cref="OpenLinkedDocument"/> throws it instead of opening the document.</summary>
         public Exception? OpenFailure { get; set; }
 
+        /// <summary>What <see cref="IsShown"/> answers.</summary>
+        public bool Shown { get; set; } = true;
+
         public string? GroupRootOf(string documentPath) => Roots.GetValueOrDefault(documentPath);
+
+        public bool IsShown(string documentPath) => Shown;
 
         public void OpenLinkedDocument(string path, string? fragment)
         {
@@ -641,11 +799,35 @@ public sealed class LinkOpenerTests
                         _pending.Enqueue((work, done));
                         return done.Task;
                     },
-                    Time
+                    Time,
+                    (title, body) =>
+                    {
+                        var answer = new TaskCompletionSource<bool>();
+                        Cards.Add((title, body, answer));
+                        return answer.Task;
+                    }
                 ),
                 new LinkDropRoute(() => DragSignalled, Dropped.Add)
             );
             DecideBy = _ => Decision!;
+        }
+
+        /// <summary>Every confirm card shown and the source of its answer, oldest first.</summary>
+        public List<(string Title, string Body, TaskCompletionSource<bool> Answer)> Cards { get; } = [];
+
+        /// <summary>Clicks a link to <paramref name="path"/> and runs the decision, leaving the card up.</summary>
+        public Task ClickUpToTheCard(string path)
+        {
+            Task handled = Opener.HandleAsync(Click("link", new Uri(path), Doc));
+            RunOne();
+            return handled;
+        }
+
+        /// <summary>Answers the card shown last, and lets the UI thread take the answer.</summary>
+        public void Answer(bool open)
+        {
+            Cards[^1].Answer.SetResult(open);
+            Dispatcher.UIThread.RunJobs();
         }
 
         /// <summary>What the drag signal answers.</summary>
@@ -736,6 +918,7 @@ public sealed class LinkOpenerTests
         {
             Assert.Empty(Browser);
             Assert.Empty(Files.Viewed);
+            Assert.Empty(Files.Confirmed);
             Assert.Empty(Files.Opened);
             Assert.Empty(Documents.Opened);
         }

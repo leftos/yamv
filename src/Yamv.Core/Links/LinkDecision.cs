@@ -40,7 +40,8 @@ public sealed record OpenWithDefaultApp(string Path) : LinkDecision;
 /// extension, both read from <paramref name="Path"/>.
 /// </summary>
 /// <param name="Path">The file's or folder's resolved real path: what is opened is the path the policy checked.</param>
-public sealed record Confirm(string Path) : LinkDecision;
+/// <param name="IsDirectory">Whether <paramref name="Path"/> was a folder when the policy resolved it.</param>
+public sealed record Confirm(string Path, bool IsDirectory) : LinkDecision;
 
 /// <summary>Leaves the link alone; <paramref name="Kind"/> says why for the user, <paramref name="Reason"/> is the log line.</summary>
 /// <param name="Kind">Which kind of refusal this is, so the app can word what the user sees.</param>

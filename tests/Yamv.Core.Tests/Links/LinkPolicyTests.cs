@@ -170,6 +170,18 @@ public sealed class LinkPolicyTests
     }
 
     [Fact]
+    public void A_link_to_a_folder_confirms_as_a_directory()
+    {
+        string folder = Path.Combine(Root, "assets");
+
+        Confirm decision = Assert.IsType<Confirm>(
+            LinkPolicy.Decide(FileUri(folder), Mapping(folder, new ResolvedPath(folder, Exists: true, IsDirectory: true)))
+        );
+
+        Assert.True(decision.IsDirectory);
+    }
+
+    [Fact]
     public void Decide_MarkdownOutsideTheRoot_OpensTheDocument()
     {
         string path = Path.Combine(Path.GetTempPath(), "yamv-link-elsewhere", "notes.md");

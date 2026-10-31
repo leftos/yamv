@@ -33,7 +33,7 @@ public sealed class FileActionsTests
     public void Reveal_whose_file_manager_cannot_start_logs_a_warning_and_toasts(bool mac, string fileManager)
     {
         string path = Path.Combine(Path.GetTempPath(), "a.md");
-        var seams = new FileActionSeams(mac ? FilePlatform.MacOS : FilePlatform.Windows, (_, _) => new ProcessOutcome(false, 0, string.Empty));
+        FileActionSeams seams = SeamsOn(mac ? FilePlatform.MacOS : FilePlatform.Windows);
         var actions = new AvaloniaFileActions(_log, _toasts, _ => throw new Win32Exception(2), seams);
 
         actions.Reveal(path, RevealKind.File);
@@ -141,7 +141,7 @@ public sealed class FileActionsTests
     public void OpenWithDefaultApp_on_an_unknown_platform_throws_platform_not_supported()
     {
         string path = ThemePath();
-        var seams = new FileActionSeams(FilePlatform.Other, (_, _) => new ProcessOutcome(false, 0, string.Empty));
+        FileActionSeams seams = SeamsOn(FilePlatform.Other);
         var actions = new AvaloniaFileActions(_log, _toasts, _started.Add, seams);
 
         Assert.Throws<PlatformNotSupportedException>(() =>
@@ -223,6 +223,144 @@ public sealed class FileActionsTests
         });
 
         Assert.Empty(_started);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OpenConfirmed_starts_any_type_with_no_verb_or_arguments(bool mac)
+    {
+        Assert.SkipUnless(mac || OperatingSystem.IsWindows(), "Only Windows reads a drive-letter path as fully qualified.");
+        string path = mac ? Path.Combine(Path.GetTempPath(), "yamv links", "set up.PS1") : @"C:\yamv links\set up.PS1";
+        List<ProcessStartInfo> runs = [];
+        var log = new RecordingAppLog();
+        AvaloniaFileActions actions = mac
+            ? MacActions(
+                log,
+                (start, _) =>
+                {
+                    runs.Add(start);
+                    return new ProcessOutcome(false, 0, string.Empty);
+                }
+            )
+            : new AvaloniaFileActions(log, _toasts, runs.Add, WindowsSeams);
+
+        actions.OpenConfirmed(path, isDirectory: false);
+
+        ProcessStartInfo start = Assert.Single(runs);
+        Assert.Equal(string.Empty, start.Verb);
+        if (mac)
+        {
+            Assert.Equal("/usr/bin/open", start.FileName);
+            Assert.Equal(path, Assert.Single(start.ArgumentList));
+        }
+        else
+        {
+            Assert.True(start.UseShellExecute);
+            Assert.Equal(path, start.FileName);
+            Assert.Empty(start.ArgumentList);
+            Assert.Equal(string.Empty, start.Arguments);
+        }
+    }
+
+    [Theory]
+    [InlineData(@"\\server\share\a.ps1")]
+    [InlineData("//server/share/a.ps1")]
+    [InlineData(@"\\?\C:\a.ps1")]
+    [InlineData(@"\??\C:\a.ps1")]
+    [InlineData("a.ps1")]
+    [InlineData("docs/a.ps1")]
+    [InlineData("{temp}folder.{sep}a.ps1")]
+    [InlineData("{temp}folder {sep}a.ps1")]
+    [InlineData("C:\\a\\b.exe\0.ps1")]
+    [InlineData(@"C:\a\b.ps1:stream")]
+    public void OpenConfirmed_refuses_a_path_that_is_not_plain_local(string template)
+    {
+        string path = template
+            .Replace("{temp}", Path.GetTempPath(), StringComparison.Ordinal)
+            .Replace("{sep}", Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal);
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            WindowsActions().OpenConfirmed(path, isDirectory: false);
+        });
+
+        Assert.Empty(_started);
+    }
+
+    [Fact]
+    public void OpenConfirmed_opens_a_windows_folder_with_explorer_and_no_shell()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows reads a drive-letter path as fully qualified.");
+        string folder = @"C:\yamv links\docs";
+
+        WindowsActions().OpenConfirmed(folder, isDirectory: true);
+
+        ProcessStartInfo start = Assert.Single(_started);
+        Assert.False(start.UseShellExecute);
+        Assert.Equal(Path.Combine(FakeWindowsFolder, "explorer.exe"), start.FileName);
+        Assert.Equal($"\"{folder}\"", start.Arguments);
+    }
+
+    [Theory]
+    [InlineData(".pif")]
+    [InlineData(".com")]
+    [InlineData(".exe")]
+    [InlineData(".bat")]
+    [InlineData(".cmd")]
+    [InlineData(".lnk")]
+    public void OpenConfirmed_refuses_a_file_with_a_program_twin(string extension)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows reads a drive-letter path as fully qualified.");
+        string path = @"C:\yamv links\setup";
+
+        IOException refused = Assert.Throws<IOException>(() => ActionsWithFile(path + extension).OpenConfirmed(path, isDirectory: false));
+
+        Assert.Equal($"{path} has a program of the same name beside it, which Windows might run instead.", refused.Message);
+        Assert.Empty(_started);
+    }
+
+    [Fact]
+    public void A_file_with_its_own_extension_opens_beside_a_same_named_program()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows reads a drive-letter path as fully qualified.");
+        string path = @"C:\yamv links\chart.png";
+
+        ActionsWithFile(path + ".cmd").OpenViewable(path);
+
+        Assert.Equal(path, Assert.Single(_started).FileName);
+    }
+
+    [Fact]
+    public void A_file_with_no_twin_opens()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows reads a drive-letter path as fully qualified.");
+        string path = @"C:\yamv links\setup";
+
+        ActionsWithFile(path).OpenConfirmed(path, isDirectory: false);
+
+        Assert.Equal(path, Assert.Single(_started).FileName);
+    }
+
+    [Fact]
+    public void OpenViewable_still_refuses_an_unlisted_type()
+    {
+        List<ProcessStartInfo> runs = [];
+        AvaloniaFileActions actions = MacActions(
+            new RecordingAppLog(),
+            (start, _) =>
+            {
+                runs.Add(start);
+                return new ProcessOutcome(false, 0, string.Empty);
+            }
+        );
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            actions.OpenViewable(Path.Combine(Path.GetTempPath(), "setup.ps1"));
+        });
+
+        Assert.Empty(runs);
     }
 
     [Theory]
@@ -342,7 +480,7 @@ public sealed class FileActionsTests
     public void A_file_name_with_a_backtick_stays_inside_the_code_span(bool mac, string fileManager)
     {
         string path = Path.Combine(Path.GetTempPath(), "a`b.md");
-        var seams = new FileActionSeams(mac ? FilePlatform.MacOS : FilePlatform.Windows, (_, _) => new ProcessOutcome(false, 0, string.Empty));
+        FileActionSeams seams = SeamsOn(mac ? FilePlatform.MacOS : FilePlatform.Windows);
         var actions = new AvaloniaFileActions(_log, _toasts, _ => throw new Win32Exception(2), seams);
 
         actions.Reveal(path, RevealKind.File);
@@ -354,7 +492,12 @@ public sealed class FileActionsTests
         Assert.Equal($"Couldn't open {fileManager} for `aˋb.md`", text);
     }
 
-    private static FileActionSeams WindowsSeams { get; } = new(FilePlatform.Windows, (_, _) => new ProcessOutcome(false, 0, string.Empty));
+    private const string FakeWindowsFolder = @"C:\FakeWindows";
+
+    private static FileActionSeams WindowsSeams { get; } = SeamsOn(FilePlatform.Windows);
+
+    private static FileActionSeams SeamsOn(FilePlatform platform) =>
+        new(platform, (_, _) => new ProcessOutcome(false, 0, string.Empty), _ => false, FakeWindowsFolder);
 
     private static string ThemePath() => Path.Combine(Path.GetTempPath(), "yamv themes", "a b.yamv-theme.json");
 
@@ -362,8 +505,11 @@ public sealed class FileActionsTests
 
     private AvaloniaFileActions WindowsActions() => new(_log, _toasts, _started.Add, WindowsSeams);
 
+    private AvaloniaFileActions ActionsWithFile(string existing) =>
+        new(_log, _toasts, _started.Add, WindowsSeams with { FileExists = path => path == existing });
+
     private static AvaloniaFileActions MacActions(RecordingAppLog log, Func<ProcessStartInfo, TimeSpan, ProcessOutcome> run) =>
-        new(log, null, _ => { }, new FileActionSeams(FilePlatform.MacOS, run));
+        new(log, null, _ => { }, SeamsOn(FilePlatform.MacOS) with { Run = run });
 
     /// <summary>The root of a drive letter no volume is mounted on, Z: first.</summary>
     private static string MissingDriveRoot()

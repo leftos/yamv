@@ -27,6 +27,8 @@ Every busy command goes through `pwsh -NoProfile -File tools/gate.ps1`, written 
 
   `-DropOverlay ok|no` (with `-App`, not with `-WidthPopover`, `-Toasts` or `-ThemeSettingsEntry`) shows the drop overlay's "Drop to open" form or its grey refusal once the window has shown, and paints it over the capture (`YAMV_DEV_DROP_OVERLAY`, read only when `YAMV_DATA_DIR` is set).
 
+  `-ConfirmCard` (with `-App`, not with `-WidthPopover`, `-Toasts`, `-ThemeSettingsEntry` or `-DropOverlay`) opens the confirm card for a sample `setup.ps1` once the window has shown and paints it over the capture (`YAMV_DEV_CONFIRM_CARD=1`, read only when `YAMV_DATA_DIR` is set); the hidden capture draws the card's scrim over black.
+
   A real OLE drag works on the hidden desktop: the drag is driven with posted mouse messages and a `WH_GETMESSAGE` hook, so a drop can be tested without the owner's desktop.
 
   Every run uses a fresh data folder under `.tmp\yamv-data` (`YAMV_DATA_DIR`), never `%APPDATA%\YAMV`.
