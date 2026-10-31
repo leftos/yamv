@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YAMV administrator title bar</title>
+<style>
+@font-face { font-family: "Inter V"; src: url("../fonts/inter-normal.woff2") format("woff2"); font-weight: 100 900; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 40px 40px 64px; background: #8a8f96; font-family: "Inter V", "Segoe UI", system-ui, sans-serif; width: 1800px; color: #111; }
+h1.page { font: 600 30px "Inter V", "Segoe UI", sans-serif; color: #fff; margin: 0 0 6px; }
+p.page { color: #eef0f2; margin: 0 0 8px; font-size: 15px; max-width: 1500px; line-height: 1.5; }
+p.page code { font: 12.5px Consolas, monospace; background: rgba(255,255,255,.14); padding: 1px 5px; border-radius: 4px; }
+section { margin: 40px 0 0; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.28); }
+section > h2 { font: 650 24px "Inter V", "Segoe UI", sans-serif; color: #fff; margin: 0 0 4px; }
+section > h2 .q { display: inline-block; min-width: 40px; padding: 1px 8px; margin-right: 10px; border-radius: 5px; background: rgba(0,0,0,.28); font-size: 18px; text-align: center; vertical-align: 2px; }
+section > p { color: #eef0f2; margin: 0 0 16px; font-size: 15px; max-width: 1500px; line-height: 1.5; }
+.row { display: grid; grid-template-columns: 170px 760px 760px; column-gap: 24px; align-items: start; margin-top: 14px; }
+.row .lbl, .zoomrow .lbl { color: #fff; font: 600 13.5px "Inter V", sans-serif; padding-top: 11px; line-height: 1.35; }
+.row .lbl span, .zoomrow .lbl span { display: block; font-weight: 400; font-size: 12px; color: #eef0f2; margin-top: 2px; }
+.colh { display: grid; grid-template-columns: 170px 760px 760px; column-gap: 24px; margin-top: 4px; }
+.colh div { font: 600 11.5px "Inter V", sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #e3e6e9; }
+.zoomrow { display: grid; grid-template-columns: 170px 760px 760px; column-gap: 24px; margin-top: 18px; }
+.zoomwrap { width: 760px; height: 92px; overflow: hidden; border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.zoomwrap .win { zoom: 2; border-radius: 0; box-shadow: none; }
+
+/* ---------- a window's top: every colour is a token ---------- */
+.win { width: 760px; position: relative; overflow: hidden; border-radius: 10px 10px 0 0; flex: none;
+       box-shadow: 0 10px 30px rgba(0,0,0,.28), 0 0 0 1px rgba(0,0,0,.25); background: var(--page); color: var(--text); font-size: 13px; }
+.titlebar { height: 38px; display: flex; align-items: center; background: var(--chrome); border-bottom: 1px solid var(--line);
+            font: 500 12.5px "Inter V", "Segoe UI", sans-serif; color: var(--muted); padding-left: 14px; white-space: nowrap; }
+.titlebar .name { color: var(--text); font-weight: 600; margin-right: 10px; }
+.titlebar .loc { display: inline-flex; align-items: center; }
+.titlebar .spacer { flex: 1; }
+.titlebar .ctl { width: 46px; height: 38px; display: grid; place-items: center; flex: none; }
+.titlebar .ctl svg { stroke: var(--ctl); }
+.wbtn { width: 28px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--muted); margin-right: 6px; flex: none; }
+.wbtn.off { opacity: .45; }
+.below { height: 34px; display: flex; }
+.below .doc { flex: 1; padding: 12px 0 0 0; }
+.below .doc i { display: block; height: 7px; width: 300px; margin: 0 auto; border-radius: 4px; background: var(--line); opacity: .7; }
+.below .tree { width: 280px; background: var(--sidebar); border-left: 1px solid var(--line); }
+.below .list { width: 190px; background: var(--sidebar); border-right: 1px solid var(--line); }
+.below .tokens { width: 350px; border-right: 1px solid var(--line); }
+
+/* the chip of lane B: the theme settings header badge's shape, in mixed case */
+.chip { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; border: 1px solid; font: 600 11px "Inter V", sans-serif; letter-spacing: .01em; margin-left: 10px; }
+.chip.warn { background: var(--warnBg); border-color: var(--warnLine); color: var(--warn); }
+.chip.accent { background: var(--sel); border-color: var(--accentSoft); color: var(--accent); }
+.chip svg { margin-right: 4px; }
+
+/* Studio light and dark, from ThemeTokens.cs's defaults */
+.light { --page: #ffffff; --text: #1f2328; --muted: #656d76; --accent: #0969da; --accentSoft: #b6d4f5; --line: #d8dee4; --chrome: #f6f8fa; --sidebar: #f6f8fa;
+         --ctl: #000000; --sel: #e3edfa; --warn: #9a6700; --warnBg: #fff8c5; --warnLine: #e5d17b; }
+.dark  { --page: #0f1318; --text: #e6edf3; --muted: #8b949e; --accent: #4493f8; --accentSoft: #1f3b5e; --line: #2a3139; --chrome: #0a0d11; --sidebar: #0a0d11;
+         --ctl: #ffffff; --sel: #182a40; --warn: #d29922; --warnBg: #bb800926; --warnLine: #9e6a03; }
+</style>
+</head>
+<body>
+<h1 class="page">YAMV-54 · How does an elevated YAMV say so in its title bars?</h1>
+<p class="page">An elevated instance shows “Administrator” in the title bar of every one of its windows, so it is clear why two YAMV apps can be open at once. Three ways to draw it, each in Studio light and dark. Every bar is drawn at 1:1 (760 px wide; the theme settings window is 980 px wide by default, cut here), with a 200% detail of the document bar under each lane.</p>
+<p class="page">Each lane shows the three bars an elevated instance has: a main window with <code>README.md</code> in <code>yamv / docs</code>, the empty main window (its bar reads “YAMV”, ⟷ is off), and the theme settings window (its bar reads “Themes” then the theme and the half shown; close button only).</p>
+
+<template id="ctl3"><span class="ctl"><svg width="10" height="10"><path d="M0 5h10" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke-width="1"/></svg></span><span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span></template>
+
+<div id="out"></div>
+
+<script>
+const CTL3 = document.getElementById("ctl3").innerHTML;
+const CLOSE = `<span class="ctl"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke-width="1"/></svg></span>`;
+/* the title bar's tools, from TitleBar.axaml's paths: Open, ⟷, ⋯ */
+const OPEN = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 12.6V3.2h4.1l1.5 1.5h5.3v2.1M1.8 12.6 3.7 7h10.6l-1.9 5.6z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`;
+const WIDTH = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.8 8h12.4M4.6 5.2 1.8 8l2.8 2.8M11.4 5.2 14.2 8l-2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const MORE = `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M3.39 8h.02M7.99 8h.02M12.59 8h.02" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>`;
+const SHIELD = `<svg width="11" height="11" viewBox="0 0 16 16"><path d="M8 1.5 13.5 3.6v4.1c0 3.3-2.3 5.7-5.5 6.8-3.2-1.1-5.5-3.5-5.5-6.8V3.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+const tools = (widthOn) => `<span class="wbtn">${OPEN}</span><span class="wbtn${widthOn ? "" : " off"}">${WIDTH}</span><span class="wbtn">${MORE}</span>`;
+
+/* text of each bar per lane: [name, location-and-after] as HTML */
+const ADMIN = "Administrator";
+const chip = (kind) => `<span class="chip ${kind}">${SHIELD}${ADMIN}</span>`;
+const LANES = {
+  ref: {
+    doc:   ["README.md", "yamv / docs"],
+    empty: ["YAMV", ""],
+    ts:    ["Themes", "Studio · {half}"],
+  },
+  A: {
+    doc:   ["README.md", "yamv / docs · Administrator"],
+    empty: ["YAMV", "Administrator"],
+    ts:    ["Themes", "Studio · {half} · Administrator"],
+  },
+  B: {
+    doc:   ["README.md", "yamv / docs" + chip("warn")],
+    empty: ["YAMV", chip("warn")],
+    ts:    ["Themes", "Studio · {half}" + chip("warn")],
+  },
+  Bacc: {
+    doc:   ["README.md", "yamv / docs" + chip("accent")],
+    empty: ["YAMV", chip("accent")],
+    ts:    ["Themes", "Studio · {half}" + chip("accent")],
+  },
+  C: {
+    doc:   ["README.md (Administrator)", "yamv / docs"],
+    empty: ["YAMV (Administrator)", ""],
+    ts:    ["Themes (Administrator)", "Studio · {half}"],
+  },
+};
+
+/* a chip right after the name with no location keeps the name's 10 px gap, not 10 + 10 */
+const fixEmpty = (html) => html.replace('class="chip', 'style="margin-left:0" class="chip');
+
+function bar(kind, lane, theme) {
+  const [name, rest0] = LANES[lane][kind];
+  let rest = rest0.replace("{half}", theme);
+  if (kind === "empty") rest = fixEmpty(rest);
+  const right = kind === "ts" ? CLOSE : tools(kind === "doc") + CTL3;
+  const below = kind === "doc" ? `<div class="doc"><i></i></div><div class="tree"></div>`
+              : kind === "empty" ? `<div class="doc"></div>`
+              : `<div class="list"></div><div class="tokens"></div><div class="doc"></div>`;
+  return `<div class="win ${theme}"><div class="titlebar"><span class="name">${name}</span><span class="loc">${rest}</span><span class="spacer"></span>${right}</div><div class="below">${below}</div></div>`;
+}
+
+const ROWS = [
+  ["doc", "Main window", "README.md in yamv / docs"],
+  ["empty", "Empty main window", "no document open"],
+  ["ts", "Theme settings", "Studio selected"],
+];
+
+function lane(key, q, title, caption, extra = "") {
+  let h = `<section><h2><span class="q">${q}</span>${title}</h2><p>${caption}</p>`;
+  h += `<div class="colh"><div></div><div>Studio light</div><div>Studio dark</div></div>`;
+  for (const [kind, lbl, sub] of ROWS)
+    h += `<div class="row"><div class="lbl">${lbl}<span>${sub}</span></div>${bar(kind, key, "light")}${bar(kind, key, "dark")}</div>`;
+  h += `<div class="zoomrow"><div class="lbl">Detail, 200%<span>main window, left 380 px</span></div>`
+     + `<div class="zoomwrap">${bar("doc", key, "light")}</div><div class="zoomwrap">${bar("doc", key, "dark")}</div></div>`;
+  return h + extra + `</section>`;
+}
+
+let html = "";
+html += lane("ref", "Now", "Today's bars, not elevated (unchanged in every lane)", "For reference: the name in semibold, the location muted, the tools and window controls on the right.");
+html += lane("A", "A", "A muted suffix after the location", "“· Administrator” joins the muted location text, in its colour and weight. With no location (the empty window) it stands alone in the location's place.");
+const bAcc = `<div class="row" style="margin-top:22px"><div class="lbl">B, accent tint<span>the same chip in the accent colours, for comparison</span></div>${bar("doc", "Bacc", "light")}${bar("doc", "Bacc", "dark")}</div>`;
+html += lane("B", "B", "A small chip after the name and location", "A rounded chip with a shield glyph reading “Administrator”, in the warning colours (<code>warningBackground</code>, <code>warningLine</code>, <code>warning</code>), the shape of the theme settings header's MISSING ON DISK badge. The accent-tinted version is under the detail.", bAcc);
+html += lane("C", "C", "In the name", "“(Administrator)” is part of the semibold name; the location stays muted as usual.");
+document.getElementById("out").innerHTML = html;
+</script>
+</body>
+</html>
