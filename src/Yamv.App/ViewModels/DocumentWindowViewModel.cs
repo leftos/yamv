@@ -24,7 +24,7 @@ namespace Yamv.App.ViewModels;
 /// watched documents are updated before a newly opened document is read, so a save in the single pool dispatch between that
 /// read and the watcher stamping the file is not reported, and is picked up by the next change.
 /// </remarks>
-public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
+public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable, ILinkDocuments
 {
     private const string AppName = "YAMV";
     private static readonly TimeSpan MissingRecheckInterval = TimeSpan.FromSeconds(2);
@@ -63,6 +63,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private int _syncDepth;
     private int _renderGeneration;
     private string? _shownPath;
+
+    /// <summary>A link's fragment and the render generation whose first show scrolls to it; null when none waits.</summary>
+    private (string Fragment, int Generation)? _pendingFragment;
     private List<ShapeRow>? _treeShape;
     private string _sessionKey;
     private bool _closeRequested;
@@ -285,6 +288,55 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// <summary>Adds documents to the window and selects the first one given.</summary>
     [RelayCommand]
     public void Open(IEnumerable<string> paths) => _state.Add(paths);
+
+    /// <summary>The root folder of the group holding <paramref name="documentPath"/>, or null when the document is not open.</summary>
+    /// <param name="documentPath">The document that holds a link.</param>
+    public string? GroupRootOf(string documentPath) => _state.GroupOf(documentPath)?.Path;
+
+    /// <summary>
+    /// Opens a document a link named in this window and selects it as <see cref="Open"/> does, a missing file becoming a
+    /// missing row; its first show scrolls to <paramref name="fragment"/>. A link to the shown document scrolls it without a
+    /// render.
+    /// </summary>
+    /// <param name="path">The document's real path, as the link policy decided it.</param>
+    /// <param name="fragment">The heading to scroll to, already decoded; null for none.</param>
+    public void OpenLinkedDocument(string path, string? fragment)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (SamePath(path, ShownSelection()))
+        {
+            if (fragment is not null)
+            {
+                _renders.RemoveWhere(render => render.IsCompleted);
+                _renders.Add(ScrollToFragmentAsync(fragment));
+            }
+
+            return;
+        }
+
+        // Tagged before the add, whose selection change renders at once: that render takes the fragment, and no other does.
+        int generation = _renderGeneration;
+        _pendingFragment = fragment is null ? null : (fragment, generation + 1);
+        try
+        {
+            _state.Add([path]);
+        }
+        catch
+        {
+            _pendingFragment = null;
+            throw;
+        }
+
+        if (_renderGeneration != generation + 1 || !SamePath(_state.SelectedPath, path))
+        {
+            _pendingFragment = null;
+        }
+    }
 
     /// <summary>
     /// Replaces a document's path with another (Locate…), keeping its place in the list, its scroll position and its scroll anchor.
@@ -944,7 +996,28 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         }
 
         // Nothing may be awaited between the check above and this call: a document that is no longer the selection is never shown.
-        await _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, anchor, Fragment: null, width.Px));
+        await _surface.ShowAsync(new DocumentShow(document, path, group.Path, scroll, anchor, TakePendingFragment(generation), width.Px));
+    }
+
+    /// <summary>The link fragment waiting for the render of <paramref name="generation"/>, or null; the slot is emptied either way.</summary>
+    private string? TakePendingFragment(int generation)
+    {
+        (string Fragment, int Generation)? pending = _pendingFragment;
+        _pendingFragment = null;
+        return pending is { } slot && slot.Generation == generation ? slot.Fragment : null;
+    }
+
+    /// <summary>Scrolls the shown document to a link's fragment, logging a failure.</summary>
+    private async Task ScrollToFragmentAsync(string fragment)
+    {
+        try
+        {
+            await _surface.ScrollToFragmentAsync(fragment);
+        }
+        catch (Exception exception)
+        {
+            _log.LogError($"Cannot scroll the shown document to the heading {fragment}.", exception);
+        }
     }
 
     /// <summary>

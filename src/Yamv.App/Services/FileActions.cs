@@ -5,6 +5,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Documents;
+using Yamv.Core.Links;
 using Yamv.Core.Platform;
 
 namespace Yamv.App.Services;
@@ -174,6 +175,57 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
             throw new ArgumentException($"Only a .json file can be opened as text: {path}", nameof(path));
         }
 
+        OpenInDefaultApp(path, "Edit as text:");
+    }
+
+    public void OpenViewable(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (!IsViewablePath(path, seams.Platform == FilePlatform.Windows))
+        {
+            throw new ArgumentException($"Only a fully qualified local file of a viewable type can be opened from a link: {path}", nameof(path));
+        }
+
+        OpenInDefaultApp(path, "Open link:");
+    }
+
+    /// <summary>
+    /// Whether a link may open <paramref name="path"/>: fully qualified, with no control character, of a viewable type, and on
+    /// Windows rooted at a drive letter (so never a share or device path), with no <c>:</c> after the root (an alternate data
+    /// stream) and no name ending in a dot or a space, which Windows would rewrite.
+    /// </summary>
+    private static bool IsViewablePath(string path, bool windows)
+    {
+        if (!Path.IsPathFullyQualified(path) || path.Any(character => character < ' '))
+        {
+            return false;
+        }
+
+        if (windows && !IsPlainWindowsPath(path))
+        {
+            return false;
+        }
+
+        return LinkPolicy.ViewableExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> starts at a drive root such as <c>C:\</c>, has no <c>:</c> after it, and has no name
+    /// ending in a dot or a space.
+    /// </summary>
+    private static bool IsPlainWindowsPath(string path) =>
+        path.Length >= 3
+        && char.IsAsciiLetter(path[0])
+        && path[1] == ':'
+        && path[2] is '\\' or '/'
+        && !path.AsSpan(3).Contains(':')
+        && !path.Split('\\', '/').Any(name => name.EndsWith('.') || name.EndsWith(' '));
+
+    /// <summary>Opens <paramref name="path"/> in its default app, with no verb and no arguments.</summary>
+    /// <param name="path">The file to open, already checked.</param>
+    /// <param name="logPrefix">What the log lines start with, naming the action.</param>
+    private void OpenInDefaultApp(string path, string logPrefix)
+    {
         FilePlatform platform = seams.Platform;
         if (platform == FilePlatform.Other)
         {
@@ -189,18 +241,19 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
 
         if (platform == FilePlatform.Windows)
         {
-            StartOnWindows(start, path);
+            StartOnWindows(start, path, logPrefix);
             return;
         }
 
-        RunOpen(start, path);
+        RunOpen(start, path, logPrefix);
     }
 
     /// <summary>Starts the shell open, whose failure is the window's: no app is associated with the file.</summary>
     /// <param name="start">The shell open to start.</param>
     /// <param name="path">The file being opened, named in the message.</param>
+    /// <param name="logPrefix">What the log line starts with.</param>
     /// <exception cref="IOException">The shell refused to start.</exception>
-    private void StartOnWindows(ProcessStartInfo start, string path)
+    private void StartOnWindows(ProcessStartInfo start, string path, string logPrefix)
     {
         try
         {
@@ -208,7 +261,7 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
-            log.LogWarning($"Edit as text: could not open {path}.", exception);
+            log.LogWarning($"{logPrefix} could not open {path}.", exception);
             throw new IOException($"Could not open {path} in its default app.", exception);
         }
     }
@@ -219,19 +272,20 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
     /// </summary>
     /// <param name="start">The <c>open</c> to run.</param>
     /// <param name="path">The file being opened, named in the messages.</param>
+    /// <param name="logPrefix">What the log lines start with.</param>
     /// <exception cref="IOException"><c>open</c> reported no app would take the file.</exception>
-    private void RunOpen(ProcessStartInfo start, string path)
+    private void RunOpen(ProcessStartInfo start, string path, string logPrefix)
     {
         ProcessOutcome outcome = seams.Run(start, MacOpenTimeout);
         if (outcome.TimedOut)
         {
-            log.LogWarning($"Edit as text: open did not finish within {MacOpenTimeout.TotalSeconds:0} s for {path}.");
+            log.LogWarning($"{logPrefix} open did not finish within {MacOpenTimeout.TotalSeconds:0} s for {path}.");
             return;
         }
 
         if (outcome.ExitCode != 0)
         {
-            log.LogWarning($"Edit as text: open exited {outcome.ExitCode} for {path}: {outcome.StandardError.Trim()}");
+            log.LogWarning($"{logPrefix} open exited {outcome.ExitCode} for {path}: {outcome.StandardError.Trim()}");
             throw new IOException($"Could not open {path} in its default app: {outcome.StandardError.Trim()}");
         }
     }
@@ -301,6 +355,18 @@ internal interface IFileActions
     /// <param name="path">The file to open.</param>
     /// <exception cref="IOException">No app would open the file.</exception>
     void OpenWithDefaultApp(string path);
+
+    /// <summary>
+    /// Opens <paramref name="path"/>, a file a link named, in whatever app the system associates with it, with no verb and no
+    /// arguments.
+    /// </summary>
+    /// <param name="path">
+    /// A fully qualified local path of a viewable type (<see cref="Yamv.Core.Links.LinkPolicy.ViewableExtensions"/>); not a
+    /// share or device path, and on Windows no name in it ends in a dot or a space.
+    /// </param>
+    /// <exception cref="ArgumentException">The path is not one a link may open.</exception>
+    /// <exception cref="IOException">No app would open the file.</exception>
+    void OpenViewable(string path);
 
     /// <summary>Puts <paramref name="text"/> on the clipboard.</summary>
     /// <param name="owner">The window whose clipboard is used.</param>

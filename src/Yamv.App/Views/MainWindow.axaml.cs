@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Controls;
@@ -16,6 +17,7 @@ using Yamv.App.Services;
 using Yamv.App.ViewModels;
 using Yamv.Core.Diagnostics;
 using Yamv.Core.Input;
+using Yamv.Core.Links;
 using Yamv.Core.Platform;
 using Yamv.Core.Session;
 
@@ -28,6 +30,11 @@ namespace Yamv.App.Views;
 /// its own key presses and those the page forwards, the tree rows' context menus, Open files… and Locate…, and keeps its
 /// normal (restored) rectangle for the session.
 /// </summary>
+[SuppressMessage(
+    "Reliability",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "A window is not disposed; its link opener is disposed when the window closes (OnClosed)."
+)]
 public partial class MainWindow : Window
 {
     /// <summary>The sidebar width a window starts with, in device-independent pixels.</summary>
@@ -43,6 +50,7 @@ public partial class MainWindow : Window
     private readonly DocumentWindowViewModel? _viewModel;
     private readonly IDocumentSurface? _surface;
     private readonly IAppLog? _log;
+    private readonly LinkOpener? _linkOpener;
     private double _sidebarWidth = DefaultSidebarWidth;
     private bool _sidebarShown = true;
     private bool _opened;
@@ -78,6 +86,12 @@ public partial class MainWindow : Window
         _surface = surface;
         _log = log;
         FileActions = new AvaloniaFileActions(log, viewModel.Toasts, AvaloniaFileActions.StartProcess, FileActionSeams.Default);
+        _linkOpener = new LinkOpener(
+            viewModel,
+            viewModel.Toasts,
+            log,
+            new LinkOpenerSeams(uri => Launcher.LaunchUriAsync(uri), () => FileActions!, LinkPolicy.Decide, decide => Task.Run(decide))
+        );
         _toasts = viewModel.Toasts as ToastCenter;
         ToastPopup.PlacementTarget = DocumentColumn;
         ToastPopup.Opened += OnToastPopupOpened;
@@ -94,6 +108,7 @@ public partial class MainWindow : Window
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.CloseRequested += OnCloseRequested;
         surface.KeyForwarded += OnKeyForwarded;
+        surface.LinkActivated += _linkOpener.OnLinkActivated;
         EmptyState.OpenFilesRequested += OnOpenFilesRequested;
         MissingPane.LocateRequested += OnLocateRequested;
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
@@ -1000,6 +1015,8 @@ public partial class MainWindow : Window
         _viewModel!.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.CloseRequested -= OnCloseRequested;
         _surface!.KeyForwarded -= OnKeyForwarded;
+        _surface.LinkActivated -= _linkOpener!.OnLinkActivated;
+        _linkOpener.Dispose();
         EmptyState.OpenFilesRequested -= OnOpenFilesRequested;
         MissingPane.LocateRequested -= OnLocateRequested;
         PositionChanged -= OnPositionChanged;

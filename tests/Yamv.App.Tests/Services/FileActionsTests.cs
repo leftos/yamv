@@ -196,6 +196,75 @@ public sealed class FileActionsTests
         Assert.Equal(("warning", $"Edit as text: could not open {path}."), (entry.Level, entry.Message));
     }
 
+    [Theory]
+    [InlineData("{temp}tool.exe")]
+    [InlineData("{temp}notes.md")]
+    [InlineData(@"\\server\share\a.png")]
+    [InlineData("//server/share/a.png")]
+    [InlineData(@"\\?\C:\a.png")]
+    [InlineData(@"\??\C:\a.png")]
+    [InlineData("a.png")]
+    [InlineData("docs/a.png")]
+    [InlineData("{temp}folder.{sep}a.png")]
+    [InlineData("{temp}folder {sep}a.png")]
+    [InlineData(@"/\server\share\a.png")]
+    [InlineData(@"\/server\share\a.png")]
+    [InlineData("C:\\a\\b.exe\0.png")]
+    [InlineData(@"C:\a\b.png:stream")]
+    public void OpenViewable_refuses_exe_unc_device_relative_and_trailing_dot_paths(string template)
+    {
+        string path = template
+            .Replace("{temp}", Path.GetTempPath(), StringComparison.Ordinal)
+            .Replace("{sep}", Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal);
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            WindowsActions().OpenViewable(path);
+        });
+
+        Assert.Empty(_started);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OpenViewable_starts_a_viewable_file_with_no_verb_or_arguments(bool mac)
+    {
+        string path = mac ? Path.Combine(Path.GetTempPath(), "yamv links", "a chart.PNG") : @"C:\yamv links\a chart.PNG";
+        List<ProcessStartInfo> runs = [];
+        var log = new RecordingAppLog();
+        AvaloniaFileActions actions = mac
+            ? MacActions(
+                log,
+                (start, _) =>
+                {
+                    runs.Add(start);
+                    return new ProcessOutcome(false, 0, string.Empty);
+                }
+            )
+            : new AvaloniaFileActions(log, _toasts, runs.Add, WindowsSeams);
+
+        actions.OpenViewable(path);
+
+        ProcessStartInfo start = Assert.Single(runs);
+        if (mac)
+        {
+            Assert.Equal("/usr/bin/open", start.FileName);
+            Assert.Equal(path, Assert.Single(start.ArgumentList));
+        }
+        else
+        {
+            Assert.True(start.UseShellExecute);
+            Assert.Equal(path, start.FileName);
+            Assert.Empty(start.ArgumentList);
+        }
+
+        Assert.Empty(start.Verb);
+        Assert.Empty(start.Arguments);
+        Assert.Empty(log.Entries);
+        Assert.Empty(_toasts.Shown);
+    }
+
     private static FileActionSeams WindowsSeams { get; } = new(FilePlatform.Windows, (_, _) => new ProcessOutcome(false, 0, string.Empty));
 
     private static string ThemePath() => Path.Combine(Path.GetTempPath(), "yamv themes", "a b.yamv-theme.json");

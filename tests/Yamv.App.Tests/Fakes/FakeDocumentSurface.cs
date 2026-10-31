@@ -8,11 +8,7 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 {
     public event EventHandler<ScrollPosition>? ScrollChanged;
 
-    public event EventHandler<LinkActivatedEventArgs>? LinkActivated
-    {
-        add { }
-        remove { }
-    }
+    public event EventHandler<LinkActivatedEventArgs>? LinkActivated;
 
     public event EventHandler<KeyForwardedEventArgs>? KeyForwarded;
 
@@ -109,6 +105,12 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     /// <summary>Raises <see cref="KeyForwarded"/> as the page would for a shortcut pressed while it had focus.</summary>
     public void RaiseKey(KeyForwardedEventArgs key) => KeyForwarded?.Invoke(this, key);
+
+    /// <summary>Raises <see cref="LinkActivated"/> as the page would for an activated link.</summary>
+    public void RaiseLink(LinkActivatedEventArgs link) => LinkActivated?.Invoke(this, link);
+
+    /// <summary>Whether anything listens to <see cref="LinkActivated"/>.</summary>
+    public bool HasLinkSubscribers => LinkActivated is not null;
 }
 
 /// <summary>One <see cref="FakeDocumentSurface.ShowAsync"/> call.</summary>

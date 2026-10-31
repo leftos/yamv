@@ -1793,6 +1793,136 @@ public sealed class DocumentWindowViewModelTests
             Assert.Empty(fixture.Surface.ContentWidths);
         });
 
+    [Fact]
+    public Task A_link_fragment_is_used_by_the_first_show_of_its_document_only() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.OpenLinkedDocument(RepoDocB, "set up");
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocA);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal<(string, string?)>(
+                [(RepoDocA, null), (RepoDocB, "set up"), (RepoDocA, null), (RepoDocB, null)],
+                fixture.Surface.Shown.Select(shown => (shown.DocumentPath, shown.Fragment))
+            );
+            Assert.Empty(fixture.Surface.ScrolledFragments);
+        });
+
+    [Fact]
+    public Task A_link_fragment_is_dropped_when_the_selection_moves_first() =>
+        Headless.RunAsync(async () =>
+        {
+            using var gate = new ManualResetEventSlim();
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA, RepoRootDoc]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Reader = path =>
+            {
+                if (SamePath(path, RepoDocB))
+                {
+                    WaitFor(gate);
+                }
+
+                return fixture.Files[path];
+            };
+
+            fixture.ViewModel.OpenLinkedDocument(RepoDocB, "set up");
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoRootDoc);
+            gate.Set();
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.ViewModel.SelectedItem = DocumentRow(fixture.ViewModel, RepoDocB);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal<(string, string?)>(
+                [(RepoDocA, null), (RepoRootDoc, null), (RepoDocB, null)],
+                fixture.Surface.Shown.Select(shown => (shown.DocumentPath, shown.Fragment))
+            );
+        });
+
+    [Fact]
+    public Task A_link_fragment_to_an_already_selected_missing_document_is_dropped() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Absent.Add(RepoDocB);
+            fixture.ViewModel.Open([RepoDocB]);
+            await fixture.ViewModel.WhenRendersSettled();
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+
+            fixture.ViewModel.OpenLinkedDocument(RepoDocB, "set up");
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Absent.Remove(RepoDocB);
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await fixture.ViewModel.WhenRendersSettled();
+
+            ShownDocument shown = Assert.Single(fixture.Surface.Shown);
+            Assert.Equal((RepoDocB, null), (shown.DocumentPath, shown.Fragment));
+            Assert.Empty(fixture.Surface.ScrolledFragments);
+        });
+
+    [Fact]
+    public Task A_link_to_the_shown_document_scrolls_without_a_render() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.OpenLinkedDocument(RepoDocA, "set up");
+            fixture.ViewModel.OpenLinkedDocument(RepoDocA, null);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(["set up"], fixture.Surface.ScrolledFragments);
+            Assert.Single(fixture.Surface.Shown);
+            Assert.Equal(RepoDocA, fixture.ViewModel.SelectedPath);
+        });
+
+    [Fact]
+    public Task A_link_fragment_is_dropped_when_the_add_throws() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.ExistsThrowsFor = RepoDocB;
+
+            Assert.Throws<IOException>(() => fixture.ViewModel.OpenLinkedDocument(RepoDocB, "set up"));
+            fixture.ExistsThrowsFor = null;
+            fixture.ViewModel.Open([RepoRootDoc]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal<(string, string?)>(
+                [(RepoDocA, null), (RepoRootDoc, null)],
+                fixture.Surface.Shown.Select(shown => (shown.DocumentPath, shown.Fragment))
+            );
+        });
+
+    [Fact]
+    public Task A_link_to_a_missing_document_opens_a_missing_row() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Absent.Add(RepoDocB);
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            fixture.ViewModel.OpenLinkedDocument(RepoDocB, "set up");
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal(RepoDocB, fixture.ViewModel.SelectedPath);
+            Assert.True(fixture.ViewModel.SelectedIsMissing);
+            Assert.True(DocumentRow(fixture.ViewModel, RepoDocB).IsMissing);
+            Assert.Equal(RepoDocA, Assert.Single(fixture.Surface.Shown).DocumentPath);
+            Assert.Equal(Repo, fixture.ViewModel.GroupRootOf(RepoDocB));
+        });
+
     private static string P(params string[] parts) => Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", Path.Combine(parts));
 
     private static bool SamePath(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
@@ -1950,9 +2080,17 @@ public sealed class DocumentWindowViewModelTests
             }
         }
 
+        /// <summary>When set, asking whether this path is on disk throws, as a failing probe would.</summary>
+        public string? ExistsThrowsFor { get; set; }
+
         private bool Exists(string path)
         {
             Interlocked.Increment(ref _existsCalls);
+            if (ExistsThrowsFor is string failing && SamePath(path, failing))
+            {
+                throw new IOException($"Cannot probe {path}.");
+            }
+
             return !Absent.Contains(path);
         }
     }

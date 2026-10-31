@@ -978,6 +978,45 @@ public sealed class MainWindowTests
             Assert.DoesNotContain("open", fixture.Window.WindowTitleBar.MoreButton.Classes);
         });
 
+    [Fact]
+    public Task A_clicked_link_in_the_window_reaches_the_opener() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.ViewModel.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(DocumentWindowViewModel.SelectedPath) && fixture.ViewModel.SelectedPath is not null)
+                {
+                    opened.TrySetResult();
+                }
+            };
+
+            fixture.Surface.RaiseLink(new LinkActivatedEventArgs("b.md", new Uri(fixture.DocB), 0, LinkSource.Click, fixture.DocA));
+            await opened.Task.WaitAsync(TimeSpan.FromMinutes(5), TestContext.Current.CancellationToken);
+            await fixture.ViewModel.WhenRendersSettled();
+            fixture.Settle();
+
+            Assert.Equal(fixture.DocB, fixture.ViewModel.SelectedPath, StringComparer.OrdinalIgnoreCase);
+            Assert.Equal(fixture.DocB, fixture.Surface.Shown[^1].DocumentPath, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Level == "error");
+        });
+
+    [Fact]
+    public Task Closing_the_window_unhooks_the_opener() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            Assert.True(fixture.Surface.HasLinkSubscribers);
+
+            fixture.Window.Close();
+            fixture.Settle();
+
+            Assert.False(fixture.Surface.HasLinkSubscribers);
+        });
+
     private static List<string?> Headers(ContextMenu? menu) =>
         [.. Assert.IsType<ContextMenu>(menu).Items.OfType<MenuItem>().Select(item => item.Header as string)];
 

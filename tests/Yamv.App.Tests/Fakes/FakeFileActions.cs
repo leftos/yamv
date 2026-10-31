@@ -68,6 +68,22 @@ internal sealed class FakeFileActions : IFileActions
 
     public void OpenWithDefaultApp(string path) => Opened.Add(path);
 
+    /// <summary>Every path a link opened in its default app, oldest first.</summary>
+    public List<string> Viewed { get; } = [];
+
+    /// <summary>When set, <see cref="OpenViewable"/> throws it instead of recording the path.</summary>
+    public Exception? ViewFailure { get; set; }
+
+    public void OpenViewable(string path)
+    {
+        if (ViewFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        Viewed.Add(path);
+    }
+
     public Task CopyTextAsync(TopLevel owner, string text)
     {
         Copied.Add(text);
