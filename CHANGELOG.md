@@ -5,8 +5,11 @@
 ### Added
 
 - A main window that reopens last time's documents, grouped by git repo or folder, at its saved size and place.
-- `yamv <files>` opens a separate viewer window with just those files, which saves nothing of its own.
+- `yamv <files>` opens a viewer window with just those files in the running YAMV, saving nothing; a file already open brings its window forward.
 - A second `yamv` with no files brings the running main window forward instead of opening another.
+- When the running YAMV doesn't answer a file launch, a box says it is not responding and the file was not opened.
+- A YAMV run as Administrator opens beside the normal one, marked Administrator in every window's title bar, and saves no session.
+- On macOS, files opened from Finder open in viewer windows, and a Dock click brings the main window back.
 - Markdown rendered in the document pane, with Mermaid diagrams and the document's local images.
 - An open document reloads when its file changes, keeping your place, your find match and the old page until the new one is ready.
 - A missing document offers **Locate…** and **Remove from list**; one that can't be read says why and offers **Retry**.
