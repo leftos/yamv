@@ -15,7 +15,7 @@ public sealed class ContentWidthViewModelTests
     /// <summary>A pane whose text space is 712 px, narrower than the 800 px app default.</summary>
     private const double NarrowPane = 800;
     private static readonly double WideTextSpace = ContentWidth.TextSpace(WidePane);
-    private static readonly TimeSpan GateBackstop = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan GateBackstop = TimeSpan.FromMinutes(5);
     private static readonly GroupingOptions Plain = new(null, StringComparison.OrdinalIgnoreCase);
     private static readonly string Dev = P("dev");
     private static readonly string Repo = P("dev", "yamv");

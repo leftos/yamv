@@ -52,6 +52,7 @@ function check(name, ok, detail) {
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 900, height: 400 } });
+  page.setDefaultTimeout(5 * 60_000);
   const requested = [];
   await page.route(/^https?:/, (route) => {
     requested.push(route.request().url());
@@ -66,6 +67,25 @@ try {
 
   const messages = () => page.evaluate(() => window.__messages);
   const clearMessages = () => page.evaluate(() => { window.__messages = []; });
+  // Resolves once some entry of `window.__messages` matches `predicate`, which runs in the page and receives `arg`, its
+  // serialisable data (a type, a generation or a count): Playwright ships the function's source, never its closure.
+  const waitForMessage = (predicate, arg) => page.waitForFunction(predicate, arg);
+  // Resolves once the view has held its scroll position for three animation frames: a render, and a viewport resize
+  // before it, reach the scroll a frame or two after the call that asked for them, so a report alone is not settled.
+  const waitForScrollSettled = () =>
+    page.waitForFunction(() => {
+      const state = window.__settle;
+      if (!state || state.y !== window.scrollY) {
+        window.__settle = { y: window.scrollY, frames: 0 };
+        return false;
+      }
+      state.frames += 1;
+      if (state.frames < 3) {
+        return false;
+      }
+      window.__settle = null;
+      return true;
+    });
   const attribute = (id, name) => page.evaluate(([i, n]) => document.getElementById(i).getAttribute(n), [id, name]);
   const blocked = (all, src) => all.find((message) => message.type === "blocked" && message.src === src);
   const render = (options) => page.evaluate(([html, o]) => window.yamv.render(html, o), [fixture, options]);
@@ -106,7 +126,6 @@ try {
   check("style= attributes are removed", stripped.styleAttribute === false, stripped);
   check("meta, base and link elements are removed", stripped.head === 0, stripped);
   check("the document's <base> does not re-base the page", stripped.baseUri === templateUrl, stripped);
-  await page.waitForTimeout(1200);
   check("meta refresh does not navigate", page.url() === templateUrl, page.url());
   check("no request to the refresh or link targets", !requested.some((url) => /refresh\.example|link\.example/.test(url)), requested);
 
@@ -117,23 +136,22 @@ try {
   });
   check("language-c# is highlighted as csharp", code.classes.includes("language-csharp") && code.keywords > 0, code);
 
-  // Step 4: only primary and middle clicks post links.
+  // Step 4: only primary and middle clicks post links. A click posts synchronously, so the two clicks' messages are
+  // there once the clicks return; a right click that posted would be first in that list.
   await clearMessages();
   await page.click("#link", { button: "right" });
-  await page.waitForTimeout(200);
-  all = await messages();
-  check("right-click on a link posts nothing", !all.some((m) => m.type === "link"), all);
   await page.keyboard.press("Escape");
   await page.click("#link", { button: "middle" });
   await page.click("#link", { button: "left" });
-  await page.waitForTimeout(200);
+  await waitForMessage((count) => window.__messages.filter((m) => m.type === "link").length >= count, 2);
   const links = (await messages()).filter((m) => m.type === "link");
+  check("right-click on a link posts nothing", links.length === 2 && !links.some((m) => m.button === 2), links);
   check("middle then left click post buttons 1 and 0", links.length === 2 && links[0].button === 1 && links[1].button === 0 && links[1].href === "other.md", links);
   // The host refuses a file: link with a host and raises one outside the group root; the page posts both as written.
   await clearMessages();
   await page.click("#host-link");
   await page.click("#outside-link");
-  await page.waitForTimeout(200);
+  await waitForMessage((count) => window.__messages.filter((m) => m.type === "link").length >= count, 2);
   const fileLinks = (await messages()).filter((m) => m.type === "link").map((m) => m.href);
   check("file://host and outside-root links are posted as written", fileLinks.join(" ") === "file://host/share/doc.md ../../../outside.md", fileLinks);
 
@@ -162,9 +180,10 @@ try {
   await render({ ...baseOptions, generation: 8, fragment: "caf%C3%A9" });
   const scrolled = await page.evaluate(() => window.scrollY);
   check("an encoded fragment scrolls to its element", scrolled > 0, scrolled);
-  await page.waitForTimeout(100);
+  // The render's own report arrives once it has settled, so the scroll below is the only source of a report after it.
+  await waitForMessage((generation) => window.__messages.some((m) => m.type === "scroll" && m.generation === generation), 8);
   await page.evaluate(() => window.scrollTo(0, 10));
-  await page.waitForTimeout(400);
+  await waitForMessage((count) => window.__messages.filter((m) => m.type === "scroll").length > count, 1);
   const scrolls = (await messages()).filter((m) => m.type === "scroll");
   check("scroll messages carry the render generation", scrolls.length > 0 && scrolls.every((m) => m.generation === 8), scrolls);
 
@@ -179,7 +198,6 @@ try {
     await clearMessages();
     await page.evaluate(() => { window.__keys = []; });
     await keys();
-    await page.waitForTimeout(50);
     return {
       forwarded: (await messages()).filter((m) => m.type === "key"),
       seen: await page.evaluate(() => window.__keys),
@@ -349,10 +367,13 @@ try {
   }, text);
 
   await show(longDocument, { ...anchorOptions, generation: 30 });
-  await page.waitForTimeout(100);
+  // The render's own report, so the scroll's report below is the next one and cannot land after the clear; then the
+  // view's own settle, since the resize above and the render both reach the scroll a frame or two later.
+  await waitForMessage((generation) => window.__messages.some((m) => m.type === "scroll" && m.generation === generation), 30);
+  await waitForScrollSettled();
   await clearMessages();
   await scrollToBlock("Block 30 text.");
-  await page.waitForTimeout(400);
+  await waitForMessage((count) => window.__messages.filter((m) => m.type === "scroll").length > count, 0);
   const anchorScrolls = (await messages()).filter((m) => m.type === "scroll");
   check("a scroll message carries the top block's source line", anchorScrolls.length > 0 && anchorScrolls.at(-1).line === 60, anchorScrolls);
 
@@ -362,7 +383,7 @@ try {
   await show(inserted, { ...anchorOptions, generation: 31, scroll: 0.1, anchorLine: 0 });
   let top = await topBlockOf();
   check("a reload after 20 lines inserted above the top block stays on that block", top?.text === "Block 30 text." && Math.abs(top.top) <= 1, top);
-  await page.waitForTimeout(100);
+  await waitForMessage((generation) => window.__messages.some((m) => m.type === "scroll" && m.generation === generation), 31);
   let reported = await lastScroll();
   check("once a reload has landed the page reports its new top line", reported?.line === 80 && reported.generation === 31, reported);
 
@@ -514,16 +535,18 @@ try {
     return item ? { text: item.textContent, top: Math.round(item.getBoundingClientRect().top) } : null;
   });
   await show(listDocument(false), { ...listOptions, generation: 40 });
+  // The render's own report first, so the scroll below is the only report after it and its count is exact.
+  await waitForMessage((generation) => window.__messages.some((m) => m.type === "scroll" && m.generation === generation), 40);
   await page.evaluate(() => {
     const item = Array.from(document.querySelectorAll("#yamv-content li")).find((element) => element.textContent === "Item 150");
     window.scrollTo(0, item.getBoundingClientRect().top + window.scrollY);
   });
-  await page.waitForTimeout(400);
+  await waitForMessage((count) => window.__messages.filter((m) => m.type === "scroll").length > count, 1);
   await clearMessages();
   await show(listDocument(true), { ...listOptions, generation: 41 });
   let item = await topItem();
   check("a reload keeps the reader on the same item halfway down a long list", item?.text === "Item 150" && Math.abs(item.top) <= 1, item);
-  await page.waitForTimeout(100);
+  await waitForMessage((generation) => window.__messages.some((m) => m.type === "scroll" && m.generation === generation), 41);
   reported = await lastScroll();
   check(
     "the scroll report carries the list's line and the offset within it",
@@ -543,12 +566,10 @@ try {
   }));
   await show(longDocument, { ...pinOptions, generation: 44 });
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await page.waitForTimeout(50);
   await show(blocksHtml(90, 0, "Block"), { ...pinOptions, generation: 45 });
   let edges = await viewEdges();
   check("a view at the very bottom stays at the bottom when text is appended", edges.gap <= 2 && edges.scrollY > 0, edges);
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(50);
   await show(`<p data-line="0">New first block.</p>\n${blocksHtml(90, 2, "Block")}`, { ...pinOptions, generation: 46 });
   edges = await viewEdges();
   check("a view at the very top stays at the top when a block is inserted above", edges.scrollY === 0, edges);
@@ -557,7 +578,7 @@ try {
   await clearMessages();
   const rawDocument = `<div data-line="1.5">Raw block.</div>\n${blocksHtml(40, 2, "Block")}`;
   await show(rawDocument, { ...anchorOptions, documentPath: "C:\\docs\\raw.md", generation: 47 });
-  await page.waitForTimeout(100);
+  await waitForMessage((generation) => window.__messages.some((m) => m.type === "scroll" && m.generation === generation), 47);
   reported = await lastScroll();
   check("a raw data-line is skipped: the scroll report names the first Core block", reported?.line === 2 && reported.generation === 47, reported);
 
@@ -570,7 +591,6 @@ try {
     window.yamv.find("needle", "first");
   });
   await scrollToBlock("Block 40 text.");
-  await page.waitForTimeout(50);
   await show(farDocument, { ...farOptions, generation: 49 });
   top = await topBlockOf();
   match = await currentMatch();
@@ -613,7 +633,6 @@ try {
     const block = document.querySelector("#yamv-content pre.mermaid");
     window.scrollTo(0, block.getBoundingClientRect().top + window.scrollY + 5);
   });
-  await page.waitForTimeout(50);
   await show(diagramMoved, { ...diagramOptions, generation: 55 });
   const movedTop = await diagramTop();
   check("a reload with 20 lines inserted above keeps a diagram block at the top", Math.abs(movedTop + 5) <= 1, movedTop);

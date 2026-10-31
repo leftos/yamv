@@ -13,7 +13,7 @@ namespace Yamv.App.Tests.ViewModels;
 public sealed class DocumentWindowViewModelTests
 {
     private const double WidePane = 1600;
-    private static readonly TimeSpan GateBackstop = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan GateBackstop = TimeSpan.FromMinutes(5);
     private static readonly GroupingOptions Plain = new(null, StringComparison.OrdinalIgnoreCase);
     private static readonly string Repo = P("dev", "yamv");
     private static readonly string RepoDocA = Path.Combine(Repo, "docs", "a.md");
@@ -1805,7 +1805,7 @@ public sealed class DocumentWindowViewModelTests
     {
         if (!gate.Wait(GateBackstop, TestContext.Current.CancellationToken))
         {
-            throw new TimeoutException($"The test gate was not opened within {GateBackstop.TotalSeconds} s.");
+            throw new TimeoutException($"The test gate was not opened: hung after {GateBackstop.TotalMinutes} min.");
         }
     }
 
@@ -1814,7 +1814,7 @@ public sealed class DocumentWindowViewModelTests
     {
         if (!signal.Wait(GateBackstop, TestContext.Current.CancellationToken))
         {
-            throw new TimeoutException($"The test signal was not released within {GateBackstop.TotalSeconds} s.");
+            throw new TimeoutException($"The test signal was not released: hung after {GateBackstop.TotalMinutes} min.");
         }
     }
 

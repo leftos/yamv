@@ -17,6 +17,7 @@
 - **Group**: a top-level node of the sidebar tree, one per group root: a git repo or a folder.
 - **Group root**: the folder a document is grouped under in the tree: its git work-tree root, or its parent folder when it is not in a repo.
 - **Half**: the light or dark part of a theme family: its `light` or `dark` object, with that half's tokens and css ([themes.md](design/themes.md)).
+- **Hang guard**: the one wall-clock bound a test may hold, sized in minutes (`GateBackstop`, `HangGuard`, the page check's default timeout); when it fires, the test fails as hung, never as too slow.
 - **Harness window**: the development window (`HarnessWindow`) that hosts a bare `DocumentView` with `--theme`, `--find`, `--scroll` and similar switches; opened instead of the main window when `YAMV_DEV_HARNESS=1`.
 - **Import notice**: the modal an Import shows before copying a theme file, with a card for the file (name, author, halves, whether it has css, its path, its errors and warnings) and the warning about css that loads from the web; the card is read by `ThemeCatalog.Inspect` into a `ThemeInspection` ([themes.md](design/themes.md)).
 - **Inherited value**: a token's value in the token editor when the tab sets none: shown grey, taken from Shared or the defaults (on the Shared tab, from the defaults). Setting it, even to the same value, makes it set; ↺ removes a set value.
