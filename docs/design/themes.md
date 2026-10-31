@@ -56,7 +56,9 @@ JSON with comments (`//`, `/* */`) and trailing commas allowed. Every field exce
   - When the theme in use has its file deleted or renamed outside the app, its row stays, greyed and marked "Missing on disk", in its last loaded version with any edits. Save writes the file again; Rename, Delete, Export and Edit as text are off.
 - `css` is appended to the document page after YAMV's own stylesheet. It styles the document only, not the app chrome. Scripts can't run in the page (the page's Content-Security-Policy blocks them), so `css` can't run code.
 
-  Theme css can make the page load images from the web (`url(https://…)` in CSS), which can reveal that you opened a document and which links it holds. Import a theme from someone you trust, as you would a browser extension's styles. On every Import the app shows a modal, "Import a theme", with a card for the file (name, author, which halves it has, whether it has css, the file's full path, and its errors and warnings) and this warning. A file that cannot be imported shows its file name and no chip, and only Cancel works.
+  Theme css can make the page load images from the web (`url(https://…)` in CSS), which can reveal that you opened a document and which links it holds. Import a theme from someone you trust, as you would a browser extension's styles.
+
+  On every Import the app shows a modal, "Import a theme", with a card for the file (name, author, which halves it has, whether it has css, the file's full path, and its errors and warnings) and this warning. A file that cannot be imported shows its file name and no chip, and only Cancel works.
 
 ## Tokens
 

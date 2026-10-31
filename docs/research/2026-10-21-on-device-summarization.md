@@ -25,15 +25,21 @@ Confidence key: **verified** means quoted from the linked primary page in this s
 
 Quality signals for long input: the Qwen3.5-4B card reports AA-LCR 57.0 and LongBench v2 50.0 ([card](https://huggingface.co/Qwen/Qwen3.5-4B)). No vendor in this range publishes a dedicated summarization benchmark that was found in this session; YAMV should build a small eval set of its own Markdown documents.
 
-Architecture matters for long documents: Qwen3.5 uses Gated DeltaNet (linear attention) in three of every four blocks ([card](https://huggingface.co/Qwen/Qwen3.5-4B)), and Gemma 4 small models use a 512-token sliding window on most layers ([model card](https://ai.google.dev/gemma/docs/core/model_card_4)). Both keep the KV cache far smaller at 10K-30K tokens than a plain transformer such as Llama 3.2 or Phi-4-mini, which the [vdf.ai](https://vdf.ai/blog/best-small-language-models/) roundup notes is often what decides whether long context fits.
+Architecture matters for long documents: Qwen3.5 uses Gated DeltaNet (linear attention) in three of every four blocks ([card](https://huggingface.co/Qwen/Qwen3.5-4B)), and Gemma 4 small models use a 512-token sliding window on most layers ([model card](https://ai.google.dev/gemma/docs/core/model_card_4)).
 
-Licenses: Apache 2.0 and MIT permit redistribution inside a free or commercial app with the license text and notices kept. Llama 3.2 requires "Built with Llama" displayed by redistributors and a separate license above 700M MAU; LFM grants commercial rights only below $10M annual revenue; Nemotron is a custom license to read in full ([vdf.ai, licence section](https://vdf.ai/blog/best-small-language-models/)). Gemma 4 moved to Apache 2.0 ([HF blog](https://huggingface.co/blog/gemma4)), unlike Gemma 3's custom Gemma terms.
+Both keep the KV cache far smaller at 10K-30K tokens than a plain transformer such as Llama 3.2 or Phi-4-mini, which the [vdf.ai](https://vdf.ai/blog/best-small-language-models/) roundup notes is often what decides whether long context fits.
+
+Licenses: Apache 2.0 and MIT permit redistribution inside a free or commercial app with the license text and notices kept.
+
+Llama 3.2 requires "Built with Llama" displayed by redistributors and a separate license above 700M MAU; LFM grants commercial rights only below $10M annual revenue; Nemotron is a custom license to read in full ([vdf.ai, licence section](https://vdf.ai/blog/best-small-language-models/)). Gemma 4 moved to Apache 2.0 ([HF blog](https://huggingface.co/blog/gemma4)), unlike Gemma 3's custom Gemma terms.
 
 ## 2. OS-provided models
 
 ### Apple Foundation Models (macOS)
 
-- Requires macOS 26+, Apple silicon, and Apple Intelligence enabled. The on-device model is ~3B params. Context window holds input and output combined: 4,096 tokens on macOS 26 and on M1/M2 Macs; 8,192 on macOS 27 with M3 or newer and 12 GB+ ([apfel README](https://github.com/arthur-ficial/apfel), secondary but reads `SystemLanguageModel.contextSize` at runtime). Apple's WWDC26 session shows `model.contextSize` returning 8192 and a `tokenCount(for:)` API added in 26.4 ([WWDC26 session 241](https://developer.apple.com/videos/play/wwdc2026/241/)).
+- Requires macOS 26+, Apple silicon, and Apple Intelligence enabled. The on-device model is ~3B params. Context window holds input and output combined: 4,096 tokens on macOS 26 and on M1/M2 Macs; 8,192 on macOS 27 with M3 or newer and 12 GB+ ([apfel README](https://github.com/arthur-ficial/apfel), secondary but reads `SystemLanguageModel.contextSize` at runtime).
+
+  Apple's WWDC26 session shows `model.contextSize` returning 8192 and a `tokenCount(for:)` API added in 26.4 ([WWDC26 session 241](https://developer.apple.com/videos/play/wwdc2026/241/)).
 - macOS 27 adds `PrivateCloudComputeLanguageModel` (32K context, reasoning) and a `LanguageModel` protocol with CoreAI and MLX backends ([WWDC26 241](https://developer.apple.com/videos/play/wwdc2026/241/), [WWDC26 339](https://developer.apple.com/videos/play/wwdc2026/339/)). PCC sends text off device, which changes the privacy story.
 - Context management guidance: [TN3193](https://developer.apple.com/documentation/technotes/tn3193-managing-the-on-device-foundation-model-s-context-window).
 - .NET access: the API is Swift-only (async, Swift concurrency). No .NET binding was found. Practical route is a small Swift dynamic library exposing `@_cdecl` C functions (prompt in, streamed chunks via callback) loaded by P/Invoke, built in the macOS packaging step. Unverified effort estimate: a few hundred lines plus build plumbing.
