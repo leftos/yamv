@@ -54,6 +54,7 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 | Show a failure of a user-started action (a toast) | `src/Yamv.App/Services/IToasts.cs` → `ViewModels/ToastValue.cs` → `ToastCenter.cs` → `ToastItem.cs` → `Views/ToastHost.axaml` + `.axaml.cs` (and `ToastText`) → `Views/MainWindow.axaml` (`ToastPopup`) + `.axaml.cs` (`RunLogged`) → `Platform/ToastClickThrough.cs` → `ViewModels/DocumentWindowViewModel.cs` (`RenderAsync`, `StepContentWidthAsync`, `DocumentWindowServices`) → `ViewModels/ContentWidthViewModel.cs` → `Services/FileActions.cs` → `Services/LinkOpener.cs` → `Services/MainWindowFactory.cs` → `tests/Yamv.App.Tests/Services/FileActionsTests.cs` + `Services/LinkOpenerTests.cs` + `Fakes/RecordingToasts.cs` + `ViewModels/ToastCenterTests.cs` + `Views/ToastHostTests.cs` | [look.md](design/look.md) |
 | Change the format command or the commit hooks | `prek.toml` → `tools/hooks/csharpier-wrapper.ps1`, `tools/hooks/dotnet-format-wrapper.ps1` → `.csharpierignore` → `CLAUDE.md` Commands |
 | Change the app log or how a log line is written | `src/Yamv.Core/Diagnostics/FileAppLog.cs` → `IAppLog.cs` → `LogText.cs` → the sites that log document-derived values: `src/Yamv.Core/Links/LinkPolicy.cs`, `src/Yamv.App/Services/LinkOpener.cs`, `Controls/DocumentView.cs`, `Services/FileActions.cs` → `tests/Yamv.Core.Tests/Diagnostics/` | |
+| Log an exception that escapes a handler, or change what the app does after one | `src/Yamv.App/App.axaml.cs` (`OnFrameworkInitializationCompleted`, `InstallUnhandledExceptionHandlers`, `ReleaseMainWindow`) → `src/Yamv.Core/Diagnostics/FileAppLog.cs` → `tests/Yamv.App.Tests/UnhandledExceptionTests.cs` | |
 
 ## Layers
 
@@ -82,6 +83,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
   A folder whose watch cannot be started, or fails before it has worked for a full tick, is polled instead: every 2 s `FileStamps.Read` takes each open document's length and last write time (no document is opened), and only a document whose stamp changed since the previous poll is reported, so a rewrite that keeps both is missed.
 
   A document's first stamp is taken on a pass asked for when it is opened in a polled folder or the folder starts being polled; a change before that read is not reported. That window is one thread-pool dispatch (plus the rest of the folder's running pass), and, outside the watcher, the time between the subscriber's own read of the document and its call to `SetPaths`, so a subscriber reads a document and calls `SetPaths` close together (the [first-stamp window](glossary.md)).
+
+  An exception that escapes a handler is logged, not left to end the app silently: under the classic desktop lifetime `App` subscribes `Dispatcher.UIThread.UnhandledException` (logs "Unhandled: an exception escaped a UI handler; the app keeps running.", marks it handled so the app keeps running, and shows the warning toast "Something went wrong; see the log" in the most recently active document window), `AppDomain.CurrentDomain.UnhandledException` (logs "Unhandled: an exception no handler caught; the app ends."; it cannot stop the end) and `TaskScheduler.UnobservedTaskException` (logs "Unhandled: a task's exception was never observed." unless the UI handler already logged that same exception, and always marks it observed). `ReleaseMainWindow` removes them last, in a `finally`; a headless test installs them with `InstallUnhandledExceptionHandlers`.
 
   Links (`Links/`): `LinkPolicy.Decide(Uri?, LinkContext)` returns a `LinkDecision`: `OpenExternal(Uri, DroppedFields)`, `OpenDocument(Path, LinkPath, Fragment)`, `OpenWithDefaultApp(Path)`, `Confirm(Path)` or `Ignore(Kind, Reason)`. `Kind` is an [ignore kind](glossary.md) (`IgnoreKind`: `Scheme`, `NetworkShare`, `NotPlainPath`, `Missing`, `OutsideRoot`, `TrailingDotOrSpace`) the app words for the user, and `Reason` is the log line.
 
@@ -427,6 +430,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
 - `ThemeCatalog.LoadAll` can list two entries with one id (an invalid user file beside the built-in it shadows): look a theme up by id preferring the valid entry.
 - The title bar's ⋯ menu shares one fill for hover and `:focus-visible`, and each open focuses its first item. That holds with one entry; a second entry needs the focus to follow the pointer or a distinct focus look, or two rows highlight at once.
 
+- Window callbacks Avalonia raises straight from the platform (`Activated`, `Closing`, `Closed`) bypass `Dispatcher.UIThread.UnhandledException`, so an exception in one still ends the app (YAMV-124). `Dispatcher.InvokeAsync` and `DispatcherTimer` ticks never raise it either: their exception only surfaces later as an unobserved task, logged with no toast. An exception object Avalonia already routed once is not routed again and ends the app. Avalonia 12.1.4 also faults the dispatcher operation's task for an exception the UI handler saw, which is why `TaskScheduler.UnobservedTaskException` skips one already logged.
+
 ## Test locations
 
 - `tests/Yamv.Core.Tests`: everything in Core. A new Core type gets a test file at the mirrored path (`Documents/ReadFailureTests.cs` covers the read-failure reasons).
@@ -443,6 +448,8 @@ YAMV is a markdown viewer for Windows and macOS. `Yamv.Core` holds every piece o
   `ViewModels/ToastCenterTests.cs` covers the cards, their count, cap and fades on a fake clock, and `Views/ToastHostTests.cs` how `ToastHost` draws them; `Fakes/RecordingToasts` is the `IToasts` that records what a view model or `FileActionsTests` shows.
 
   `tests/Yamv.App.Tests/InstanceRequestHandlerTests.cs` covers `InstanceRequestHandler`, `ProgramLaunchTests.cs` beside it `Program`'s second-launch exit codes and `RunAsApp`, and `TestInstanceServer.cs` is the real instance server they run against.
+
+  `tests/Yamv.App.Tests/UnhandledExceptionTests.cs` covers the three unhandled-exception handlers (the log lines, the toast, the app keeping running, no double log, removal on release).
 
   `Platform/PlatformTrashTests.cs` covers `PlatformTrash`; its one `Category=Desktop` test touches the real Recycle Bin or Trash and is excluded by default.
 

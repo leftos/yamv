@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -88,6 +89,15 @@ public partial class App : Application
 
     /// <summary>The last stamp given to a document window's activation; a higher stamp is a more recent activation.</summary>
     private long _activationStamp;
+
+    /// <summary>
+    /// Every exception the UI-thread handler already logged, so the same one is not logged again when its dispatcher operation
+    /// surfaces it as an unobserved task exception at the next collection; weak, so an entry goes with its exception.
+    /// </summary>
+    private static readonly ConditionalWeakTable<Exception, object> HandledOnUiThread = [];
+
+    /// <summary>The value <see cref="HandledOnUiThread"/> holds for every logged exception; only its key matters.</summary>
+    private static readonly object HandledMarker = new();
 
     /// <summary>The activate requests that arrived during the launch grace, unanswered until it ends.</summary>
     private readonly List<InstanceRequest> _heldActivates = [];
@@ -206,6 +216,9 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // Only a real start takes the handlers: a headless test builds an app with no lifetime and installs them itself, so
+            // nothing process-wide is left behind by an app a test never releases.
+            InstallUnhandledExceptionHandlers();
             desktop.ShutdownRequested += (_, e) => OnShutdownRequested(e, () => desktop.TryShutdown());
             desktop.Exit += (_, _) => ReleaseMainWindow();
             if (IsHarnessStart)
@@ -227,6 +240,108 @@ public partial class App : Application
 
     /// <summary>Opens the ready latch, if this launch has one: its queued jobs, and every later one, are posted to the UI thread.</summary>
     internal static void OpenReadyLatch() => ReadyLatch?.Open(job => Dispatcher.UIThread.Post(job));
+
+    /// <summary>
+    /// Installs the process-wide handlers for an exception that escapes one of the app's own: a UI-thread one keeps the app
+    /// running and is shown as a toast, a background-thread one and an unobserved task's are only logged. Installing again keeps
+    /// one handler of each, so a start that runs twice stacks nothing.
+    /// </summary>
+    internal void InstallUnhandledExceptionHandlers()
+    {
+        Dispatcher.UIThread.UnhandledException -= OnUnhandledUiException;
+        Dispatcher.UIThread.UnhandledException += OnUnhandledUiException;
+        AppDomain.CurrentDomain.UnhandledException -= OnAppDomainUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+    }
+
+    /// <summary>
+    /// Logs an exception that escaped a UI-thread job, says so in the most recently active document window, and keeps the app
+    /// running: the action that failed simply did not finish. Neither half may throw out of the handler, since nothing catches
+    /// it a second time, so each reports its own failure to stderr.
+    /// </summary>
+    private void OnUnhandledUiException(object? sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+        try
+        {
+            HandledOnUiThread.AddOrUpdate(e.Exception, HandledMarker);
+            Log.LogError("Unhandled: an exception escaped a UI handler; the app keeps running.", e.Exception);
+        }
+        catch (Exception inner)
+        {
+            Console.Error.WriteLine($"Unhandled: could not log an escaped exception: {inner}");
+        }
+
+        try
+        {
+            MostRecentlyActiveWindow()?.Composition.ViewModel.Toasts.Show(ToastKind.Warning, "Something went wrong; see the log");
+        }
+        catch (Exception inner)
+        {
+            Console.Error.WriteLine($"Unhandled: could not show the failure toast: {inner}");
+        }
+    }
+
+    /// <summary>
+    /// Logs an exception no handler caught, which the runtime follows by ending the app; nothing can stop that. A test calls it
+    /// directly, since raising a real one ends the test host.
+    /// </summary>
+    internal void OnAppDomainUnhandledException(object? sender, UnhandledExceptionEventArgs e)
+    {
+        try
+        {
+            Log.LogError("Unhandled: an exception no handler caught; the app ends.", e.ExceptionObject as Exception);
+        }
+        catch (Exception inner)
+        {
+            Console.Error.WriteLine($"Unhandled: could not log an uncaught exception: {inner}");
+        }
+    }
+
+    /// <summary>
+    /// Logs a task exception nobody observed and marks it observed, so the runtime reports nothing further. A test calls it
+    /// directly, since the runtime raises it on the finalizer thread.
+    /// </summary>
+    internal void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        try
+        {
+            // The dispatcher marks every handled UI exception on the operation's task too, so one the UI handler already logged
+            // would otherwise be logged again here at the next collection.
+            if (!e.Exception.Flatten().InnerExceptions.All(exception => HandledOnUiThread.TryGetValue(exception, out _)))
+            {
+                Log.LogError("Unhandled: a task's exception was never observed.", e.Exception);
+            }
+        }
+        catch (Exception inner)
+        {
+            Console.Error.WriteLine($"Unhandled: could not log an unobserved task exception: {inner}");
+        }
+
+        e.SetObserved();
+    }
+
+    /// <summary>The tracked document window activated most recently, or null when none is open.</summary>
+    private DocumentWindow? MostRecentlyActiveWindow()
+    {
+        List<DocumentWindow> windows = [.. _viewers];
+        if (_main is { } main)
+        {
+            windows.Add(main);
+        }
+
+        return windows.MaxBy(window => window.ActivatedAt);
+    }
+
+    /// <summary>Removes the handlers an exit no longer needs; removing one that is not installed does nothing.</summary>
+    private void RemoveUnhandledExceptionHandlers()
+    {
+        Dispatcher.UIThread.UnhandledException -= OnUnhandledUiException;
+        AppDomain.CurrentDomain.UnhandledException -= OnAppDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+    }
 
     /// <summary>
     /// Shows the theme settings window over <paramref name="owner"/>, or activates the open one; when its owner closes while
@@ -1177,48 +1292,56 @@ public partial class App : Application
     /// Releases what the app owns when it exits: disposes the theme settings host, closing its window without the unsaved-edits
     /// confirm, runs the stop action if the app had not begun stopping (the last-window rule's stop came first), disposes every
     /// document window's composition (saving the main session), then the themes folder watcher, then the settings file watcher,
-    /// then the settings writer, waiting up to 2 s for the theme picks still being saved, then the bridge. A quit job still queued
-    /// does nothing once this ran. Safe to call more than once.
+    /// then the settings writer, waiting up to 2 s for the theme picks still being saved, then the bridge. The
+    /// unhandled-exception handlers go last, in a <c>finally</c>, so a failure along the way is still logged. A quit job still
+    /// queued does nothing once this ran. Safe to call more than once.
     /// </summary>
     internal void ReleaseMainWindow()
     {
-        _exited = true;
-        _activatable?.Activated -= OnLifetimeActivated;
-        _activatable = null;
-        StopGraceTimer();
-        ReleaseHeldActivates();
-        _themeSettingsHost?.Dispose();
-        _themeSettingsHost = null;
-        if (_policy.Exiting())
+        try
         {
-            RunStopOnce();
-        }
+            _exited = true;
+            _activatable?.Activated -= OnLifetimeActivated;
+            _activatable = null;
+            StopGraceTimer();
+            ReleaseHeldActivates();
+            _themeSettingsHost?.Dispose();
+            _themeSettingsHost = null;
+            if (_policy.Exiting())
+            {
+                RunStopOnce();
+            }
 
-        if (_main is { } main)
+            if (_main is { } main)
+            {
+                _main = null;
+                main.Unhook();
+                main.Composition.Dispose();
+            }
+
+            foreach (DocumentWindow viewer in _viewers)
+            {
+                viewer.Unhook();
+                viewer.Composition.Dispose();
+            }
+
+            _viewers.Clear();
+            _themesSync?.Dispose();
+            _themesSync = null;
+            ReleaseSettingsWatcher();
+            _bridge?.RequestChanged -= OnThemeRequestChanged;
+            _settingsWriter?.Dispose();
+            _settingsWriter = null;
+            _bridge?.Dispose();
+            _bridge = null;
+            _widths = null;
+            _harnessBridge?.Dispose();
+            _harnessBridge = null;
+        }
+        finally
         {
-            _main = null;
-            main.Unhook();
-            main.Composition.Dispose();
+            RemoveUnhandledExceptionHandlers();
         }
-
-        foreach (DocumentWindow viewer in _viewers)
-        {
-            viewer.Unhook();
-            viewer.Composition.Dispose();
-        }
-
-        _viewers.Clear();
-        _themesSync?.Dispose();
-        _themesSync = null;
-        ReleaseSettingsWatcher();
-        _bridge?.RequestChanged -= OnThemeRequestChanged;
-        _settingsWriter?.Dispose();
-        _settingsWriter = null;
-        _bridge?.Dispose();
-        _bridge = null;
-        _widths = null;
-        _harnessBridge?.Dispose();
-        _harnessBridge = null;
     }
 
     /// <summary>Answers <c>closing</c> to every activate still held for the launch grace, since the app exits before it ends.</summary>

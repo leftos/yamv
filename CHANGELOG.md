@@ -20,6 +20,6 @@
 - Ctrl+[ and Ctrl+] (Cmd on macOS) or the **⟷** popover set the text column's width, saved per folder or for all documents.
 - The theme settings window (**⋯** menu, Ctrl+, or Cmd+,) picks, edits with a live preview, imports and exports themes.
 - The theme and Appearance are saved app-wide, and an outside edit of the settings or a theme reaches every open window.
-- A toast at the bottom of the document pane says when an action you started fails.
+- A toast at the bottom of the document pane says when an action you started fails, or when an unexpected error was logged and YAMV kept running.
 - `--help`, and on Windows `--register` and `--unregister`, which add or remove YAMV in Explorer's Open with for `.md` and `.markdown`.
 - A single-file `yamv.exe` for Windows and a `YAMV.app` for macOS.
