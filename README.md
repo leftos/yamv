@@ -39,7 +39,9 @@ A quiet markdown viewer for Windows and macOS.
 
   The card that asks before a link opens a file or shortcut adds "It will run as Administrator."; the card for a folder does not.
 - A path that does not exist is not an error: the viewer window shows it as a missing document.
-- `yamv --register` (Windows) adds YAMV to Explorer's Open with for `.md` and `.markdown`, for the `yamv.exe` you run it from, and never takes over the default handler. It prints `Registered YAMV for .md and .markdown in Open with (<path>).`, or `YAMV is already registered for .md and .markdown (<path>).` when nothing changed, and exits 0. Run from a program that is not `yamv.exe`, it prints `Not registering: <path> is not yamv.exe. Run --register from the installed yamv.exe.` and exits 1.
+- `yamv --register` (Windows) adds YAMV to Explorer's Open with for `.md` and `.markdown`, for the `yamv.exe` you run it from, and lists YAMV in Settings' Default apps, where you can make it the default; it never takes over the default handler itself.
+
+  It prints `Registered YAMV for .md and .markdown in Open with (<path>).`, or `YAMV is already registered for .md and .markdown (<path>).` when nothing changed, and exits 0. Run from a program that is not `yamv.exe`, it prints `Not registering: <path> is not yamv.exe. Run --register from the installed yamv.exe.` and exits 1.
 - `yamv --unregister` removes the entries that point at the `yamv.exe` you run it from and leaves any that point at another program. It prints `Removed YAMV from Open with for .md and .markdown.`, or `Nothing to remove.`, and exits 0, with a note after the line when it left an entry in place. A registry failure prints `Could not register: <message>` or `Could not unregister: <message>` to standard error and exits 1.
 - On macOS, `--register` and `--unregister` print a note to standard error and exit 2: Finder's Open With lists YAMV from its app bundle.
 
@@ -63,6 +65,19 @@ pwsh scripts/publish.ps1 -Rid win-x64     # publish/win-x64/yamv.exe, one file
 pwsh scripts/publish.ps1 -Rid osx-arm64   # publish/osx-arm64/, a folder for make-app.sh
 pwsh scripts/publish.ps1 -Rid osx-x64     # the same for Intel Macs
 ```
+
+On Windows, `scripts/make-installer.ps1` publishes win-x64 and builds `dist/YAMV-Setup.exe` with Inno Setup 6 (`winget install JRSoftware.InnoSetup`); `-Install` also runs it silently:
+
+```
+pwsh scripts/make-installer.ps1            # dist/YAMV-Setup.exe
+pwsh scripts/make-installer.ps1 -Install   # and install it, restarting a YAMV it closed
+```
+
+The installer shows no pages. It installs YAMV for the current user into `%LOCALAPPDATA%\Programs\YAMV`, adds a Start menu entry and an uninstall entry, and runs `yamv --register`, failing when that fails. Uninstalling runs `yamv --unregister`.
+
+On a first install it then opens Settings at YAMV's Default apps page, where **Set default** makes YAMV open `.md` and `.markdown` files; Windows leaves that click to you.
+
+A reinstall closes a running YAMV first, and `-Install` starts it again, with its documents. When YAMV declines to close (an unsaved theme edit asks whether to save it), setup fails and YAMV is not updated.
 
 On a Mac, `scripts/make-app.sh` turns a published macOS folder into `YAMV.app` and signs it ad hoc:
 

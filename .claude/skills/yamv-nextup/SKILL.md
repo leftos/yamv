@@ -65,4 +65,7 @@ test mode: stable
 
 - An item built in a worktree: copy or commit its change onto `main` in the main checkout, build and run the full suite there through the gate, commit one item per commit with a `Refs: YAMV-<n>` trailer, `git push`, then remove the worktree and branch per the user-level `nextup` §4 step 6.
 - A small change (docs, plan, config): commit on `main` and `git push`.
+- **Reinstall**, after every landing that changes anything under `src/`, `installer/` or `scripts/`: from the main checkout, `pwsh -NoProfile -File tools/gate.ps1 run --log .tmp/install.log --slot heavy --timeout 900 -- pwsh -NoProfile -File scripts/make-installer.ps1 -Install`, which updates the owner's installed YAMV (`%LOCALAPPDATA%\Programs\YAMV`) and restarts it when it was running.
+
+  A failed reinstall (YAMV declined to close, an unsaved theme edit) is reported in one line and retried at the next landing; it never holds the landing.
 - Commit messages: ≤4-char type tag, imperative, ≤72-char subject, the session's attribution trailers.

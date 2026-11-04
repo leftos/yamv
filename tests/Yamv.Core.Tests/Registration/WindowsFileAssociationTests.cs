@@ -18,7 +18,15 @@ public sealed class WindowsFileAssociationTests : IDisposable
 
     private const string ParentPath = @"Software\YamvTests";
 
-    private readonly string _rootPath = ParentPath + @"\" + Guid.NewGuid().ToString("N");
+    private readonly string _rootPath;
+    private readonly string _softwarePath;
+
+    public WindowsFileAssociationTests()
+    {
+        string id = Guid.NewGuid().ToString("N");
+        _rootPath = ParentPath + @"\" + id;
+        _softwarePath = ParentPath + @"\" + id + "-software";
+    }
 
     public void Dispose()
     {
@@ -28,6 +36,7 @@ public sealed class WindowsFileAssociationTests : IDisposable
         }
 
         Registry.CurrentUser.DeleteSubKeyTree(_rootPath, throwOnMissingSubKey: false);
+        Registry.CurrentUser.DeleteSubKeyTree(_softwarePath, throwOnMissingSubKey: false);
         bool empty;
         using (RegistryKey? parent = Registry.CurrentUser.OpenSubKey(ParentPath, writable: false))
         {
@@ -123,18 +132,21 @@ public sealed class WindowsFileAssociationTests : IDisposable
     {
         SkipOffWindows();
         using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
         RegistrationResult first = Register(root, ExeA);
         Assert.True(first.Succeeded);
         Assert.True(first.Changed);
         Assert.Equal($"Registered YAMV for .md and .markdown in Open with ({ExeA}).", first.Message);
 
         List<string> before = Snapshot(root);
+        List<string> softwareBefore = Snapshot(software);
         RegistrationResult second = Register(root, ExeA);
 
         Assert.True(second.Succeeded);
         Assert.False(second.Changed);
         Assert.Equal($"YAMV is already registered for .md and .markdown ({ExeA}).", second.Message);
         Assert.Equal(before, Snapshot(root));
+        Assert.Equal(softwareBefore, Snapshot(software));
     }
 
     [Fact]
@@ -266,7 +278,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
         using RegistryKey writable = OpenRoot();
         using RegistryKey root = OpenRootForReading();
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult failed = association.Register();
 
         Assert.False(failed.Succeeded);
@@ -283,7 +296,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
         Register(writable, ExeA);
 
         using RegistryKey root = OpenRootForReading();
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult failed = association.Unregister();
 
         Assert.False(failed.Succeeded);
@@ -301,7 +315,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
             command.SetValue(null, QuotedA, RegistryValueKind.String);
         }
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult removed = association.Unregister();
 
         Assert.True(removed.Succeeded);
@@ -316,9 +331,11 @@ public sealed class WindowsFileAssociationTests : IDisposable
     {
         SkipOffWindows();
         using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+        List<string> softwareBefore = Snapshot(software);
         Register(root, ExeA);
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult removed = association.Unregister();
 
         Assert.True(removed.Succeeded);
@@ -326,6 +343,7 @@ public sealed class WindowsFileAssociationTests : IDisposable
         Assert.Equal("Removed YAMV from Open with for .md and .markdown.", removed.Message);
         List<string> expected = [".markdown", @".markdown\OpenWithProgids", ".md", @".md\OpenWithProgids", "Applications"];
         Assert.Equal(expected, Snapshot(root));
+        Assert.Equal(softwareBefore, Snapshot(software));
         foreach (string extension in Extensions)
         {
             using RegistryKey progIds = Open(root, $@"{extension}\OpenWithProgids");
@@ -346,7 +364,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
         }
         Register(root, ExeA);
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         association.Unregister();
 
         Assert.Equal("SomeEditor.md", DefaultValue(root, ".md"));
@@ -366,7 +385,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
         }
         Register(root, ExeA);
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         association.Unregister();
 
         using RegistryKey kept = Open(root, @"Applications\other.exe");
@@ -381,7 +401,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
         SkipOffWindows();
         using RegistryKey root = OpenRoot();
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult nothing = association.Unregister();
 
         Assert.True(nothing.Succeeded);
@@ -401,7 +422,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
             command.SetValue(null, ForeignCommand, RegistryValueKind.String);
         }
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult left = association.Unregister();
 
         Assert.True(left.Succeeded);
@@ -426,7 +448,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
         Register(root, ExeA);
         List<string> before = Snapshot(root);
 
-        using WindowsFileAssociation association = new(root, ExeB);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeB);
         RegistrationResult left = association.Unregister();
 
         Assert.True(left.Succeeded);
@@ -449,7 +472,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
             command.SetValue(null, QuotedB, RegistryValueKind.String);
         }
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult removed = association.Unregister();
 
         Assert.True(removed.Succeeded);
@@ -481,7 +505,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
             progIds.SetValue(ProgId, Array.Empty<byte>(), RegistryValueKind.None);
         }
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult removed = association.Unregister();
 
         Assert.True(removed.Succeeded);
@@ -504,7 +529,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
             application.SetValue("FriendlyAppName", "YAMV", RegistryValueKind.String);
         }
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult removed = association.Unregister();
 
         Assert.True(removed.Succeeded);
@@ -512,6 +538,183 @@ public sealed class WindowsFileAssociationTests : IDisposable
         Assert.Equal("Removed YAMV from Open with for .md and .markdown.", removed.Message);
         using RegistryKey? left = root.OpenSubKey(@"Applications\yamv.exe");
         Assert.Null(left);
+    }
+
+    [Fact]
+    public void Register_writes_capabilities_with_name_description_icon_and_file_associations()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+
+        Register(root, ExeA);
+
+        using RegistryKey capabilities = Open(software, @"YAMV\Capabilities");
+        Assert.Equal("YAMV", capabilities.GetValue("ApplicationName") as string);
+        Assert.Equal(RegistryValueKind.String, capabilities.GetValueKind("ApplicationName"));
+        Assert.Equal("Yet Another Markdown Viewer", capabilities.GetValue("ApplicationDescription") as string);
+        Assert.Equal(RegistryValueKind.String, capabilities.GetValueKind("ApplicationDescription"));
+        Assert.Equal("\"" + ExeA + "\",0", capabilities.GetValue("ApplicationIcon") as string);
+        Assert.Equal(RegistryValueKind.String, capabilities.GetValueKind("ApplicationIcon"));
+
+        using RegistryKey fileAssociations = Open(capabilities, "FileAssociations");
+        foreach (string extension in Extensions)
+        {
+            Assert.Equal(ProgId, fileAssociations.GetValue(extension) as string);
+            Assert.Equal(RegistryValueKind.String, fileAssociations.GetValueKind(extension));
+        }
+    }
+
+    [Fact]
+    public void Register_adds_registered_applications_value_pointing_at_capabilities()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+
+        Register(root, ExeA);
+
+        using RegistryKey registered = Open(software, "RegisteredApplications");
+        Assert.Equal(@"Software\YAMV\Capabilities", registered.GetValue("YAMV") as string);
+        Assert.Equal(RegistryValueKind.String, registered.GetValueKind("YAMV"));
+        Assert.Equal("YAMV", WindowsFileAssociation.RegisteredApplicationName);
+    }
+
+    [Fact]
+    public void Unregister_removes_capabilities_and_registered_applications_value()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+        Register(root, ExeA);
+
+        using WindowsFileAssociation association = new(root, software, ExeA);
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        Assert.Equal("Removed YAMV from Open with for .md and .markdown.", removed.Message);
+        using RegistryKey? capabilities = software.OpenSubKey(@"YAMV\Capabilities");
+        Assert.Null(capabilities);
+        using RegistryKey? yamv = software.OpenSubKey("YAMV");
+        Assert.Null(yamv);
+        using RegistryKey? registered = software.OpenSubKey("RegisteredApplications");
+        Assert.Null(registered);
+    }
+
+    [Fact]
+    public void Unregister_keeps_other_registered_applications_values()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+        Register(root, ExeA);
+        using (RegistryKey registered = software.CreateSubKey("RegisteredApplications", writable: true)!)
+        {
+            registered.SetValue("Other", @"Software\Other\Capabilities", RegistryValueKind.String);
+        }
+
+        using WindowsFileAssociation association = new(root, software, ExeA);
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        using RegistryKey kept = Open(software, "RegisteredApplications");
+        Assert.Equal(@"Software\Other\Capabilities", kept.GetValue("Other") as string);
+        Assert.DoesNotContain(kept.GetValueNames(), name => string.Equals(name, "YAMV", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Unregister_leaves_registered_applications_value_that_points_elsewhere()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+        Register(root, ExeA);
+        using (RegistryKey registered = software.OpenSubKey("RegisteredApplications", writable: true)!)
+        {
+            registered.SetValue("YAMV", @"Software\Elsewhere\Capabilities", RegistryValueKind.String);
+        }
+
+        using WindowsFileAssociation association = new(root, software, ExeA);
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        using RegistryKey kept = Open(software, "RegisteredApplications");
+        Assert.Equal(@"Software\Elsewhere\Capabilities", kept.GetValue("YAMV") as string);
+    }
+
+    [Fact]
+    public void Unregister_removes_capabilities_even_when_progid_opens_another_program()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+        Register(root, ExeA);
+        using (RegistryKey command = root.OpenSubKey($@"{ProgId}\shell\open\command", writable: true)!)
+        {
+            command.SetValue(null, ForeignCommand, RegistryValueKind.String);
+        }
+
+        using WindowsFileAssociation association = new(root, software, ExeA);
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        Assert.Equal(ForeignCommand, DefaultValue(root, $@"{ProgId}\shell\open\command"));
+        using RegistryKey? capabilities = software.OpenSubKey(@"YAMV\Capabilities");
+        Assert.Null(capabilities);
+        using RegistryKey? registered = software.OpenSubKey("RegisteredApplications");
+        Assert.Null(registered);
+    }
+
+    [Fact]
+    public void Unregister_from_another_exe_leaves_capabilities_and_registered_applications_value()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+        Register(root, ExeA);
+
+        using WindowsFileAssociation association = new(root, software, ExeB);
+        RegistrationResult left = association.Unregister();
+
+        Assert.True(left.Succeeded);
+        Assert.False(left.Changed);
+        using RegistryKey capabilities = Open(software, @"YAMV\Capabilities");
+        Assert.Equal("\"" + ExeA + "\",0", capabilities.GetValue("ApplicationIcon") as string);
+        using RegistryKey registered = Open(software, "RegisteredApplications");
+        Assert.Equal(@"Software\YAMV\Capabilities", registered.GetValue("YAMV") as string);
+    }
+
+    [Fact]
+    public void Unregister_removes_capabilities_without_an_icon()
+    {
+        SkipOffWindows();
+        using RegistryKey root = OpenRoot();
+        using RegistryKey software = OpenSoftwareRoot();
+        using (RegistryKey capabilities = software.CreateSubKey(@"YAMV\Capabilities", writable: true)!)
+        {
+            capabilities.SetValue("ApplicationName", "YAMV", RegistryValueKind.String);
+        }
+
+        using (RegistryKey registered = software.CreateSubKey("RegisteredApplications", writable: true)!)
+        {
+            registered.SetValue("YAMV", @"Software\YAMV\Capabilities", RegistryValueKind.String);
+        }
+
+        using WindowsFileAssociation association = new(root, software, ExeA);
+        RegistrationResult removed = association.Unregister();
+
+        Assert.True(removed.Succeeded);
+        Assert.True(removed.Changed);
+        using RegistryKey? goneCapabilities = software.OpenSubKey(@"YAMV\Capabilities");
+        Assert.Null(goneCapabilities);
+        using RegistryKey? goneYamv = software.OpenSubKey("YAMV");
+        Assert.Null(goneYamv);
+        using RegistryKey? goneRegistered = software.OpenSubKey("RegisteredApplications");
+        Assert.Null(goneRegistered);
     }
 
     [Fact]
@@ -529,7 +732,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
         using RegistryKey root = OpenRoot();
         Register(root, ExeA);
 
-        using WindowsFileAssociation association = new(root, ExeA.ToUpperInvariant());
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA.ToUpperInvariant());
         RegistrationResult removed = association.Unregister();
 
         Assert.True(removed.Succeeded);
@@ -563,7 +767,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
             progIds.SetValue(ProgId, Array.Empty<byte>(), RegistryValueKind.None);
         }
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult left = association.Unregister();
 
         Assert.True(left.Succeeded);
@@ -587,7 +792,8 @@ public sealed class WindowsFileAssociationTests : IDisposable
             command.SetValue(null, ForeignCommand, RegistryValueKind.String);
         }
 
-        using WindowsFileAssociation association = new(root, ExeA);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, ExeA);
         RegistrationResult left = association.Unregister();
 
         Assert.True(left.Succeeded);
@@ -598,13 +804,16 @@ public sealed class WindowsFileAssociationTests : IDisposable
 
     private static void SkipOffWindows() => Assert.SkipUnless(OperatingSystem.IsWindows(), "The registry exists only on Windows.");
 
-    private static RegistrationResult Register(RegistryKey root, string exePath)
+    private RegistrationResult Register(RegistryKey root, string exePath)
     {
-        using WindowsFileAssociation association = new(root, exePath);
+        using RegistryKey software = OpenSoftwareRoot();
+        using WindowsFileAssociation association = new(root, software, exePath);
         return association.Register();
     }
 
     private RegistryKey OpenRoot() => Registry.CurrentUser.CreateSubKey(_rootPath, writable: true)!;
+
+    private RegistryKey OpenSoftwareRoot() => Registry.CurrentUser.CreateSubKey(_softwarePath, writable: true)!;
 
     private RegistryKey OpenRootForReading() => Registry.CurrentUser.OpenSubKey(_rootPath, writable: false)!;
 

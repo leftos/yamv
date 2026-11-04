@@ -23,3 +23,4 @@
 - A toast at the bottom of the document pane says when an action you started fails, or when an unexpected error was logged and YAMV kept running.
 - `--help`, and on Windows `--register` and `--unregister`, which add or remove YAMV in Explorer's Open with for `.md` and `.markdown`.
 - A single-file `yamv.exe` for Windows and a `YAMV.app` for macOS.
+- A Windows installer that installs YAMV for you and opens Settings, where one click makes it the default markdown viewer.
