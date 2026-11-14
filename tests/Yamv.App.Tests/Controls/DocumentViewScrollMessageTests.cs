@@ -13,7 +13,7 @@ public sealed class DocumentViewScrollMessageTests
         JsonSerializer.Deserialize(body, PageJsonContext.Default.PageMessage) ?? throw new InvalidOperationException("no message");
 
     private static DocumentShow Show(string path) =>
-        new(new RenderedDocument("<p>x</p>", null, false, false), path, Path.GetDirectoryName(path) ?? path, 0, null, null, null);
+        new(new RenderedDocument("<p>x</p>", null, false, false, "x"), path, Path.GetDirectoryName(path) ?? path, 0, null, null, null);
 
     [Fact]
     public void A_scroll_message_carries_its_fraction_and_anchor_to_ScrollChanged()

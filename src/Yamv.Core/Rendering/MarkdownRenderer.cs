@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text;
 using Markdig;
 using Markdig.Extensions.Abbreviations;
@@ -16,8 +17,9 @@ public sealed class MarkdownRenderer
 {
     /// <summary>
     /// Built once and shared: a built pipeline is immutable and rendering from it is thread-safe.
+    /// <see cref="RawSelection"/> parses with it too, so its source offsets are the ones the HTML carries.
     /// </summary>
-    private static readonly MarkdownPipeline Pipeline = BuildPipeline();
+    internal static readonly MarkdownPipeline Pipeline = BuildPipeline();
 
     /// <summary>Renders <paramref name="markdown"/> into HTML and reports what the viewer must prepare for.</summary>
     [SuppressMessage(
@@ -30,18 +32,20 @@ public sealed class MarkdownRenderer
         ArgumentNullException.ThrowIfNull(markdown);
         MarkdownDocument document = Markdown.Parse(markdown, Pipeline);
         MarkSourceLines(document);
+        MarkSourceOffsets(document);
 
         return new RenderedDocument(
             Markdown.ToHtml(document, Pipeline),
             FindTitle(document),
             HasDiagram(document, "mermaid"),
-            document.Descendants<MathInline>().Any() || document.Descendants<MathBlock>().Any()
+            document.Descendants<MathInline>().Any() || document.Descendants<MathBlock>().Any(),
+            markdown
         );
     }
 
     private static MarkdownPipeline BuildPipeline()
     {
-        MarkdownPipelineBuilder builder = new MarkdownPipelineBuilder().UseAdvancedExtensions().UseYamlFrontMatter();
+        MarkdownPipelineBuilder builder = new MarkdownPipelineBuilder().UseAdvancedExtensions().UseYamlFrontMatter().UsePreciseSourceLocation();
 
         // UseAdvancedExtensions registers auto identifiers with the default options; drop that registration
         // so the GitHub one below is the only one assigning ids.
@@ -66,6 +70,21 @@ public sealed class MarkdownRenderer
             if (block is not YamlFrontMatterBlock)
             {
                 block.GetAttributes().AddPropertyIfNotExist("data-line", block.Line);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tags every element the HTML writes for a node with <c>data-src</c>, the node's source start offset,
+    /// so a selection in the page can be mapped back to the markdown (<see cref="RawSelection.Extract"/>).
+    /// </summary>
+    private static void MarkSourceOffsets(MarkdownDocument document)
+    {
+        foreach (MarkdownObject node in document.Descendants())
+        {
+            if (RawSelection.IsTaggedInHtml(node))
+            {
+                node.GetAttributes().AddPropertyIfNotExist("data-src", node.Span.Start.ToString(CultureInfo.InvariantCulture));
             }
         }
     }

@@ -5,4 +5,5 @@ namespace Yamv.Core.Rendering;
 /// <param name="Title">The plain text of the first level-1 heading, or null when the document has none.</param>
 /// <param name="HasMermaid">Whether the document contains a mermaid diagram.</param>
 /// <param name="HasMath">Whether the document contains math for the math renderer.</param>
-public sealed record RenderedDocument(string Html, string? Title, bool HasMermaid, bool HasMath);
+/// <param name="Source">The markdown the HTML was rendered from, which the source offsets in the HTML index into.</param>
+public sealed record RenderedDocument(string Html, string? Title, bool HasMermaid, bool HasMath, string Source);

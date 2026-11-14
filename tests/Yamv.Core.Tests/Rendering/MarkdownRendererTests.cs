@@ -18,7 +18,7 @@ public sealed class MarkdownRendererTests
         ).Html;
 
         Assert.Contains("<table", html);
-        Assert.Contains("<th>Name</th>", html);
+        Assert.Contains("<th data-src=\"1\">Name</th>", html);
     }
 
     [Fact]
@@ -26,7 +26,8 @@ public sealed class MarkdownRendererTests
     {
         string html = Render("- [x] done\n- [ ] todo").Html;
 
-        Assert.Contains("<input disabled=\"disabled\" type=\"checkbox\"", html);
+        Assert.Contains("<input data-src=\"2\" disabled=\"disabled\" type=\"checkbox\"", html);
+        Assert.Contains("<input data-src=\"13\" disabled=\"disabled\" type=\"checkbox\"", html);
     }
 
     [Fact]
@@ -44,7 +45,7 @@ public sealed class MarkdownRendererTests
             """
         ).Html;
 
-        Assert.Contains("<del>gone</del>", html);
+        Assert.Contains("<del data-src=\"0\">gone</del>", html);
         Assert.Contains("class=\"footnotes\"", html);
         Assert.Contains("href=\"https://example.com\"", html);
     }
@@ -83,11 +84,12 @@ public sealed class MarkdownRendererTests
             """
         ).Html;
 
-        Assert.Contains("<h1 id=\"heading\" data-line=\"3\">", html);
-        Assert.Contains("<p data-line=\"5\">", html);
-        Assert.Contains("<ul data-line=\"7\">", html);
-        Assert.Contains("<table data-line=\"9\">", html);
-        Assert.Contains("<code class=\"language-c#\" data-line=\"13\">", html);
+        Assert.Contains("<h1 id=\"heading\" data-line=\"3\" data-src=\"20\">", html);
+        Assert.Contains("<p data-line=\"5\" data-src=\"31\">", html);
+        Assert.Contains("<ul data-line=\"7\" data-src=\"43\">", html);
+        Assert.Contains("<li data-src=\"43\">item</li>", html);
+        Assert.Contains("<table data-line=\"9\" data-src=\"51\">", html);
+        Assert.Contains("<code class=\"language-c#\" data-line=\"13\" data-src=\"70\">", html);
     }
 
     [Fact]
@@ -157,7 +159,7 @@ public sealed class MarkdownRendererTests
         );
 
         Assert.True(document.HasMermaid);
-        Assert.Contains("<pre class=\"mermaid\" data-line=\"0\">graph TD;\n  A-->B;\n</pre>", document.Html);
+        Assert.Contains("<pre class=\"mermaid\" data-line=\"0\" data-src=\"0\">graph TD;\n  A-->B;\n</pre>", document.Html);
     }
 
     [Fact]
@@ -174,11 +176,11 @@ public sealed class MarkdownRendererTests
     {
         RenderedDocument inline = Render("$x^2$");
         Assert.True(inline.HasMath);
-        Assert.Contains("<span class=\"math\">", inline.Html);
+        Assert.Contains("<span class=\"math\" data-src=\"0\">", inline.Html);
 
         RenderedDocument block = Render("$$\nx^2\n$$");
         Assert.True(block.HasMath);
-        Assert.Contains("<div class=\"math\" data-line=\"0\">", block.Html);
+        Assert.Contains("<div class=\"math\" data-line=\"0\" data-src=\"0\">", block.Html);
     }
 
     [Fact]
