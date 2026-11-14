@@ -29,6 +29,9 @@ public enum ShortcutCommand
 
     /// <summary>Open the theme settings window (Ctrl/Cmd+,).</summary>
     ThemeSettings,
+
+    /// <summary>Copy the selection's markdown source (Ctrl/Cmd+Shift+C).</summary>
+    CopyRaw,
 }
 
 /// <summary>Maps a key press to the window command it runs, the same way for a native key and one the page forwarded.</summary>
@@ -36,7 +39,8 @@ public static class Shortcuts
 {
     /// <summary>
     /// The command <paramref name="key"/> runs with these modifiers, or null. The command key is Ctrl on Windows and Cmd (Meta)
-    /// on macOS, exactly one of the two and never with Alt; letters match either case, with Shift ignored. <c>[</c>, <c>]</c>
+    /// on macOS, exactly one of the two and never with Alt; letters match either case, with Shift ignored except on C, which
+    /// copies the selection's markdown only with Shift (without it, C is the page's own copy). <c>[</c>, <c>]</c>
     /// and <c>,</c> take the command key alone, never with Shift. Tab takes Ctrl on both platforms: alone it is the next
     /// document, with Shift the previous.
     /// </summary>
@@ -73,13 +77,14 @@ public static class Shortcuts
             "[" => shift ? null : ShortcutCommand.NarrowerWidth,
             "]" => shift ? null : ShortcutCommand.WiderWidth,
             "," => shift ? null : ShortcutCommand.ThemeSettings,
-            _ => Letter(key),
+            _ => Letter(key, shift),
         };
     }
 
-    private static ShortcutCommand? Letter(string key) =>
+    private static ShortcutCommand? Letter(string key, bool shift) =>
         key.ToUpperInvariant() switch
         {
+            "C" => shift ? ShortcutCommand.CopyRaw : null,
             "W" => ShortcutCommand.CloseDocument,
             "B" => ShortcutCommand.ToggleSidebar,
             "R" => ShortcutCommand.Reload,

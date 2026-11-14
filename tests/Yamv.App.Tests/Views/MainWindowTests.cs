@@ -20,6 +20,7 @@ using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
 using Yamv.Core.Links;
 using Yamv.Core.Platform;
+using Yamv.Core.Rendering;
 using Yamv.Core.Session;
 using Yamv.Core.Widths;
 
@@ -1053,6 +1054,128 @@ public sealed class MainWindowTests
             ToastItem toast = Assert.Single(fixture.Toasts.Items);
             Assert.Equal((ToastKind.Warning, "Couldn't copy the path; see the log"), (toast.Kind, toast.Text));
             Assert.Contains(fixture.Log.Entries, entry => entry.Message == "Copy path: failed.");
+        });
+
+    private const string CopyRawFailed = "Couldn't copy the selection as markdown; see the log";
+
+    [Fact]
+    public Task Copy_as_raw_copies_the_markdown_of_the_selected_points() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            File.WriteAllText(fixture.DocA, "see **the guide** for more");
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Surface.RaiseRawSelection(new RawSelectionRequest(new RawPoint(0, null, 0), new RawPoint(0, 4, 4), FromShownRender: true));
+            fixture.Settle();
+
+            Assert.Equal(["see **the guide** for"], fixture.Files.Copied);
+            Assert.Empty(fixture.Toasts.Items);
+        });
+
+    [Fact]
+    public Task Copy_as_raw_of_a_replaced_page_toasts_and_copies_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            File.WriteAllText(fixture.DocA, "see **the guide** for more");
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Surface.RaiseRawSelection(new RawSelectionRequest(new RawPoint(0, null, 0), new RawPoint(0, 4, 4), FromShownRender: false));
+            fixture.Settle();
+
+            Assert.Empty(fixture.Files.Copied);
+            ToastItem toast = Assert.Single(fixture.Toasts.Items);
+            Assert.Equal((ToastKind.Warning, CopyRawFailed), (toast.Kind, toast.Text));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == "Copy as raw: the selection belongs to a page that was replaced.");
+        });
+
+    [Fact]
+    public Task Copy_as_raw_of_unmappable_points_toasts_and_copies_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            File.WriteAllText(fixture.DocA, "see **the guide** for more");
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Surface.RaiseRawSelection(new RawSelectionRequest(new RawPoint(999, null, 0), new RawPoint(0, 4, 4), FromShownRender: true));
+            fixture.Settle();
+
+            Assert.Empty(fixture.Files.Copied);
+            ToastItem toast = Assert.Single(fixture.Toasts.Items);
+            Assert.Equal((ToastKind.Warning, CopyRawFailed), (toast.Kind, toast.Text));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == "Copy as raw: failed.");
+        });
+
+    [Fact]
+    public Task Copy_as_raw_of_a_selection_the_page_could_not_map_toasts_and_copies_nothing() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            File.WriteAllText(fixture.DocA, "see **the guide** for more");
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Surface.RaiseRawSelection(new RawSelectionRequest(null, new RawPoint(0, 4, 4), FromShownRender: true));
+            fixture.Settle();
+
+            Assert.Empty(fixture.Files.Copied);
+            ToastItem toast = Assert.Single(fixture.Toasts.Items);
+            Assert.Equal((ToastKind.Warning, CopyRawFailed), (toast.Kind, toast.Text));
+            Assert.Contains(fixture.Log.Entries, entry => entry.Message == "Copy as raw: the page could not map the selection.");
+        });
+
+    [Fact]
+    public Task Copy_as_raw_shortcut_does_nothing_while_the_missing_pane_shows() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            File.Delete(fixture.DocA);
+            fixture.ViewModel.Reload();
+            fixture.Settle();
+            Assert.True(fixture.Window.MissingPane.IsVisible);
+
+            fixture.Press(Key.C, CommandModifier | RawInputModifiers.Shift);
+            fixture.Settle();
+
+            Assert.Equal(0, fixture.Surface.RawCopyRequests);
+            Assert.Empty(fixture.Toasts.Items);
+        });
+
+    [Fact]
+    public Task Copy_as_raw_from_the_menu_or_the_shortcut_asks_the_page_for_its_selection() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+
+            fixture.Surface.RaiseCopyRawChosen();
+            fixture.Settle();
+            fixture.Press(Key.C, CommandModifier | RawInputModifiers.Shift);
+            fixture.Press(Key.C, CommandModifier);
+
+            Assert.Equal(2, fixture.Surface.RawCopyRequests);
+            Assert.Empty(fixture.Toasts.Items);
+        });
+
+    [Fact]
+    public Task Copy_as_raw_that_the_page_cannot_take_toasts() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            await fixture.OpenAsync(fixture.DocA);
+            fixture.Surface.RawCopyFails = true;
+
+            fixture.Surface.RaiseCopyRawChosen();
+            fixture.Settle();
+
+            ToastItem toast = Assert.Single(fixture.Toasts.Items);
+            Assert.Equal((ToastKind.Warning, CopyRawFailed), (toast.Kind, toast.Text));
+
+            fixture.Press(Key.C, CommandModifier | RawInputModifiers.Shift);
+
+            Assert.Equal(2, fixture.Surface.RawCopyRequests);
+            Assert.Equal(2, fixture.Log.Entries.Count(entry => entry.Message == "Copy as raw: failed."));
         });
 
     [Fact]

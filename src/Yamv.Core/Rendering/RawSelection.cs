@@ -20,17 +20,24 @@ using Markdig.Syntax.Inlines;
 
 namespace Yamv.Core.Rendering;
 
-/// <summary>One end of a selection in the rendered page, located by the <c>data-src</c> source offsets the HTML carries.</summary>
-/// <param name="Node">The <c>data-src</c> of the innermost tagged element holding the end, or null when none holds it.</param>
+/// <summary>One end of a selection in the rendered page, located by the <c>data-yamv-src</c> source offsets the HTML carries.</summary>
+/// <param name="Node">The <c>data-yamv-src</c> of the innermost tagged element holding the end, or null when none holds it.</param>
 /// <param name="After">
-/// The <c>data-src</c> of the last tagged element directly inside <paramref name="Node"/>'s element (not inside another
+/// The <c>data-yamv-src</c> of the last tagged element directly inside <paramref name="Node"/>'s element (not inside another
 /// tagged element below it) that ends before the end, or null when there is none.
 /// </param>
 /// <param name="Offset">
 /// The text characters (UTF-16 code units) from the end of <paramref name="After"/>'s element, or from the start of
 /// <paramref name="Node"/>'s element, to the end, counting only text outside tagged elements below <paramref name="Node"/>;
-/// -1 means the end of <paramref name="Node"/>'s element for a start and its start for an end.
+/// -1 means the end of <paramref name="Node"/>'s element for a start and its start for an end. An element with no text
+/// and no tagged parent (a rule between blocks) is named by its own tag: offset 0 is just before it and offset 1 just
+/// after it, for a start and an end alike.
 /// </param>
+/// <remarks>
+/// A point with no <paramref name="Node"/>, no <paramref name="After"/> and offset 0 is the document's edge: its start
+/// for a start point and its end for an end point, so raw HTML at the very top or bottom of a document can be copied.
+/// Any other point without a <paramref name="Node"/> maps to nothing.
+/// </remarks>
 public sealed record RawPoint(int? Node, int? After, int Offset);
 
 /// <summary>Maps a selection in the rendered page back to the markdown source it was rendered from.</summary>
@@ -63,8 +70,7 @@ public static class RawSelection
 
         (int first, int last) = WidenToMarks(document, from.Value, to.Value);
         List<LeafBlock> leaves = [.. document.Descendants<LeafBlock>().Where(IsWideningLeaf)];
-        first = WidenStartToBlock(leaves, markdown, first);
-        last = WidenEndToBlock(leaves, markdown, last);
+        (first, last) = (WidenStartToBlock(leaves, markdown, first, last), WidenEndToBlock(leaves, markdown, last, first));
         string copied = markdown[first..Math.Max(first, last)].TrimEnd().TrimStart('\r', '\n');
         return copied.Length == 0 ? null : copied;
     }
@@ -96,7 +102,7 @@ public static class RawSelection
     }
 
     /// <summary>
-    /// Whether the HTML renderer writes attributes for <paramref name="node"/>, so its element carries <c>data-src</c>.
+    /// Whether the HTML renderer writes attributes for <paramref name="node"/>, so its element carries <c>data-yamv-src</c>.
     /// The renderer tags with it and the selection mapping reads with it, so both agree on what the page sees. A node
     /// without a source position (a footnote's back link and the paragraph made to hold it) and anything in a definition
     /// list (whose renderer writes one item's attributes on several elements) stay untagged.
@@ -112,7 +118,7 @@ public static class RawSelection
             _ => IsTaggedBlockType(node),
         };
 
-    /// <summary>The nearest ancestor whose element carries <c>data-src</c>.</summary>
+    /// <summary>The nearest ancestor whose element carries <c>data-yamv-src</c>.</summary>
     internal static MarkdownObject? TaggedParent(MarkdownObject node)
     {
         MarkdownObject? current = Parent(node);
@@ -179,6 +185,11 @@ public static class RawSelection
 
     private static int? MapPoint(string markdown, Dictionary<int, List<MarkdownObject>> tagged, RawPoint point, bool isStart)
     {
+        if (point is { Node: null, After: null, Offset: 0 })
+        {
+            return isStart ? 0 : markdown.Length;
+        }
+
         if (point.Offset < -1 || Resolve(tagged, point) is not ({ } node, var after))
         {
             return null;
@@ -222,14 +233,15 @@ public static class RawSelection
     }
 
     /// <summary>
-    /// A point in a node copied whole: a start at the end of the node's text maps after it, an end at its very start
-    /// maps before it, and any other point takes the whole node.
+    /// A point in a node copied whole: a start at the end of the node's text (offset 1 or more of a rule, which has none)
+    /// maps after it, an end at its very start maps before it, and any other point takes the whole node.
     /// </summary>
     private static int WholeNode(MarkdownObject node, MarkdownObject? after, int offset, bool isStart)
     {
         if (isStart)
         {
-            return IsAtEnd(node, after, offset) ? node.Span.End + 1 : node.Span.Start;
+            bool atEnd = IsAtEnd(node, after, offset) || (node is ThematicBreakBlock && offset > 0);
+            return atEnd ? node.Span.End + 1 : node.Span.Start;
         }
 
         return offset == 0 && after is null ? node.Span.Start : node.Span.End + 1;
@@ -564,23 +576,36 @@ public static class RawSelection
     /// </summary>
     private static bool IsFramedParagraph(LeafBlock block) => block is ParagraphBlock { Parent: TableCell or Footnote };
 
-    /// <summary>A start at or before a leaf block's content moves to the start of its first source line, markers included.</summary>
-    private static int WidenStartToBlock(List<LeafBlock> leaves, string markdown, int start)
+    /// <summary>
+    /// A start at or before a leaf block's content moves to the start of its first source line, markers included; a start
+    /// at or after its content's end moves to the block's end, so a closing fence or a heading's closing marks stay out.
+    /// </summary>
+    private static int WidenStartToBlock(List<LeafBlock> leaves, string markdown, int start, int end)
     {
-        LeafBlock? block = leaves.Find(leaf => leaf.Span.Start <= start && start <= leaf.Span.End);
-        if (block is null || IsFramedParagraph(block))
+        LeafBlock? block = leaves.Find(leaf => leaf.Span.Start <= start && start <= leaf.Span.End + 1);
+        if (block is null)
         {
             return start;
         }
 
-        return start > ContentStart(block, markdown) ? start : LineStart(markdown, block.Span.Start);
+        if (IsFramedParagraph(block))
+        {
+            return WidenStartAtTableEdge(block, markdown, start, end);
+        }
+
+        if (start <= ContentStart(block, markdown))
+        {
+            return LineStart(markdown, block.Span.Start);
+        }
+
+        return start >= ContentEnd(block) ? block.Span.End + 1 : start;
     }
 
     /// <summary>
     /// An end at or before a leaf block's content (where a triple click ends) moves back before the block, so the next
     /// block's marker stays out; an end at or after its content moves to the block's end, a closing fence included.
     /// </summary>
-    private static int WidenEndToBlock(List<LeafBlock> leaves, string markdown, int end)
+    private static int WidenEndToBlock(List<LeafBlock> leaves, string markdown, int end, int start)
     {
         LeafBlock? block = leaves.Find(leaf => leaf.Span.Start <= end && end <= leaf.Span.End + 1);
         if (block is null)
@@ -593,7 +618,82 @@ public static class RawSelection
             return block is ParagraphBlock { Parent: TableCell cell } ? BeforeCell(markdown, cell, end) : LineStart(markdown, block.Span.Start);
         }
 
-        return end >= ContentEnd(block) && !IsFramedParagraph(block) ? block.Span.End + 1 : end;
+        return WidenEndPastContent(block, markdown, end, start);
+    }
+
+    /// <summary>
+    /// An end at or after a leaf block's content end moves to the block's end, a closing fence included; in a table's
+    /// last cell it moves to the table's end when the selection starts before that cell's text, so text selected within
+    /// the cell stays just that text. Any other framed paragraph keeps the end, so it never runs past its cell.
+    /// </summary>
+    private static int WidenEndPastContent(LeafBlock block, string markdown, int end, int start)
+    {
+        if (IsTableEdge(block, last: true))
+        {
+            bool beyondCell = end >= CellTextEnd(block, markdown) && start < ContentStart(block, markdown);
+            return beyondCell ? TableEnd(block, markdown) : end;
+        }
+
+        return end < ContentEnd(block) || IsFramedParagraph(block) ? end : block.Span.End + 1;
+    }
+
+    /// <summary>
+    /// Where a table cell's text ends: a pipe table's cell spans the spaces and the <c>|</c> after its text, so they are
+    /// stepped back over.
+    /// </summary>
+    private static int CellTextEnd(LeafBlock block, string markdown)
+    {
+        int start = ContentStart(block, markdown);
+        int end = ContentEnd(block);
+        while (end > start && markdown[end - 1] is ' ' or '\t' or '|')
+        {
+            end--;
+        }
+
+        return end;
+    }
+
+    /// <summary>
+    /// A start in a framed paragraph moves only at a table's edges: at or before its first cell's content to the table's
+    /// line start (a grid table's top border included) when the selection ends past that cell's text, and at or after its
+    /// last cell's content past the table.
+    /// </summary>
+    private static int WidenStartAtTableEdge(LeafBlock block, string markdown, int start, int end)
+    {
+        if (IsTableEdge(block, last: false) && start <= ContentStart(block, markdown) && end > CellTextEnd(block, markdown))
+        {
+            return LineStart(markdown, TableOf(block).Span.Start);
+        }
+
+        return IsTableEdge(block, last: true) && start >= CellTextEnd(block, markdown) ? TableEnd(block, markdown) : start;
+    }
+
+    /// <summary>
+    /// Whether the block is the first block of its table's first cell, or (<paramref name="last"/>) the last block of its
+    /// last cell.
+    /// </summary>
+    private static bool IsTableEdge(LeafBlock block, bool last)
+    {
+        if (block.Parent is not TableCell { Parent: TableRow { Parent: Table table } row } cell)
+        {
+            return false;
+        }
+
+        return last
+            ? ReferenceEquals(cell[^1], block) && ReferenceEquals(row[^1], cell) && ReferenceEquals(table[^1], row)
+            : ReferenceEquals(cell[0], block) && ReferenceEquals(row[0], cell) && ReferenceEquals(table[0], row);
+    }
+
+    private static Table TableOf(LeafBlock block) => (Table)block.Parent!.Parent!.Parent!;
+
+    /// <summary>
+    /// Where the block's table ends: the end of the source line its span ends on, since a pipe table's span stops before its
+    /// last row's closing pipe.
+    /// </summary>
+    private static int TableEnd(LeafBlock block, string markdown)
+    {
+        int lineEnd = markdown.IndexOf('\n', TableOf(block).Span.End);
+        return lineEnd < 0 ? markdown.Length : lineEnd;
     }
 
     /// <summary>

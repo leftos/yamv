@@ -123,7 +123,7 @@ internal sealed class FakeFileActions : IFileActions
         ConfirmedAsDirectory.Add(isDirectory);
     }
 
-    public Task CopyTextAsync(TopLevel owner, string text)
+    public Task CopyTextAsync(TopLevel owner, string text, string what)
     {
         if (CopyFailure is { } failure)
         {

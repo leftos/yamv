@@ -36,6 +36,7 @@ The chosen design. The mocks it was chosen from are kept beside it as reference:
 - Folder rows are muted and have a chevron. Compacted chains are joined with `/` (`docs/plans`).
 - Document rows have a file icon. The selected row gets the selection fill and a 3 px accent bar on its left edge. A hovered or selected row shows a `×` close button on its right. Selecting a document expands its group and folders, and Up/Down move between documents, skipping headers.
 - Context menu, by row: a document has Reveal in Explorer (Finder on macOS), Copy path, Close, Close group; a folder has Reveal and Copy path; a group header has Reveal, Copy path and Close group. Right-clicking an unselected document selects and opens it first; right-clicking a folder or group leaves the selection alone.
+- The document's own right-click menu is the web view's, not Avalonia's; with a selection it gains **Copy as raw** right after Copy (Ctrl+Shift+C, ⌘⇧C on macOS), which copies the selection's markdown source. Success is silent; a failure shows the toast "Couldn't copy the selection as markdown; see the log" (or "…: no clipboard"). Without a selection the menu is unchanged.
 
 ## Edge states
 

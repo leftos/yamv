@@ -17,6 +17,7 @@
 - Clicked links open in the browser, as another document in the same window, or in the file's default app.
 - A link to a program, script, folder or unlisted file type shows a card asking before it opens.
 - Right-click in the tree for Reveal in Explorer or Finder, Copy path, Close and Close group.
+- Copy as raw, in a selection's right-click menu or with Ctrl+Shift+C (Cmd+Shift+C), copies the selection's markdown source.
 - Ctrl+[ and Ctrl+] (Cmd on macOS) or the **⟷** popover set the text column's width, saved per folder or for all documents.
 - The theme settings window (**⋯** menu, Ctrl+, or Cmd+,) picks, edits with a live preview, imports and exports themes.
 - The theme and Appearance are saved app-wide, and an outside edit of the settings or a theme reaches every open window.

@@ -16,6 +16,16 @@ public sealed class FakeDocumentSurface : IDocumentSurface
 
     public event EventHandler? ViewportWidthChanged;
 
+    public event EventHandler<RawSelectionRequest>? RawSelectionRequested;
+
+    public event EventHandler? CopyRawChosen;
+
+    /// <summary>How many times <see cref="RequestRawCopyAsync"/> was called.</summary>
+    public int RawCopyRequests { get; private set; }
+
+    /// <summary>Whether <see cref="RequestRawCopyAsync"/> reports that the page could not take the request.</summary>
+    public bool RawCopyFails { get; set; }
+
     /// <summary>The width <see cref="RaiseViewportWidth"/> last reported; null again once a show starts a new render.</summary>
     public double? ViewportWidth { get; private set; }
 
@@ -137,6 +147,18 @@ public sealed class FakeDocumentSurface : IDocumentSurface
     public Task<FindResult> FindAsync(string query, FindDirection direction) => Task.FromResult(new FindResult(0, 0));
 
     public Task ClearFindAsync() => Task.CompletedTask;
+
+    public Task<bool> RequestRawCopyAsync()
+    {
+        RawCopyRequests++;
+        return Task.FromResult(!RawCopyFails);
+    }
+
+    /// <summary>Raises <see cref="RawSelectionRequested"/> as the page would once asked for its selection's points.</summary>
+    public void RaiseRawSelection(RawSelectionRequest request) => RawSelectionRequested?.Invoke(this, request);
+
+    /// <summary>Raises <see cref="CopyRawChosen"/> as the web view's menu would.</summary>
+    public void RaiseCopyRawChosen() => CopyRawChosen?.Invoke(this, EventArgs.Empty);
 
     /// <summary>Raises <see cref="ScrollChanged"/> as the page would: the fraction and the anchor, if any.</summary>
     public void RaiseScroll(double fraction, ScrollAnchor? anchor) => ScrollChanged?.Invoke(this, new ScrollPosition(fraction, anchor));

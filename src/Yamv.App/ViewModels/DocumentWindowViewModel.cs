@@ -63,6 +63,9 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     private readonly IDocumentChanges? _changes;
     private List<string> _watchedDocuments = [];
     private string? _shownHtml;
+
+    /// <summary>The markdown the shown page was rendered from, which Copy as raw maps the page's selection against.</summary>
+    private string? _shownSource;
     private double? _shownWidth;
 
     /// <summary>How many width changes have written the store; a render that resolved its width before one reconciles the page.</summary>
@@ -1059,7 +1062,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
         ClearUnreadable(path);
         double scroll = _scrollPositions.GetValueOrDefault(path);
         ScrollAnchor? anchor = _scrollAnchors.GetValueOrDefault(path);
-        if (!MarkShown(path, document.Html, width.Px, origin))
+        if (!MarkShown(path, document.Html, document.Source, width.Px, origin))
         {
             return;
         }
@@ -1107,7 +1110,7 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
     /// Records <paramref name="path"/> as the shown document, ending its delete grace since it was read, and returns false when
     /// it is a reload of the page already shown with the same HTML at the same width, which needs no new show.
     /// </summary>
-    private bool MarkShown(string path, string html, double? widthPx, RenderOrigin origin)
+    private bool MarkShown(string path, string html, string source, double? widthPx, RenderOrigin origin)
     {
         if (SamePath(_gracePath, path))
         {
@@ -1121,9 +1124,16 @@ public sealed partial class DocumentWindowViewModel : ViewModelBase, IDisposable
             && _shownWidth == widthPx;
         _shownPath = path;
         _shownHtml = html;
+        _shownSource = source;
         ShowWidth(widthPx);
         return !unchanged;
     }
+
+    /// <summary>The markdown source of the selection from <paramref name="start"/> to <paramref name="end"/> in the shown page.</summary>
+    /// <param name="start">The selection's start, as the page describes it.</param>
+    /// <param name="end">The selection's end, as the page describes it.</param>
+    /// <returns>The selected source; null when no document has been shown or the points map to no source.</returns>
+    public string? RawSourceOf(RawPoint start, RawPoint end) => _shownSource is { } source ? RawSelection.Extract(source, start, end) : null;
 
     /// <summary>Records the width the page shows and stamps the change, so a send that started before it never reverts it.</summary>
     private void ShowWidth(double? px)

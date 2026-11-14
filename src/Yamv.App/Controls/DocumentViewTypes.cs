@@ -113,8 +113,30 @@ internal sealed class PageMessage
     /// <summary>A <c>drag</c> message's direction: true while files are over the page, false once the drag left it.</summary>
     public bool? Over { get; init; }
 
-    /// <summary>The render a <c>rendered</c>, <c>scroll</c>, <c>link</c> or <c>viewport</c> message belongs to.</summary>
+    /// <summary>The render a <c>rendered</c>, <c>scroll</c>, <c>link</c>, <c>viewport</c> or <c>rawSelection</c> message belongs to.</summary>
     public int? Generation { get; init; }
+
+    /// <summary>
+    /// A <c>rawSelection</c> message's start: where the selection begins, by the page's <c>data-yamv-src</c> tags; null when
+    /// the page could not map it.
+    /// </summary>
+    public RawPointMessage? Start { get; init; }
+
+    /// <summary>
+    /// A <c>rawSelection</c> message's end: where the selection ends, by the page's <c>data-yamv-src</c> tags; null when the
+    /// page could not map it.
+    /// </summary>
+    public RawPointMessage? End { get; init; }
+}
+
+/// <summary>One end of a <c>rawSelection</c> message, as the page sends it; <c>RawPoint</c> says what each field means.</summary>
+internal sealed class RawPointMessage
+{
+    public int? Node { get; init; }
+
+    public int? After { get; init; }
+
+    public int? Offset { get; init; }
 }
 
 /// <summary>

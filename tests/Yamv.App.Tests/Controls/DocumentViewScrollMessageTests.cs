@@ -268,6 +268,78 @@ public sealed class DocumentViewScrollMessageTests
             return Task.CompletedTask;
         });
 
+    [Fact]
+    public Task A_raw_selection_of_the_shown_render_raises_its_points_as_from_the_shown_render() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
+            List<RawSelectionRequest> raised = [];
+            view.RawSelectionRequested += (_, request) => raised.Add(request);
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-raw-doc", "a.md")));
+
+            view.Handle(
+                Parse(
+                    """{"type":"rawSelection","start":{"node":59,"after":null,"offset":0},"end":{"node":59,"after":63,"offset":4},"generation":1}"""
+                )
+            );
+
+            Assert.Equal([new RawSelectionRequest(new RawPoint(59, null, 0), new RawPoint(59, 63, 4), FromShownRender: true)], raised);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task A_raw_selection_of_an_older_render_is_raised_as_not_from_the_shown_render() =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
+            List<RawSelectionRequest> raised = [];
+            view.RawSelectionRequested += (_, request) => raised.Add(request);
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-raw-doc", "a.md")));
+
+            view.Handle(Parse("""{"type":"rawSelection","start":{"node":0,"offset":0},"end":{"node":87,"offset":-1},"generation":0}"""));
+
+            Assert.Equal([new RawSelectionRequest(new RawPoint(0, null, 0), new RawPoint(87, null, -1), FromShownRender: false)], raised);
+            return Task.CompletedTask;
+        });
+
+    [Theory]
+    [InlineData("""{"type":"rawSelection","start":null,"end":{"node":0,"offset":3},"generation":1}""", false, true)]
+    [InlineData("""{"type":"rawSelection","start":null,"end":null,"generation":1}""", false, false)]
+    [InlineData("""{"type":"rawSelection","start":{"node":0,"offset":0},"end":null,"generation":1}""", true, false)]
+    public Task A_raw_selection_the_page_could_not_map_is_raised_with_its_null_points(string body, bool hasStart, bool hasEnd) =>
+        Headless.RunAsync(() =>
+        {
+            var view = new DocumentView(new RecordingAppLog(), new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
+            List<RawSelectionRequest> raised = [];
+            view.RawSelectionRequested += (_, request) => raised.Add(request);
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-raw-doc", "a.md")));
+
+            view.Handle(Parse(body));
+
+            RawSelectionRequest request = Assert.Single(raised);
+            Assert.Equal((hasStart, hasEnd, true), (request.Start is not null, request.End is not null, request.FromShownRender));
+            return Task.CompletedTask;
+        });
+
+    [Theory]
+    [InlineData("""{"type":"rawSelection","start":{"node":0,"offset":0},"end":{"node":0},"generation":1}""")]
+    [InlineData("""{"type":"rawSelection","start":{"node":0},"end":null,"generation":1}""")]
+    public Task A_raw_selection_without_its_points_raises_nothing_and_is_logged(string body) =>
+        Headless.RunAsync(() =>
+        {
+            var log = new RecordingAppLog();
+            var view = new DocumentView(log, new Uri("file:///C:/yamv-tests/no-template.html"), elevated: false);
+            List<RawSelectionRequest> raised = [];
+            view.RawSelectionRequested += (_, request) => raised.Add(request);
+            _ = view.ShowAsync(Show(Path.Combine(Path.GetTempPath(), "yamv-raw-doc", "a.md")));
+
+            view.Handle(Parse(body));
+
+            Assert.Empty(raised);
+            Assert.Contains(log.Entries, entry => entry is { Level: "warning", Message: "Ignored a rawSelection message without its points" });
+            return Task.CompletedTask;
+        });
+
     [Theory]
     [InlineData(true, "window.yamv.setCardOpen(true)")]
     [InlineData(false, "window.yamv.setCardOpen(false)")]

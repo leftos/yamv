@@ -29,6 +29,10 @@ Every busy command goes through `pwsh -NoProfile -File tools/gate.ps1`, written 
 
   `-ConfirmCard` (with `-App`, not with `-WidthPopover`, `-Toasts`, `-ThemeSettingsEntry` or `-DropOverlay`) opens the confirm card for a sample `setup.ps1` once the window has shown and paints it over the capture (`YAMV_DEV_CONFIRM_CARD=1`, read only when `YAMV_DATA_DIR` is set); the hidden capture draws the card's scrim over black.
 
+  `-ContextMenu` (with `-App`, not with `-WidthPopover`, `-Toasts`, `-ThemeSettingsEntry`, `-DropOverlay`, `-ConfirmCard` or `-CopyRaw`) selects the document's first paragraph, right-clicks it and waits for the log line "Copy as raw menu: item added after Copy" (`YAMV_DEV_CONTEXT_MENU=1`, read only when `YAMV_DATA_DIR` is set); the WebView2 menu is a window of msedgewebview2.exe, so a capture of yamv.exe does not show it.
+
+  `-CopyRaw` (with `-App`, exclusive with the other dev switches) selects a sample range, runs Copy as raw and waits for the log line "Copy as raw (dev): <text>", which replaces the clipboard (`YAMV_DEV_COPY_RAW=1`, read only when `YAMV_DATA_DIR` is set; the hidden desktop shares the owner's clipboard).
+
   `YAMV_DEV_ELEVATED=1` (read only when `YAMV_DATA_DIR` is set) makes every window show the Administrator chip and " (Administrator)" in its title and the main window save no session, as the elevated instance does; the lock stays `main.lock`, so a hidden run needs no UAC.
 
   A real OLE drag works on the hidden desktop: the drag is driven with posted mouse messages and a `WH_GETMESSAGE` hook, so a drop can be tested without the owner's desktop.

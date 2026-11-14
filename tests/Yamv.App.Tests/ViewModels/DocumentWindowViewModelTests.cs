@@ -5,6 +5,7 @@ using Yamv.App.Tests.Fakes;
 using Yamv.App.ViewModels;
 using Yamv.Core.Documents;
 using Yamv.Core.Grouping;
+using Yamv.Core.Rendering;
 using Yamv.Core.Session;
 using Yamv.Core.Widths;
 
@@ -39,6 +40,23 @@ public sealed class DocumentWindowViewModelTests
             Assert.Equal(Repo, shown.GroupRoot);
             Assert.Equal(0, shown.Scroll);
             Assert.Null(shown.Fragment);
+        });
+
+    [Fact]
+    public Task RawSourceOf_maps_points_against_the_shown_document_s_source() =>
+        Headless.RunAsync(async () =>
+        {
+            await using var fixture = new Fixture();
+            fixture.Files[RepoDocA] = "see **the guide** for more";
+            var start = new RawPoint(0, null, 0);
+            var end = new RawPoint(0, 4, 4);
+
+            Assert.Null(fixture.ViewModel.RawSourceOf(start, end));
+
+            fixture.ViewModel.Open([RepoDocA]);
+            await fixture.ViewModel.WhenRendersSettled();
+
+            Assert.Equal("see **the guide** for", fixture.ViewModel.RawSourceOf(start, end));
         });
 
     [Fact]

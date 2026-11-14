@@ -456,11 +456,21 @@ public sealed class FileActionsTests
     [Fact]
     public async Task Copy_path_with_no_clipboard_logs_and_toasts()
     {
-        await Actions().CopyTextToAsync(null, "x");
+        await Actions().CopyTextToAsync(null, "x", "the path");
 
         LogEntry entry = Assert.Single(_log.Entries);
-        Assert.Equal(("warning", "Copy path: the window has no clipboard."), (entry.Level, entry.Message));
+        Assert.Equal(("warning", "Copy the path: the window has no clipboard."), (entry.Level, entry.Message));
         Assert.Equal((ToastKind.Warning, "Couldn't copy the path: no clipboard"), Assert.Single(_toasts.Shown));
+    }
+
+    [Fact]
+    public async Task Copy_as_raw_with_no_clipboard_names_the_selection_in_its_toast()
+    {
+        await Actions().CopyTextToAsync(null, "see **the guide**", "the selection as markdown");
+
+        LogEntry entry = Assert.Single(_log.Entries);
+        Assert.Equal(("warning", "Copy the selection as markdown: the window has no clipboard."), (entry.Level, entry.Message));
+        Assert.Equal((ToastKind.Warning, "Couldn't copy the selection as markdown: no clipboard"), Assert.Single(_toasts.Shown));
     }
 
     [Fact]

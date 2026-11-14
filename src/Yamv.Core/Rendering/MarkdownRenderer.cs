@@ -75,7 +75,7 @@ public sealed class MarkdownRenderer
     }
 
     /// <summary>
-    /// Tags every element the HTML writes for a node with <c>data-src</c>, the node's source start offset,
+    /// Tags every element the HTML writes for a node with <c>data-yamv-src</c>, the node's source start offset,
     /// so a selection in the page can be mapped back to the markdown (<see cref="RawSelection.Extract"/>).
     /// </summary>
     private static void MarkSourceOffsets(MarkdownDocument document)
@@ -84,7 +84,7 @@ public sealed class MarkdownRenderer
         {
             if (RawSelection.IsTaggedInHtml(node))
             {
-                node.GetAttributes().AddPropertyIfNotExist("data-src", node.Span.Start.ToString(CultureInfo.InvariantCulture));
+                node.GetAttributes().AddPropertyIfNotExist("data-yamv-src", node.Span.Start.ToString(CultureInfo.InvariantCulture));
             }
         }
     }

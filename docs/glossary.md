@@ -65,7 +65,7 @@
 - **Settings file**: `settings.json`, the app-wide settings shared by every window and process (`SettingsStore`, saved off the UI thread by `SettingsWriter`, watched by `SettingsWatcher`: an edit made outside the app is applied to every window and never saved back); widths stay in `widths.json`, and the main window's documents and layout in `session.json`.
 - **Sidebar**: the pane on the window's right holding the tree of open documents.
 - **Source** (of a width): the folder a document's width is inherited from, or the app default; the popover opens with it selected and the Ctrl+[ and Ctrl+] steps edit it ([content-width.md](design/content-width.md)).
-- **Source tag**: the `data-src` attribute the renderer puts on an element, the markdown offset where its source starts; not unique, and `RawSelection` maps a selection back to markdown through it.
+- **Source tag**: the `data-yamv-src` attribute the renderer puts on an element, the markdown offset where its source starts; not unique, and `RawSelection` maps a selection back to markdown through it.
 - **Staging**: the hidden element the page builds a reloaded document in while the old page stays on screen; it is swapped in in one step once built (`yamv.js`).
 - **Text measure**: the width in px of the document's text lines, which is what a stored content width means; the column adds 44 px of side padding on each side.
 - **Text space**: the room a pane leaves for the document's text: the document column's width less the scrollbar the page last reported (the `viewport` message; the whole column until the shown page reports), less the page's 88 px of side padding (`ContentWidth.TextSpace`); a content width is compared against it ([content-width.md](design/content-width.md)).

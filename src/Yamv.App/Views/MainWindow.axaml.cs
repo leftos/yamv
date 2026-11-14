@@ -21,6 +21,7 @@ using Yamv.Core.Documents;
 using Yamv.Core.Input;
 using Yamv.Core.Links;
 using Yamv.Core.Platform;
+using Yamv.Core.Rendering;
 using Yamv.Core.Session;
 
 namespace Yamv.App.Views;
@@ -46,6 +47,9 @@ public partial class MainWindow : Window
     private const double MaxSidebarWidth = 480;
     private const double MinDocumentWidth = 320;
     private const string OpenFilesFailedToast = "Couldn't open the files; see the log";
+
+    /// <summary>The toast of a Copy as raw that failed anywhere between the request and the clipboard.</summary>
+    private const string CopyRawFailedToast = "Couldn't copy the selection as markdown; see the log";
 
     // The ⋯ menu's shadow is not a theme token: the width popover's far and near shadows, in each theme.
     private static readonly Color LightShadowColor = Color.Parse("#1F2328");
@@ -137,6 +141,8 @@ public partial class MainWindow : Window
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.CloseRequested += OnCloseRequested;
         surface.KeyForwarded += OnKeyForwarded;
+        surface.RawSelectionRequested += OnRawSelectionRequested;
+        surface.CopyRawChosen += OnCopyRawChosen;
         surface.LinkActivated += OnLinkActivatedCancelCard;
         surface.LinkActivated += _linkOpener.OnLinkActivated;
         ConfirmPopup.PlacementTarget = DocumentColumn;
@@ -222,6 +228,13 @@ public partial class MainWindow : Window
     /// shown its first document; the menu writes <c>Copy as raw menu: item added</c>. The hidden-desktop check sets it.
     /// </summary>
     internal bool ContextMenuWhenShown { get; set; }
+
+    /// <summary>
+    /// Whether the window selects the document from its first <c>strong</c> element's paragraph start to that element's end
+    /// and runs Copy as raw once it has shown its first document, writing <c>Copy as raw (dev): &lt;text&gt;</c> to the log
+    /// instead of copying. The hidden-desktop check sets it.
+    /// </summary>
+    internal bool CopyRawWhenShown { get; set; }
 
     /// <summary>The window's confirm card, which tests ask through.</summary>
     internal ConfirmCardViewModel? ConfirmCardQuestion => _confirmCard;
@@ -804,9 +817,75 @@ public partial class MainWindow : Window
             case ShortcutCommand.ThemeSettings:
                 RequestThemeSettings();
                 break;
+            case ShortcutCommand.CopyRaw:
+                RunCopyRawShortcut();
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown shortcut command.");
         }
+    }
+
+    /// <summary>The web view's menu asked for Copy as raw; it runs as the shortcut does.</summary>
+    private void OnCopyRawChosen(object? sender, EventArgs e) => RunCopyRaw();
+
+    /// <summary>
+    /// Ctrl/Cmd+Shift+C from the window: Copy as raw while the document page is showing; with the empty state or a missing or
+    /// unreadable document's pane in its place there is no selection to copy, so nothing happens.
+    /// </summary>
+    private void RunCopyRawShortcut()
+    {
+        if (DocumentHost.IsVisible)
+        {
+            RunCopyRaw();
+        }
+    }
+
+    /// <summary>Asks the page for its selection's source points; the copy itself happens when they arrive.</summary>
+    private void RunCopyRaw() => RunLogged(RequestRawCopyAsync, "Copy as raw", CopyRawFailedToast);
+
+    private async Task RequestRawCopyAsync()
+    {
+        if (!await _surface!.RequestRawCopyAsync())
+        {
+            throw new InvalidOperationException("The page could not take the Copy as raw request.");
+        }
+    }
+
+    /// <summary>
+    /// The page sent its selection's source points: they are mapped against the shown document's source and the markdown is
+    /// copied, or, with <see cref="CopyRawWhenShown"/>, logged. Points from a page a newer show replaced are refused.
+    /// </summary>
+    private void OnRawSelectionRequested(object? sender, RawSelectionRequest e)
+    {
+        if (!e.FromShownRender)
+        {
+            _log!.LogWarning("Copy as raw: the selection belongs to a page that was replaced.");
+            _viewModel!.Toasts.Show(ToastKind.Warning, CopyRawFailedToast);
+            return;
+        }
+
+        if (e is not { Start: { } start, End: { } end })
+        {
+            _log!.LogWarning("Copy as raw: the page could not map the selection.");
+            _viewModel!.Toasts.Show(ToastKind.Warning, CopyRawFailedToast);
+            return;
+        }
+
+        RunLogged(() => CopyRawSourceAsync(start, end), "Copy as raw", CopyRawFailedToast);
+    }
+
+    private Task CopyRawSourceAsync(RawPoint start, RawPoint end)
+    {
+        string text =
+            _viewModel!.RawSourceOf(start, end) ?? throw new InvalidOperationException("The selection could not be mapped to the document's source.");
+        if (CopyRawWhenShown)
+        {
+            // The hidden desktop shares the owner's clipboard, so the dev check reads the copy from the log instead.
+            _log!.LogInfo($"Copy as raw (dev): {LogText.Clean(text)}");
+            return Task.CompletedTask;
+        }
+
+        return FileActions!.CopyTextAsync(this, text, "the selection as markdown");
     }
 
     /// <summary>⟷ toggles the popover: it closes an open one, and a click while one is being made is ignored.</summary>
@@ -1087,7 +1166,7 @@ public partial class MainWindow : Window
     {
         if (RowOf(sender) is { } row)
         {
-            RunLogged(() => FileActions!.CopyTextAsync(this, row.Path), "Copy path", "Couldn't copy the path; see the log");
+            RunLogged(() => FileActions!.CopyTextAsync(this, row.Path, "the path"), "Copy path", "Couldn't copy the path; see the log");
         }
     }
 
@@ -1415,6 +1494,32 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Selects part of the document and runs Copy as raw on it; logs when the selection could not be made.</summary>
+    private async Task CopyDevSelectionAsRawAsync()
+    {
+        if (_surface is not DocumentView view || !await view.SelectForDevCopyRawAsync())
+        {
+            _log!.LogWarning("Window: could not select the document's text for Copy as raw");
+            return;
+        }
+
+        RunCopyRaw();
+    }
+
+    /// <summary>The dev checks that act on the document page: its context menu and Copy as raw, each when asked.</summary>
+    private async Task RunDevPageStepsAsync()
+    {
+        if (ContextMenuWhenShown)
+        {
+            await OpenDevContextMenuAsync();
+        }
+
+        if (CopyRawWhenShown)
+        {
+            await CopyDevSelectionAsRawAsync();
+        }
+    }
+
     /// <summary>Writes <c>Window: shown</c> once the first document has been shown, or at once for the empty state or missing pane.</summary>
     private async Task LogShownAsync()
     {
@@ -1447,10 +1552,7 @@ public partial class MainWindow : Window
                 await ShowDevConfirmCardAsync();
             }
 
-            if (ContextMenuWhenShown)
-            {
-                await OpenDevContextMenuAsync();
-            }
+            await RunDevPageStepsAsync();
         }
         // The log line is a dev aid; a failure is logged rather than lost in a discarded task.
         catch (Exception exception)
@@ -1487,6 +1589,8 @@ public partial class MainWindow : Window
         _viewModel!.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.CloseRequested -= OnCloseRequested;
         _surface!.KeyForwarded -= OnKeyForwarded;
+        _surface.RawSelectionRequested -= OnRawSelectionRequested;
+        _surface.CopyRawChosen -= OnCopyRawChosen;
         _surface.LinkActivated -= OnLinkActivatedCancelCard;
         _surface.LinkActivated -= _linkOpener!.OnLinkActivated;
         _surface.DragOverChanged -= OnPageDragOverChanged;

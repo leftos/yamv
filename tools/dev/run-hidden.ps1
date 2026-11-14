@@ -89,6 +89,12 @@
     process, so the capture may not show it; the log line is the proof. Not with -WidthPopover, -Toasts, -ThemeSettingsEntry,
     -DropOverlay or -ConfirmCard.
 
+.PARAMETER CopyRaw
+    With -App: selects the document from the start of the paragraph holding its first bold text to the end of that bold text
+    once the window has shown, and runs Copy as raw on it; the copied markdown goes to the log as "Copy as raw (dev): <text>"
+    instead of the clipboard, which the hidden desktop shares with the owner's. Passed as YAMV_DEV_COPY_RAW; the run waits
+    for that log line. Not with -WidthPopover, -Toasts, -ThemeSettingsEntry, -DropOverlay, -ConfirmCard or -ContextMenu.
+
 .PARAMETER ThemeSettings
     Run the theme settings window instead of the harness, on a fresh data folder under .tmp\yamv-data.
 
@@ -144,6 +150,7 @@ param(
     [ValidateSet('', 'ok', 'no')] [string] $DropOverlay = '',
     [switch] $ConfirmCard,
     [switch] $ContextMenu,
+    [switch] $CopyRaw,
     [switch] $ThemeSettings,
     [string] $Themes = '',
     [string] $ImportFile = '',
@@ -160,10 +167,10 @@ $exe = Join-Path $root 'src\Yamv.App\bin\Release\net10.0\yamv.exe'
 $capture = Join-Path $PSScriptRoot 'capture-window.ps1'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $needsApp = $Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover -or $Toasts -or $ThemeSettingsEntry -or
-    $DropOverlay -or $ConfirmCard -or $ContextMenu
+    $DropOverlay -or $ConfirmCard -or $ContextMenu -or $CopyRaw
 if ($needsApp -and -not $App) {
     throw ('-Session, -Settings, -Widths, -DeleteAfterShown, -WidthPopover, -Toasts, -ThemeSettingsEntry, -DropOverlay, ' +
-        '-ConfirmCard and -ContextMenu need -App: the harnesses read no session, settings.json or widths.json.')
+        '-ConfirmCard, -ContextMenu and -CopyRaw need -App: the harnesses read no session, settings.json or widths.json.')
 }
 if ($Toasts -and $WidthPopover) {
     throw '-Toasts and -WidthPopover each wait for their own log line; pass one.'
@@ -179,6 +186,10 @@ if ($ConfirmCard -and ($WidthPopover -or $Toasts -or $ThemeSettingsEntry -or $Dr
 }
 if ($ContextMenu -and ($WidthPopover -or $Toasts -or $ThemeSettingsEntry -or $DropOverlay -or $ConfirmCard)) {
     throw '-ContextMenu, -WidthPopover, -Toasts, -ThemeSettingsEntry, -DropOverlay and -ConfirmCard each wait for their own log line; pass one.'
+}
+if ($CopyRaw -and ($WidthPopover -or $Toasts -or $ThemeSettingsEntry -or $DropOverlay -or $ConfirmCard -or $ContextMenu)) {
+    throw ('-CopyRaw, -WidthPopover, -Toasts, -ThemeSettingsEntry, -DropOverlay, -ConfirmCard and -ContextMenu each wait for ' +
+        'their own log line; pass one.')
 }
 if ($WidthPopoverStep -and -not $WidthPopover) {
     throw '-WidthPopoverStep needs -WidthPopover: it acts on the popover that switch opens.'
@@ -225,6 +236,7 @@ if ($App) {
     $env:YAMV_DEV_DROP_OVERLAY = if ($DropOverlay) { $DropOverlay } else { $null }
     $env:YAMV_DEV_CONFIRM_CARD = if ($ConfirmCard) { '1' } else { $null }
     $env:YAMV_DEV_CONTEXT_MENU = if ($ContextMenu) { '1' } else { $null }
+    $env:YAMV_DEV_COPY_RAW = if ($CopyRaw) { '1' } else { $null }
     $readyLine = if ($WidthPopover) { 'Window: (width popover shown|no width popover to show)' }
     elseif ($Toasts) { 'Window: toasts shown' }
     elseif ($ThemeSettingsEntry -eq 'menu') { 'Window: more menu shown' }
@@ -232,6 +244,7 @@ if ($App) {
     elseif ($DropOverlay) { 'Window: drop overlay shown' }
     elseif ($ConfirmCard) { 'Window: confirm card shown' }
     elseif ($ContextMenu) { 'Copy as raw menu: item added after Copy' }
+    elseif ($CopyRaw) { 'Copy as raw \(dev\): ' }
     else { 'Window: shown' }
 }
 elseif ($ThemeSettings) {
@@ -249,6 +262,7 @@ elseif ($ThemeSettings) {
     $env:YAMV_DEV_DROP_OVERLAY = $null
     $env:YAMV_DEV_CONFIRM_CARD = $null
     $env:YAMV_DEV_CONTEXT_MENU = $null
+    $env:YAMV_DEV_COPY_RAW = $null
     $readyLine = 'Window: shown'
 }
 else {
@@ -261,6 +275,7 @@ else {
     $env:YAMV_DEV_DROP_OVERLAY = $null
     $env:YAMV_DEV_CONFIRM_CARD = $null
     $env:YAMV_DEV_CONTEXT_MENU = $null
+    $env:YAMV_DEV_COPY_RAW = $null
     $readyLine = 'Harness: showing'
 }
 

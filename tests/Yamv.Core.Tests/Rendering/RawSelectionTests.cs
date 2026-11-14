@@ -137,6 +137,160 @@ public sealed partial class RawSelectionTests
 
     private static readonly HashSet<string> VoidElements = new(StringComparer.Ordinal) { "img", "br", "hr", "input", "meta", "link", "wbr" };
 
+    private const string RuleBeforeRaw = "Para.\n\n---\n\n<div class=\"raw\">\n<p>raw text</p>\n</div>\n\nAfter.\n";
+
+    private const string RawAfterRule = "<div class=\"raw\">\n<p>raw text</p>\n</div>\n\nAfter.";
+
+    private const string TablesAroundRaw =
+        "Intro.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<div class=\"raw\">\n<p>raw text</p>\n</div>\n\n| c | d |\n|---|---|\n| 3 | 4 |\n\nAfter.\n";
+
+    private const string PipeTableBetween = "Intro.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter.";
+
+    private const string GridTableBetween = "para\n\n+-----+-----+\n| a   | b   |\n+=====+=====+\n| x   | y   |\n+-----+-----+\n\nafter";
+
+    private const string GridTableOnly = "+-----+-----+\n| a   | b   |\n+=====+=====+\n| x   | y   |\n+-----+-----+";
+
+    [Fact]
+    public void Extract_FromTheEndOfATablesLastCellIntoARawBlock_LeavesTheRowsClosingPipeOut() =>
+        Assert.Equal(
+            "<div class=\"raw\">\n<p>raw text</p>\n</div>",
+            RawSelection.Extract(TablesAroundRaw, new RawPoint(33, null, 1), new RawPoint(82, null, 0))
+        );
+
+    [Fact]
+    public void Extract_FromATablesFirstCellToTheEndOfItsLastCell_IsTheWholeTable() =>
+        Assert.Equal("| c | d |\n|---|---|\n| 3 | 4 |", RawSelection.Extract(TablesAroundRaw, new RawPoint(82, null, 0), new RawPoint(106, null, 1)));
+
+    [Fact]
+    public void Extract_FromAParagraphToTheEndOfATablesLastCell_KeepsTheRowsClosingPipe() =>
+        Assert.Equal(
+            "Intro.\n\n| a | b |\n|---|---|\n| 1 | 2 |",
+            RawSelection.Extract(TablesAroundRaw, new RawPoint(0, null, 0), new RawPoint(33, null, 1))
+        );
+
+    [Fact]
+    public void Extract_WholeTextOfAPaddedLastCell_IsJustThatText() =>
+        Assert.Equal("2", RawSelection.Extract(PipeTableBetween, new RawPoint(33, null, 0), new RawPoint(33, null, 1)));
+
+    [Fact]
+    public void Extract_StartAfterAPipeTablesLastCell_MovesPastTheTable() =>
+        Assert.Equal("After.", RawSelection.Extract(PipeTableBetween, new RawPoint(33, null, 1), new RawPoint(39, null, 6)));
+
+    [Fact]
+    public void Extract_StartAtAPipeTablesFirstCell_MovesToTheTablesLineStart() =>
+        Assert.Equal(
+            "| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter.",
+            RawSelection.Extract(PipeTableBetween, new RawPoint(9, null, 0), new RawPoint(39, null, 6))
+        );
+
+    [Fact]
+    public void Extract_EndAtAPipeTablesLastCell_MovesToTheTablesEnd() =>
+        Assert.Equal(
+            "Intro.\n\n| a | b |\n|---|---|\n| 1 | 2 |",
+            RawSelection.Extract(PipeTableBetween, new RawPoint(0, null, 0), new RawPoint(33, null, 1))
+        );
+
+    [Fact]
+    public void Extract_StartAfterAGridTablesLastCell_MovesPastTheTable()
+    {
+        int lastCell = Src(GridTableBetween, "td", 1);
+        int after = Src(GridTableBetween, "p", 1);
+
+        Assert.Equal("after", RawSelection.Extract(GridTableBetween, new RawPoint(lastCell, null, 1), new RawPoint(after, null, 5)));
+    }
+
+    [Fact]
+    public void Extract_StartAtAGridTablesFirstCell_MovesToTheTablesTopBorder()
+    {
+        int firstCell = Src(GridTableBetween, "th");
+        int after = Src(GridTableBetween, "p", 1);
+
+        Assert.Equal(
+            GridTableOnly + "\n\nafter",
+            RawSelection.Extract(GridTableBetween, new RawPoint(firstCell, null, 0), new RawPoint(after, null, 5))
+        );
+    }
+
+    [Fact]
+    public void Extract_EndAtAGridTablesLastCell_MovesPastItsBottomBorder()
+    {
+        int p = Src(GridTableBetween, "p");
+        int lastCell = Src(GridTableBetween, "td", 1);
+
+        Assert.Equal("para\n\n" + GridTableOnly, RawSelection.Extract(GridTableBetween, new RawPoint(p, null, 0), new RawPoint(lastCell, null, 1)));
+    }
+
+    [Fact]
+    public void Extract_StartAtTheDocumentStart_TakesRawHtmlAtTheTop()
+    {
+        const string markdown = "<p data-src=\"1.5\">raw para</p>\n\nnext para";
+
+        Assert.Equal(markdown, RawSelection.Extract(markdown, new RawPoint(null, null, 0), new RawPoint(32, null, 9)));
+    }
+
+    [Fact]
+    public void Extract_EndAtTheDocumentEnd_TakesRawHtmlAtTheBottom()
+    {
+        const string markdown = "Para.\n\n<div class=\"raw\">\n<p>raw text</p>\n</div>\n";
+
+        Assert.Equal(
+            "Para.\n\n<div class=\"raw\">\n<p>raw text</p>\n</div>",
+            RawSelection.Extract(markdown, new RawPoint(0, null, 0), new RawPoint(null, null, 0))
+        );
+    }
+
+    [Theory]
+    [InlineData(null, 3, true)]
+    [InlineData(5, 0, true)]
+    [InlineData(null, 3, false)]
+    [InlineData(5, 0, false)]
+    public void Extract_AnyOtherPointWithoutANode_IsNull(int? after, int offset, bool atStart)
+    {
+        const string markdown = "Para.\n\nnext para";
+        var nodeless = new RawPoint(null, after, offset);
+
+        Assert.Null(
+            atStart
+                ? RawSelection.Extract(markdown, nodeless, new RawPoint(7, null, 4))
+                : RawSelection.Extract(markdown, new RawPoint(0, null, 0), nodeless)
+        );
+    }
+
+    [Fact]
+    public void Extract_StartAtTheEndOfACodeBlocksText_LeavesTheClosingFenceOut()
+    {
+        const string markdown = "```\ncode\n```\n\nAfter para.";
+
+        Assert.Equal("After", RawSelection.Extract(markdown, new RawPoint(0, null, 5), new RawPoint(14, null, 5)));
+    }
+
+    [Fact]
+    public void Extract_StartAtTheEndOfACodeBlockBeforeARawBlock_CopiesTheRawBlockWithoutTheFence()
+    {
+        const string markdown = "Intro para.\n\n```js\nlet x = 1;\n```\n\n<div class=\"raw\">\n<p>raw text</p>\n</div>\n\nAfter para.\n";
+
+        Assert.Equal(
+            "<div class=\"raw\">\n<p>raw text</p>\n</div>\n\nAfter",
+            RawSelection.Extract(markdown, new RawPoint(13, null, 11), new RawPoint(77, null, 5))
+        );
+    }
+
+    [Fact]
+    public void Extract_EndAtOffsetZeroOfARule_LeavesTheRuleOut() =>
+        Assert.Equal("Para.", RawSelection.Extract(RuleBeforeRaw, new RawPoint(0, null, 0), new RawPoint(7, null, 0)));
+
+    [Fact]
+    public void Extract_EndAtOffsetOneOfARule_KeepsTheRule() =>
+        Assert.Equal("Para.\n\n---", RawSelection.Extract(RuleBeforeRaw, new RawPoint(0, null, 0), new RawPoint(7, null, 1)));
+
+    [Fact]
+    public void Extract_StartAtOffsetZeroOfARule_KeepsTheRule() =>
+        Assert.Equal("---\n\n" + RawAfterRule, RawSelection.Extract(RuleBeforeRaw, new RawPoint(7, null, 0), new RawPoint(54, null, 6)));
+
+    [Fact]
+    public void Extract_StartAtOffsetOneOfARule_LeavesTheRuleOut() =>
+        Assert.Equal(RawAfterRule, RawSelection.Extract(RuleBeforeRaw, new RawPoint(7, null, 1), new RawPoint(54, null, 6)));
+
     [Fact]
     public void Extract_PlainTextInOneParagraph_IsThatText()
     {
@@ -392,7 +546,7 @@ public sealed partial class RawSelectionTests
         int before = Src(DefinitionList, "p");
         int after = Src(DefinitionList, "p", 1);
 
-        Assert.DoesNotMatch("<d[ltd]\\b[^>]*data-src", html);
+        Assert.DoesNotMatch("<d[ltd]\\b[^>]*data-yamv-src", html);
         Assert.Equal("Term\n: The definition", RawSelection.Extract(DefinitionList, new RawPoint(before, null, -1), new RawPoint(after, null, -1)));
     }
 
@@ -560,12 +714,12 @@ public sealed partial class RawSelectionTests
     /// <summary>
     /// The definition list as first tagged: the HTML that shape produced, read by the same parser as the agreement test,
     /// does not agree with the current model. Against that shape's model (the term inside the item), parent offsets
-    /// alone agree, since all three share one <c>data-src</c>; the depth tells them apart.
+    /// alone agree, since all three share one <c>data-yamv-src</c>; the depth tells them apart.
     /// </summary>
     [Fact]
     public void Nesting_SharedDataSrcAtDifferentDepths_DoesNotAgree()
     {
-        const string html = "<dl data-src=\"0\"><dt data-src=\"0\">Term</dt><dd data-src=\"0\">The definition</dd></dl>";
+        const string html = "<dl data-yamv-src=\"0\"><dt data-yamv-src=\"0\">Term</dt><dd data-yamv-src=\"0\">The definition</dd></dl>";
         List<(int Src, int Parent, int Depth)> page = Nesting(HtmlTexts(html).Select(entry => (entry.Src, entry.Parent, entry.Depth)));
         MarkdownDocument document = Markdown.Parse("Term\n: The definition", MarkdownRenderer.Pipeline);
         List<(int Src, int Parent, int Depth)> model = Nesting(
@@ -581,7 +735,7 @@ public sealed partial class RawSelectionTests
 
     /// <summary>
     /// Pins the model of the page to Markdig's real output: the same elements are tagged, each nested under the same
-    /// tagged parent at the same tagged depth (the depth is what catches several elements sharing one <c>data-src</c>
+    /// tagged parent at the same tagged depth (the depth is what catches several elements sharing one <c>data-yamv-src</c>
     /// at different depths), and each text host's untagged text is what the mapping walks. The newlines Markdig writes
     /// next to a tagged block inside a container hold no source, so they are dropped from the page text; a container
     /// holding a definition list is skipped, since its walk stops at the list by design.
@@ -631,18 +785,18 @@ public sealed partial class RawSelectionTests
     /// <summary>Drops the newlines next to a tagged block's boundary (marked while parsing) and the marks themselves.</summary>
     private static string Comparable(string text) => BlockBoundaryPattern().Replace(text, string.Empty);
 
-    /// <summary>The <c>data-src</c> of the <paramref name="occurrence"/>-th <paramref name="tag"/> element in the rendered HTML.</summary>
+    /// <summary>The <c>data-yamv-src</c> of the <paramref name="occurrence"/>-th <paramref name="tag"/> element in the rendered HTML.</summary>
     private static int Src(string markdown, string tag, int occurrence = 0)
     {
         string html = new MarkdownRenderer().Render(markdown).Html;
-        MatchCollection matches = Regex.Matches(html, $"<{tag}\\b[^>]*\\bdata-src=\"(\\d+)\"");
+        MatchCollection matches = Regex.Matches(html, $"<{tag}\\b[^>]*\\bdata-yamv-src=\"(\\d+)\"");
         return int.Parse(matches[occurrence].Groups[1].Value, CultureInfo.InvariantCulture);
     }
 
     /// <summary>
     /// The text of each tagged element as the page sees it outside tagged elements below it: tagged children are dropped
     /// whole, other tags and comments are stripped, and entities are decoded. Each comes with its nearest tagged
-    /// ancestor's <c>data-src</c> (-1 for none) and its count of tagged ancestors; where a tagged block child opens or
+    /// ancestor's <c>data-yamv-src</c> (-1 for none) and its count of tagged ancestors; where a tagged block child opens or
     /// closes, the parent's text gets a <see cref="BlockBoundary"/> mark.
     /// </summary>
     private static List<PageElement> HtmlTexts(string html)
@@ -742,7 +896,7 @@ public sealed partial class RawSelectionTests
     [GeneratedRegex("<(?<close>/)?(?<name>[a-zA-Z][a-zA-Z0-9-]*)(?<attributes>[^>]*)>")]
     private static partial Regex TagPattern();
 
-    /// <summary>A tagged element of the page: its <c>data-src</c>, its tagged parent's, its tagged depth and its own text.</summary>
+    /// <summary>A tagged element of the page: its <c>data-yamv-src</c>, its tagged parent's, its tagged depth and its own text.</summary>
     private readonly record struct PageElement(int Src, int Parent, int Depth, string Text);
 
     [GeneratedRegex("\n*\u0001\n*")]
@@ -751,6 +905,6 @@ public sealed partial class RawSelectionTests
     [GeneratedRegex("<!--.*?-->", RegexOptions.Singleline)]
     private static partial Regex CommentPattern();
 
-    [GeneratedRegex("\\bdata-src=\"(\\d+)\"")]
+    [GeneratedRegex("\\bdata-yamv-src=\"(\\d+)\"")]
     private static partial Regex SrcPattern();
 }

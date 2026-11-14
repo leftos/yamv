@@ -26,6 +26,12 @@ public interface IDocumentSurface
     /// <summary><see cref="ViewportWidth"/> changed to a new width the shown render's page reported.</summary>
     event EventHandler? ViewportWidthChanged;
 
+    /// <summary>The page sent the source points of its selection, as <see cref="RequestRawCopyAsync"/> asked it to.</summary>
+    event EventHandler<RawSelectionRequest>? RawSelectionRequested;
+
+    /// <summary>The user chose Copy as raw in the web view's own right-click menu.</summary>
+    event EventHandler? CopyRawChosen;
+
     /// <summary>
     /// The width the shown render's text column is laid out in, as its page last reported it; null until that render's page
     /// has reported.
@@ -73,7 +79,25 @@ public interface IDocumentSurface
 
     /// <summary>Removes every find highlight.</summary>
     Task ClearFindAsync();
+
+    /// <summary>
+    /// Asks the page for the source points of its selection, which arrive as <see cref="RawSelectionRequested"/>; a page with
+    /// no selection sends nothing.
+    /// </summary>
+    /// <returns>
+    /// False when the host could not run the page script; true when it ran, or when a newer call or a show replaced it.
+    /// </returns>
+    Task<bool> RequestRawCopyAsync();
 }
+
+/// <summary>The source points of the page's selection, for Copy as raw.</summary>
+/// <param name="Start">Where the selection starts; null when the page could not map that end of its selection.</param>
+/// <param name="End">Where the selection ends; null when the page could not map that end of its selection.</param>
+/// <param name="FromShownRender">
+/// Whether the page that sent the points shows the latest render; false when a newer show replaced it, so the points may
+/// not match the shown source.
+/// </param>
+public sealed record RawSelectionRequest(RawPoint? Start, RawPoint? End, bool FromShownRender);
 
 /// <summary>A document for <see cref="IDocumentSurface.ShowAsync"/> to show, and how.</summary>
 /// <param name="Document">The rendered markdown.</param>

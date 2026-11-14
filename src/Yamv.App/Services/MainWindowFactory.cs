@@ -51,6 +51,17 @@ public static class MainWindowFactory
         && Environment.GetEnvironmentVariable(ContextMenuVariable) == "1";
 
     /// <summary>
+    /// Set to 1 in a run with its own data folder, it makes the main window select part of the document and run Copy as raw
+    /// once it has shown, logging the copied markdown instead of putting it on the clipboard, for a hidden-desktop check.
+    /// </summary>
+    internal const string CopyRawVariable = "YAMV_DEV_COPY_RAW";
+
+    /// <summary>True when <see cref="CopyRawVariable"/> is 1 and the run has its own data folder, so the owner's app never runs it.</summary>
+    private static bool DevCopyRawAsked() =>
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
+        && Environment.GetEnvironmentVariable(CopyRawVariable) == "1";
+
+    /// <summary>
     /// Set to ok or no in a run with its own data folder, it makes the main window show that form of the drop overlay once it has
     /// shown, for a hidden-desktop capture.
     /// </summary>
@@ -163,6 +174,7 @@ public static class MainWindowFactory
                 DropOverlayWhenShown = DevDropOverlayAsked(),
                 ConfirmCardWhenShown = DevConfirmCardAsked(),
                 ContextMenuWhenShown = DevContextMenuAsked(),
+                CopyRawWhenShown = DevCopyRawAsked(),
             };
             RestoreLayout(window, session, log);
             MainWindowSession? saver = elevated ? null : new MainWindowSession(window, viewModel, store, TimeProvider.System, log);

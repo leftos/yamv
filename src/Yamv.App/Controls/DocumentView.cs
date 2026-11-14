@@ -81,6 +81,10 @@ public sealed class DocumentView : UserControl, IDocumentSurface
 
     public event EventHandler? ViewportWidthChanged;
 
+    public event EventHandler<RawSelectionRequest>? RawSelectionRequested;
+
+    public event EventHandler? CopyRawChosen;
+
     public double? ViewportWidth { get; private set; }
 
     /// <summary>
@@ -252,6 +256,21 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         double x = point.RootElement.GetProperty("x").GetDouble();
         double y = point.RootElement.GetProperty("y").GetDouble();
         return await WebView2ContextMenu.DispatchRightClickAsync(_webView.TryGetPlatformHandle(), x, y, _log);
+    }
+
+    /// <summary>
+    /// Selects the shown document from the start of the paragraph holding its first <c>strong</c> element to the end of that
+    /// element, for a hidden-desktop check of Copy as raw.
+    /// </summary>
+    /// <returns>False when the page script failed or the page has no <c>strong</c> element.</returns>
+    internal async Task<bool> SelectForDevCopyRawAsync()
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        const string script =
+            "(() => { const strong = document.querySelector('#yamv-content strong'); if (!strong) { return false; } "
+            + "const range = document.createRange(); range.setStart(strong.parentElement, 0); range.setEndAfter(strong); "
+            + "const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); return true; })()";
+        return (await RunAsync(CallKind.Other, "devCopyRawSelection", script)).Value == "true";
     }
 
     /// <summary>Removes every find highlight, leaving the document text as it was.</summary>
@@ -493,24 +512,8 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         _wkWebViewMenu = null;
     }
 
-    /// <summary>The native menu's Copy as raw item was chosen; the request runs on the UI thread.</summary>
-    private void OnCopyRawChosen() => Dispatcher.UIThread.Post(() => _ = CopyRawAsync());
-
-    private async Task CopyRawAsync()
-    {
-        try
-        {
-            if (!await RequestRawCopyAsync())
-            {
-                _log.LogWarning("Copy as raw: the page could not take the request");
-            }
-        }
-        // The task is discarded by the posted callback, so a failure is logged here rather than left unobserved.
-        catch (Exception exception)
-        {
-            _log.LogWarning("Copy as raw: the page could not take the request", exception);
-        }
-    }
+    /// <summary>The native menu's Copy as raw item was chosen; <see cref="CopyRawChosen"/> is raised on the UI thread.</summary>
+    private void OnCopyRawChosen() => Dispatcher.UIThread.Post(() => CopyRawChosen?.Invoke(this, EventArgs.Empty));
 
     private void OnAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
     {
@@ -621,6 +624,12 @@ public sealed class DocumentView : UserControl, IDocumentSurface
                 break;
             case "viewport":
                 break;
+            case "rawSelection" when RawSelectionOf(message) is { } selection:
+                RawSelectionRequested?.Invoke(this, selection);
+                break;
+            case "rawSelection":
+                _log.LogWarning("Ignored a rawSelection message without its points");
+                break;
             case "find":
                 break;
             case "blocked":
@@ -635,6 +644,27 @@ public sealed class DocumentView : UserControl, IDocumentSurface
                 _log.LogWarning($"Ignored a page message of unknown type '{LogText.Clean(message.Type)}'");
                 break;
         }
+    }
+
+    /// <summary>
+    /// The selection a <c>rawSelection</c> message names, marked as from the shown render when its generation is the latest
+    /// show's; a point the page could not map (null or absent) stays null. Null when a point was sent without its offset.
+    /// </summary>
+    private RawSelectionRequest? RawSelectionOf(PageMessage message)
+    {
+        if (!TryReadPoint(message.Start, out RawPoint? start) || !TryReadPoint(message.End, out RawPoint? end))
+        {
+            return null;
+        }
+
+        return new RawSelectionRequest(start, end, message.Generation == _generation);
+    }
+
+    /// <summary>A message point as a <see cref="RawPoint"/>, null for none; false when the point has no offset.</summary>
+    private static bool TryReadPoint(RawPointMessage? message, out RawPoint? point)
+    {
+        point = message is { Offset: int offset } ? new RawPoint(message.Node, message.After, offset) : null;
+        return message is null || point is not null;
     }
 
     private void TakeViewportWidth(double width)

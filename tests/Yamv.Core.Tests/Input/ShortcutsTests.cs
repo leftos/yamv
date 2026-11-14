@@ -136,6 +136,27 @@ public sealed class ShortcutsTests
         Assert.Null(Shortcuts.Match(",", ctrl: false, meta: true, shift: false, alt: false, isMac: false));
 
     [Theory]
+    [InlineData("c")]
+    [InlineData("C")]
+    public void Match_CtrlShiftCOnWindows_CopiesRaw(string key) =>
+        Assert.Equal(ShortcutCommand.CopyRaw, Shortcuts.Match(key, ctrl: true, meta: false, shift: true, alt: false, isMac: false));
+
+    [Fact]
+    public void Match_CmdShiftCOnMac_CopiesRaw() =>
+        Assert.Equal(ShortcutCommand.CopyRaw, Shortcuts.Match("C", ctrl: false, meta: true, shift: true, alt: false, isMac: true));
+
+    [Fact]
+    public void Match_CtrlCWithoutShift_IsNothing() =>
+        Assert.Null(Shortcuts.Match("c", ctrl: true, meta: false, shift: false, alt: false, isMac: false));
+
+    [Fact]
+    public void Match_CtrlShiftAltC_IsNothing() => Assert.Null(Shortcuts.Match("C", ctrl: true, meta: false, shift: true, alt: true, isMac: false));
+
+    [Fact]
+    public void Match_CtrlShiftW_StillClosesTheDocument() =>
+        Assert.Equal(ShortcutCommand.CloseDocument, Shortcuts.Match("w", ctrl: true, meta: false, shift: true, alt: false, isMac: false));
+
+    [Theory]
     [InlineData("p")]
     [InlineData("1")]
     [InlineData("F5")]

@@ -798,6 +798,526 @@ try {
     check("a file drag over the page posts drag and is not default-prevented", files.posted.length === 1 && files.posted[0].over === true && !files.prevented, files);
   }
 
+  // Copy as raw: the page sends each selection end as a point Core maps back to the source. The HTML is Core's own
+  // (MarkdownRenderer) for this markdown, so the data-yamv-src numbers are real source offsets; each expected pair below maps
+  // through RawSelection.Extract to the markdown named beside it.
+  //   # Copy as raw\n\nMath $x^2$ then see **the guide** for more\n\nsee **the guide** for more\n\n- one\n- two\n\n
+  //   <div class="raw">\n<p>raw text</p>\n</div>\n\nLast paragraph.\n
+  {
+    const rawHtml = [
+      '<h1 id="copy-as-raw" data-line="0" data-yamv-src="0">Copy as raw</h1>',
+      '<p data-line="2" data-yamv-src="15">Math <span class="math" data-yamv-src="20">\\(x^2\\)</span> then see '
+        + '<strong data-yamv-src="35">the guide</strong> for more</p>',
+      '<p data-line="4" data-yamv-src="59">see <strong data-yamv-src="63">the guide</strong> for more</p>',
+      '<ul data-line="6" data-yamv-src="87">',
+      '<li data-yamv-src="87">one</li>',
+      '<li data-yamv-src="93">two</li>',
+      "</ul>",
+      '<div class="raw">',
+      "<p>raw text</p>",
+      "</div>",
+      '<p data-line="13" data-yamv-src="142">Last paragraph.</p>',
+      "",
+    ].join("\n");
+    await show(rawHtml, { ...baseOptions, documentPath: "C:\\docs\\raw-copy.md", generation: 90, hasMath: true });
+    // Selects from one end to the other and asks for Copy as raw. An end is { tag, nth, text, offset }: the text-th text
+    // node of the nth element with that data-yamv-src; { raw: true, offset }: the raw block's text; { element: tag, nth, offset }:
+    // a boundary in that element; or { before: tag, offset }: the content boundary before that block.
+    const selectAndCopy = (ends) => page.evaluate(([from, to]) => {
+      window.__messages = [];
+      const content = document.getElementById("yamv-content");
+      const tagged = (spec) => content.querySelectorAll(`[data-yamv-src="${spec}"]`);
+      const textOf = (element, index) => Array.from(element.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE)[index];
+      const boundary = (end) => {
+        if (end.raw) {
+          return [textOf(content.querySelector("div.raw p"), 0), end.offset];
+        }
+        if (end.before !== undefined) {
+          return [content, Array.from(content.childNodes).indexOf(tagged(end.before)[0])];
+        }
+        if (end.element !== undefined) {
+          return [tagged(end.element)[end.nth ?? 0], end.offset];
+        }
+        return [textOf(tagged(end.tag)[end.nth ?? 0], end.text ?? 0), end.offset];
+      };
+      const range = document.createRange();
+      range.setStart(...boundary(from));
+      range.setEnd(...boundary(to));
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      window.yamv.copyRaw();
+      return window.__messages.filter((message) => message.type === "rawSelection");
+    }, ends);
+    const expectPoints = async (name, ends, start, end) => {
+      const posted = await selectAndCopy(ends);
+      const ok = posted.length === 1
+        && JSON.stringify(posted[0].start) === JSON.stringify(start)
+        && JSON.stringify(posted[0].end) === JSON.stringify(end)
+        && posted[0].generation === 90;
+      check(name, ok, posted);
+    };
+    const mathRendered = await page.evaluate(() => document.querySelector("#yamv-content .katex") !== null);
+    check("the copy-as-raw fixture's math is rendered", mathRendered, mathRendered);
+    // "see **the guide**": a start in plain text, an end inside the bold.
+    await expectPoints(
+      "a selection ending inside a bold word names the bold's own element",
+      [{ tag: 59, offset: 0 }, { tag: 63, offset: 3 }],
+      { node: 59, after: null, offset: 0 },
+      { node: 63, after: null, offset: 3 },
+    );
+    // "see **the guide** for more": element-boundary ends, as a triple click leaves them, the end past the list's whitespace.
+    await expectPoints(
+      "element-boundary ends move to the paragraph's first and last text",
+      [{ before: 59 }, { element: 87, nth: 1, offset: 0 }],
+      { node: 59, after: null, offset: 0 },
+      { node: 59, after: 63, offset: 9 },
+    );
+    // "Math $x^2$ then": the rendered math's text is not counted after it.
+    await expectPoints(
+      "an end after inline math counts from the math element",
+      [{ tag: 15, offset: 0 }, { tag: 15, text: 1, offset: 5 }],
+      { node: 15, after: null, offset: 0 },
+      { node: 15, after: 20, offset: 5 },
+    );
+    // The whole raw HTML block: the start is the end of the text before it, the end the start of the text after it.
+    await expectPoints(
+      "a selection inside a raw HTML block names the text around it",
+      [{ raw: true, offset: 2 }, { raw: true, offset: 5 }],
+      { node: 93, after: null, offset: 3 },
+      { node: 142, after: null, offset: 0 },
+    );
+    // "- two": an end at the raw block's very first text is the end of the text before it, so the raw block is not copied.
+    await expectPoints(
+      "an end at the start of a raw HTML block is the end of the text before it",
+      [{ tag: 93, offset: 0 }, { raw: true, offset: 0 }],
+      { node: 93, after: null, offset: 0 },
+      { node: 93, after: null, offset: 3 },
+    );
+    // "Last": a start at the raw block's very last text is the start of the paragraph after it.
+    await expectPoints(
+      "a start at the end of a raw HTML block is the start of the block after it",
+      [{ raw: true, offset: 8 }, { tag: 142, offset: 4 }],
+      { node: 142, after: null, offset: 0 },
+      { node: 142, after: null, offset: 4 },
+    );
+    const nothing = await page.evaluate(() => {
+      window.__messages = [];
+      window.getSelection().removeAllRanges();
+      window.yamv.copyRaw();
+      return window.__messages;
+    });
+    check("copyRaw with no selection posts nothing", nothing.length === 0, nothing);
+
+    await page.evaluate(() => {
+      const content = document.getElementById("yamv-content");
+      const range = document.createRange();
+      range.selectNodeContents(content.querySelector('[data-yamv-src="59"]'));
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    });
+    keys = await pressKey("Control+Shift+C");
+    let raw = (await messages()).filter((message) => message.type === "rawSelection");
+    check(
+      "Ctrl+Shift+C posts a rawSelection, no key, and is blocked",
+      raw.length === 1 && keys.forwarded.length === 0 && keys.seen.at(-1).prevented,
+      { raw, keys },
+    );
+    keys = await pressKey("Control+c");
+    raw = (await messages()).filter((message) => message.type === "rawSelection");
+    check("Ctrl+C posts neither a rawSelection nor a key", raw.length === 0 && keys.forwarded.length === 0, { raw, keys });
+  }
+
+  // Copy as raw against Core's own HTML (MarkdownRenderer) for the markdown beside each fixture. Each expected pair was
+  // mapped through RawSelection.Extract (a scratch console app over Yamv.Core) to the copy named in its comment.
+  {
+    const coreHtml = {
+      rawcode: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">Intro para.</p>",
+        "<div class=\"raw\">",
+        "<p>raw text</p>",
+        "</div>",
+        "<pre><code class=\"language-js\" data-line=\"6\" data-yamv-src=\"55\">let x = 1;",
+        "</code></pre>",
+        "<p data-line=\"10\" data-yamv-src=\"77\">After para.</p>",
+        "",
+      ].join("\n"),
+      codenext: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">Intro para.</p>",
+        "<pre><code class=\"language-js\" data-line=\"2\" data-yamv-src=\"13\">let x = 1;",
+        "</code></pre>",
+        "<div class=\"raw\">",
+        "<p>raw text</p>",
+        "</div>",
+        "<p data-line=\"10\" data-yamv-src=\"77\">After para.</p>",
+        "",
+      ].join("\n"),
+      dlnested: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">intro</p>",
+        "<ul data-line=\"2\" data-yamv-src=\"7\">",
+        "<li data-yamv-src=\"7\"><p data-yamv-src=\"9\">one</p>",
+        "</li>",
+        "<li data-yamv-src=\"13\"><p data-yamv-src=\"15\">two</p>",
+        "<dl>",
+        "<dt>Term</dt>",
+        "<dd>",
+        "<p>Definition</p>",
+        "</dd>",
+        "</dl>",
+        "</li>",
+        "</ul>",
+        "<p data-line=\"8\" data-yamv-src=\"43\">after para</p>",
+        "",
+      ].join("\n"),
+      hrraw: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">Para.</p>",
+        "<hr data-line=\"2\" data-yamv-src=\"7\" />",
+        "<div class=\"raw\">",
+        "<p>raw text</p>",
+        "</div>",
+        "<p data-line=\"8\" data-yamv-src=\"54\">After.</p>",
+        "",
+      ].join("\n"),
+      lazy: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">text <img data-src=\"lazy.png\" src=\"x.png\"> more "
+          + "<strong data-yamv-src=\"48\">bold</strong> end</p>",
+        "",
+      ].join("\n"),
+      lazy2: [
+        "<p data-src=\"1.5\">raw para</p>",
+        "<p data-line=\"2\" data-yamv-src=\"32\">next para</p>",
+        "",
+      ].join("\n"),
+      image: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">see <img src=\"x.png\" data-yamv-src=\"4\" alt=\"alt\" /></p>",
+        "<p data-line=\"2\" data-yamv-src=\"19\"><img src=\"y.png\" data-yamv-src=\"19\" alt=\"solo\" /></p>",
+        "<p data-line=\"4\" data-yamv-src=\"35\">next para</p>",
+        "",
+      ].join("\n"),
+      mermaid: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">before para</p>",
+        "<pre class=\"mermaid\" data-line=\"2\" data-yamv-src=\"13\">graph TD; A-->B",
+        "</pre>",
+        "<p data-line=\"6\" data-yamv-src=\"45\">after para</p>",
+        "",
+      ].join("\n"),
+      rawonly: [
+        "<div class=\"raw\">",
+        "<p>raw only</p>",
+        "</div>",
+        "",
+      ].join("\n"),
+      find: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">see <strong data-yamv-src=\"4\">the guide</strong> for more</p>",
+        "",
+      ].join("\n"),
+      mathold: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">before para</p>",
+        "<p data-line=\"2\" data-yamv-src=\"13\">after para</p>",
+        "",
+      ].join("\n"),
+      mathnew: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">inserted <span class=\"math\" data-yamv-src=\"9\">\\(x\\)</span> line</p>",
+        "<p data-line=\"2\" data-yamv-src=\"19\">before para</p>",
+        "<p data-line=\"4\" data-yamv-src=\"32\">after para</p>",
+        "",
+      ].join("\n"),
+      tableraw: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">Intro.</p>",
+        "<table data-line=\"2\" data-yamv-src=\"8\">",
+        "<thead>",
+        "<tr data-yamv-src=\"9\">",
+        "<th data-yamv-src=\"9\">a</th>",
+        "<th data-yamv-src=\"13\">b</th>",
+        "</tr>",
+        "</thead>",
+        "<tbody>",
+        "<tr data-yamv-src=\"29\">",
+        "<td data-yamv-src=\"29\">1</td>",
+        "<td data-yamv-src=\"33\">2</td>",
+        "</tr>",
+        "</tbody>",
+        "</table>",
+        "<div class=\"raw\">",
+        "<p>raw text</p>",
+        "</div>",
+        "<table data-line=\"10\" data-yamv-src=\"81\">",
+        "<thead>",
+        "<tr data-yamv-src=\"82\">",
+        "<th data-yamv-src=\"82\">c</th>",
+        "<th data-yamv-src=\"86\">d</th>",
+        "</tr>",
+        "</thead>",
+        "<tbody>",
+        "<tr data-yamv-src=\"102\">",
+        "<td data-yamv-src=\"102\">3</td>",
+        "<td data-yamv-src=\"106\">4</td>",
+        "</tr>",
+        "</tbody>",
+        "</table>",
+        "<p data-line=\"14\" data-yamv-src=\"112\">After.</p>",
+        "",
+      ].join("\n"),
+      rawend: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">Para.</p>",
+        "<div class=\"raw\">",
+        "<p>raw text</p>",
+        "</div>",
+        "",
+      ].join("\n"),
+      readmea: [
+        "<p align=\"center\">",
+        "  <img src=\"logo.png\" alt=\"Logo\">",
+        "</p>",
+        "<h1 align=\"center\">Project</h1>",
+        "<p data-line=\"6\" data-yamv-src=\"92\">Some intro text.</p>",
+        "",
+      ].join("\n"),
+      readmeb: [
+        "<p align=\"center\"><img src=\"logo.png\" alt=\"Logo\"></p>",
+        "<p align=\"center\"><a href=\"https://x.example\"><img src=\"badge.svg\" alt=\"build\"></a> "
+          + "<a href=\"https://y.example\"><img src=\"badge2.svg\" alt=\"cov\"></a></p>",
+        "<h1 id=\"project\" data-line=\"4\" data-yamv-src=\"209\">Project</h1>",
+        "<p data-line=\"6\" data-yamv-src=\"220\">Some intro text.</p>",
+        "",
+      ].join("\n"),
+      logobottom: [
+        "<p data-line=\"0\" data-yamv-src=\"0\">Para.</p>",
+        "<p align=\"center\"><img src=\"logo.png\" alt=\"Logo\"></p>",
+        "",
+      ].join("\n"),
+    };
+    // An end is { css, nth, text, offset }: the text-th non-blank text node under the nth match of css in the content;
+    // without `text`, a boundary in that element; { label, offset }: the text node reading `label` outside style sheets;
+    // { content: true, offset }: a boundary in the content itself, -1 for its end.
+    const copyIn = (ends) => page.evaluate(([from, to]) => {
+      window.__messages = [];
+      const content = document.getElementById("yamv-content");
+      const textsUnder = (root) => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const texts = [];
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (node.data.trim() !== "" && !node.parentElement.closest("style, script")) {
+            texts.push(node);
+          }
+        }
+        return texts;
+      };
+      const boundary = (end) => {
+        if (end.content) {
+          return [content, end.offset < 0 ? content.childNodes.length : end.offset];
+        }
+        if (end.label !== undefined) {
+          return [textsUnder(content).find((text) => text.data.trim() === end.label), end.offset];
+        }
+        const element = content.querySelectorAll(end.css)[end.nth ?? 0];
+        return end.text === undefined ? [element, end.offset] : [textsUnder(element)[end.text], end.offset];
+      };
+      const range = document.createRange();
+      range.setStart(...boundary(from));
+      range.setEnd(...boundary(to));
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      window.yamv.copyRaw();
+      return window.__messages.filter((message) => message.type === "rawSelection");
+    }, ends);
+    let generation = 200;
+    const showCore = async (name, extra = {}) => {
+      generation++;
+      await show(coreHtml[name], { ...baseOptions, documentPath: `C:\\docs\\${name}.md`, generation, ...extra });
+    };
+    const expectCopy = async (name, ends, start, end) => {
+      const posted = await copyIn(ends);
+      const ok = posted.length === 1
+        && JSON.stringify(posted[0].start) === JSON.stringify(start)
+        && JSON.stringify(posted[0].end) === JSON.stringify(end)
+        && posted[0].generation === generation;
+      check(name, ok, posted);
+    };
+    const point = (node, after, offset) => ({ node, after, offset });
+    const raw = { css: "div.raw p", text: 0 };
+    const top = (nth, text) => ({ css: ":scope > p", nth, text });
+
+    // Intro, raw block, code block. "<div class=\"raw\">\n<p>raw text</p>\n</div>": the raw block alone.
+    await showCore("rawcode");
+    await expectCopy(
+      "a selection inside a raw block before a code block copies the raw block alone",
+      [{ ...raw, offset: 2 }, { ...raw, offset: 5 }],
+      point(0, null, 11),
+      point(55, null, 0),
+    );
+    // Intro, code block, raw block, After. "<div class=\"raw\">\n<p>raw text</p>\n</div>\n\nAfter": no code block.
+    await showCore("codenext");
+    await expectCopy(
+      "a selection from inside a raw block after a code block copies no code block",
+      [{ ...raw, offset: 2 }, { ...top(1, 0), offset: 5 }],
+      point(13, null, 11),
+      point(77, null, 5),
+    );
+    // "```js\nlet x = 1;\n```": an end at the raw block's first text ends with the code block before it.
+    await expectCopy(
+      "an end at a raw block's first text after a code block copies the code block",
+      [{ css: "code", text: 0, offset: 0 }, { ...raw, offset: 0 }],
+      point(13, null, 0),
+      point(13, null, 11),
+    );
+    // A definition list inside the second list item. "- two".
+    await showCore("dlnested");
+    await expectCopy(
+      "an end at a nested definition list's first text ends with the text before it",
+      [{ css: "li p", nth: 1, text: 0, offset: 0 }, { css: "dt", text: 0, offset: 0 }],
+      point(15, null, 0),
+      point(15, null, 3),
+    );
+    // Para, a rule, a raw block. "Para.\n\n---": the rule before the raw block is a position, named by its own tag.
+    await showCore("hrraw");
+    await expectCopy(
+      "an end at a raw block's first text after a rule keeps the rule",
+      [{ ...top(0, 0), offset: 0 }, { ...raw, offset: 0 }],
+      point(0, null, 0),
+      point(7, null, 1),
+    );
+    // text <img data-src="lazy.png" src="x.png"> more **bold** end. "more **bold** end": the image's own data-src is no tag.
+    await showCore("lazy");
+    await expectCopy(
+      "a document's own data-src is not read as a source tag",
+      [{ ...top(0, 1), offset: 1 }, { ...top(0, 3), offset: 4 }],
+      point(0, null, 6),
+      point(0, 48, 4),
+    );
+    // <p data-src="1.5">raw para</p> then "next para", selected across both. The whole document: the raw paragraph has
+    // nothing before it, so the start is the document's start (RawPoint with no node, offset 0).
+    await showCore("lazy2");
+    await expectCopy(
+      "a raw paragraph with a data-src of its own is raw HTML, copied from the document's start",
+      [{ ...top(0, 0), offset: 0 }, { ...top(1, 0), offset: 9 }],
+      point(null, null, 0),
+      point(32, null, 9),
+    );
+    // Para., then a raw block that ends the document. "Para.\n\n<div class=\"raw\">\n<p>raw text</p>\n</div>": the end is
+    // the document's end.
+    await showCore("rawend");
+    await expectCopy(
+      "a selection into raw HTML at the document's end copies the raw block",
+      [{ ...top(0, 0), offset: 0 }, { ...raw, offset: 4 }],
+      point(0, null, 0),
+      point(null, null, 0),
+    );
+    // Intro, table, raw block, table, After.
+    await showCore("tableraw");
+    // "<div class=\"raw\">\n<p>raw text</p>\n</div>": no stray " |" from the row before it.
+    await expectCopy(
+      "a selection inside a raw block after a table copies the raw block alone",
+      [{ ...raw, offset: 2 }, { ...raw, offset: 5 }],
+      point(33, null, 1),
+      point(82, null, 0),
+    );
+    // "| c | d |\n|---|---|\n| 3 | 4 |": the second table whole.
+    await expectCopy(
+      "a start at a raw block's last text before a table copies the table from its first row",
+      [{ ...raw, offset: 8 }, { css: "td", nth: 3, text: 0, offset: 1 }],
+      point(82, null, 0),
+      point(106, null, 1),
+    );
+    // "Intro.\n\n| a | b |\n|---|---|\n| 1 | 2 |": the first table with its last row's closing pipe.
+    await expectCopy(
+      "an end at a raw block's first text after a table keeps the table whole",
+      [{ ...top(0, 0), offset: 0 }, { ...raw, offset: 0 }],
+      point(0, null, 0),
+      point(33, null, 1),
+    );
+    // see ![alt](x.png), then ![solo](y.png). "see ![alt](x.png)" and "![solo](y.png)".
+    await showCore("image");
+    await expectCopy(
+      "an end just after an image keeps the image",
+      [{ ...top(0, 0), offset: 0 }, { css: ":scope > p", nth: 0, offset: 2 }],
+      point(0, null, 0),
+      point(0, 4, 0),
+    );
+    await expectCopy(
+      "an image-only paragraph selected whole copies its image",
+      [{ css: ":scope > p", nth: 1, offset: 0 }, { css: ":scope > p", nth: 1, offset: 1 }],
+      point(19, null, 0),
+      point(19, 19, 0),
+    );
+    // A paragraph above a diagram. "before para": the diagram's style sheet is no text.
+    await showCore("mermaid", { hasMermaid: true });
+    await expectCopy(
+      "an end at a diagram's first label does not count its style sheet",
+      [{ ...top(0, 0), offset: 0 }, { label: "A", offset: 0 }],
+      point(0, null, 0),
+      point(13, null, 0),
+    );
+    // A README's raw HTML header: an image-only block counts as selected when the selection covers its image, so a copy
+    // from the top starts at the document's start. Each expected pair maps through RawSelection.Extract to the whole
+    // document, or to the whole document up to "Some" for the second.
+    const selectAllAndCopy = async () => {
+      await page.locator("#yamv-content > p").last().click();
+      await page.keyboard.press("Control+a");
+      return page.evaluate(() => {
+        window.__messages = [];
+        window.yamv.copyRaw();
+        return window.__messages.filter((message) => message.type === "rawSelection");
+      });
+    };
+    const expectAll = async (name, start, end) => {
+      const posted = await selectAllAndCopy();
+      const ok = posted.length === 1
+        && JSON.stringify([posted[0].start, posted[0].end]) === JSON.stringify([start, end])
+        && posted[0].generation === generation;
+      check(name, ok, posted);
+    };
+    // <p align="center">\n  <img src="logo.png" alt="Logo">\n</p>, <h1 align="center">Project</h1>, Some intro text.
+    await showCore("readmea");
+    await expectAll("select all in a README with a logo header copies the whole document", point(null, null, 0), point(92, null, 16));
+    await expectCopy(
+      "a selection from the content's start keeps a README's logo and raw heading",
+      [{ css: "*", nth: 0, offset: 0, content: true }, { ...top(1, 0), offset: 4 }],
+      point(null, null, 0),
+      point(92, null, 4),
+    );
+    // A one-line logo, a row of badge links, # Project, Some intro text.
+    await showCore("readmeb");
+    await expectAll("select all in a README with logo and badges copies the whole document", point(null, null, 0), point(220, null, 16));
+    // Para., then a one-line logo ending the document. "Para.\n\n<p align=\"center\"><img src=\"logo.png\" alt=\"Logo\"></p>".
+    await showCore("logobottom");
+    await expectCopy(
+      "a selection through a logo at the document's end keeps the logo",
+      [{ ...top(0, 0), offset: 0 }, { css: "*", nth: 0, offset: -1, content: true }],
+      point(0, null, 0),
+      point(null, null, 0),
+    );
+    // A document that is only raw HTML: the document's start and end, so the raw block is copied whole.
+    await showCore("rawonly");
+    await expectCopy(
+      "a selection in a document of only raw HTML names the document's edges",
+      [{ ...raw, offset: 2 }, { ...raw, offset: 5 }],
+      point(null, null, 0),
+      point(null, null, 0),
+    );
+    await showCore("find");
+    const blank = await copyIn([{ ...top(0, 0), offset: 3 }, { ...top(0, 0), offset: 4 }]);
+    check("a selection of only whitespace posts nothing", blank.length === 0, blank);
+
+    // A reload builds off screen while the old page and its selection stay: a copy before the swap names the old page.
+    await showCore("mathold");
+    const shownGeneration = generation;
+    await copyIn([{ ...top(0, 0), offset: 0 }, { ...top(0, 0), offset: 6 }]);
+    const reloadCopy = await page.evaluate(async ([html, options]) => {
+      const done = window.yamv.render(html, options);
+      window.__messages = [];
+      window.yamv.copyRaw();
+      const posted = window.__messages.filter((message) => message.type === "rawSelection");
+      await done;
+      return posted;
+    }, [coreHtml.mathnew, { ...baseOptions, documentPath: "C:\\docs\\mathold.md", generation: generation + 1, hasMath: true }]);
+    check(
+      "a copy while a reload is staged posts the generation of the page on screen",
+      reloadCopy.length === 1 && reloadCopy[0].generation === shownGeneration,
+      reloadCopy,
+    );
+  }
+
   // The page reports the width its text column is laid out in, which a classic scrollbar narrows. Playwright hides
   // scrollbars by default, so these checks run in a browser of their own that shows them, as WebView2 does.
   {

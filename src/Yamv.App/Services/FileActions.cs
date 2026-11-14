@@ -325,10 +325,10 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
         }
     }
 
-    public async Task CopyTextAsync(TopLevel owner, string text)
+    public async Task CopyTextAsync(TopLevel owner, string text, string what)
     {
         ArgumentNullException.ThrowIfNull(owner);
-        await CopyTextToAsync(owner.Clipboard, text);
+        await CopyTextToAsync(owner.Clipboard, text, what);
     }
 
     /// <summary>
@@ -337,12 +337,13 @@ internal sealed class AvaloniaFileActions(IAppLog log, IToasts? toasts, Action<P
     /// </summary>
     /// <param name="clipboard">The clipboard to copy to; null for a window that has none.</param>
     /// <param name="text">The text to copy.</param>
-    internal async Task CopyTextToAsync(IClipboard? clipboard, string text)
+    /// <param name="what">What the text is, for the log line and the toast: <c>the path</c>.</param>
+    internal async Task CopyTextToAsync(IClipboard? clipboard, string text, string what)
     {
         if (clipboard is not { } target)
         {
-            log.LogWarning("Copy path: the window has no clipboard.");
-            toasts?.Show(ToastKind.Warning, "Couldn't copy the path: no clipboard");
+            log.LogWarning($"Copy {what}: the window has no clipboard.");
+            toasts?.Show(ToastKind.Warning, $"Couldn't copy {what}: no clipboard");
             return;
         }
 
@@ -458,7 +459,11 @@ internal interface IFileActions
     /// <summary>Puts <paramref name="text"/> on the clipboard.</summary>
     /// <param name="owner">The window whose clipboard is used.</param>
     /// <param name="text">The text to copy.</param>
-    Task CopyTextAsync(TopLevel owner, string text);
+    /// <param name="what">
+    /// What the text is, as the warning and the toast for a window with no clipboard name it: <c>the path</c> gives
+    /// "Couldn't copy the path: no clipboard".
+    /// </param>
+    Task CopyTextAsync(TopLevel owner, string text, string what);
 }
 
 /// <summary>The desktops YAMV's file actions tell apart.</summary>
