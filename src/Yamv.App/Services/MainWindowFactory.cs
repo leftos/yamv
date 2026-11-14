@@ -40,6 +40,17 @@ public static class MainWindowFactory
         && Environment.GetEnvironmentVariable(ConfirmCardVariable) == "1";
 
     /// <summary>
+    /// Set to 1 in a run with its own data folder, it makes the main window select the document's first paragraph and open the
+    /// web view's own context menu on it once it has shown, for a hidden-desktop check of its Copy as raw item.
+    /// </summary>
+    internal const string ContextMenuVariable = "YAMV_DEV_CONTEXT_MENU";
+
+    /// <summary>True when <see cref="ContextMenuVariable"/> is 1 and the run has its own data folder, so the owner's app never opens it.</summary>
+    private static bool DevContextMenuAsked() =>
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.DataDirectoryVariable))
+        && Environment.GetEnvironmentVariable(ContextMenuVariable) == "1";
+
+    /// <summary>
     /// Set to ok or no in a run with its own data folder, it makes the main window show that form of the drop overlay once it has
     /// shown, for a hidden-desktop capture.
     /// </summary>
@@ -151,6 +162,7 @@ public static class MainWindowFactory
                 ToastsWhenShown = DevToastsAsked(),
                 DropOverlayWhenShown = DevDropOverlayAsked(),
                 ConfirmCardWhenShown = DevConfirmCardAsked(),
+                ContextMenuWhenShown = DevContextMenuAsked(),
             };
             RestoreLayout(window, session, log);
             MainWindowSession? saver = elevated ? null : new MainWindowSession(window, viewModel, store, TimeProvider.System, log);

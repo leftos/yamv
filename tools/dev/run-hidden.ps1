@@ -82,6 +82,13 @@
     Passed as YAMV_DEV_CONFIRM_CARD; the run waits for the "Window: confirm card shown" log line. Not with -WidthPopover,
     -Toasts, -ThemeSettingsEntry or -DropOverlay.
 
+.PARAMETER ContextMenu
+    With -App: selects the document's first paragraph once the window has shown and right-clicks it through the DevTools
+    protocol, so WebView2 opens its own context menu with the Copy as raw item, and captures with popups. Passed as
+    YAMV_DEV_CONTEXT_MENU; the run waits for the "Copy as raw menu: item added after Copy" log line. The menu is a window of the browser
+    process, so the capture may not show it; the log line is the proof. Not with -WidthPopover, -Toasts, -ThemeSettingsEntry,
+    -DropOverlay or -ConfirmCard.
+
 .PARAMETER ThemeSettings
     Run the theme settings window instead of the harness, on a fresh data folder under .tmp\yamv-data.
 
@@ -136,6 +143,7 @@ param(
     [ValidateSet('', 'menu', 'open')] [string] $ThemeSettingsEntry = '',
     [ValidateSet('', 'ok', 'no')] [string] $DropOverlay = '',
     [switch] $ConfirmCard,
+    [switch] $ContextMenu,
     [switch] $ThemeSettings,
     [string] $Themes = '',
     [string] $ImportFile = '',
@@ -151,9 +159,11 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $exe = Join-Path $root 'src\Yamv.App\bin\Release\net10.0\yamv.exe'
 $capture = Join-Path $PSScriptRoot 'capture-window.ps1'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-if (($Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover -or $Toasts -or $ThemeSettingsEntry -or $DropOverlay -or $ConfirmCard) -and -not $App) {
-    throw ('-Session, -Settings, -Widths, -DeleteAfterShown, -WidthPopover, -Toasts, -ThemeSettingsEntry, -DropOverlay and -ConfirmCard need -App: ' +
-        'the harnesses read no session, settings.json or widths.json.')
+$needsApp = $Session -or $Settings -or $Widths -or $DeleteAfterShown -or $WidthPopover -or $Toasts -or $ThemeSettingsEntry -or
+    $DropOverlay -or $ConfirmCard -or $ContextMenu
+if ($needsApp -and -not $App) {
+    throw ('-Session, -Settings, -Widths, -DeleteAfterShown, -WidthPopover, -Toasts, -ThemeSettingsEntry, -DropOverlay, ' +
+        '-ConfirmCard and -ContextMenu need -App: the harnesses read no session, settings.json or widths.json.')
 }
 if ($Toasts -and $WidthPopover) {
     throw '-Toasts and -WidthPopover each wait for their own log line; pass one.'
@@ -166,6 +176,9 @@ if ($DropOverlay -and ($WidthPopover -or $Toasts -or $ThemeSettingsEntry)) {
 }
 if ($ConfirmCard -and ($WidthPopover -or $Toasts -or $ThemeSettingsEntry -or $DropOverlay)) {
     throw '-ConfirmCard, -WidthPopover, -Toasts, -ThemeSettingsEntry and -DropOverlay each wait for their own log line; pass one.'
+}
+if ($ContextMenu -and ($WidthPopover -or $Toasts -or $ThemeSettingsEntry -or $DropOverlay -or $ConfirmCard)) {
+    throw '-ContextMenu, -WidthPopover, -Toasts, -ThemeSettingsEntry, -DropOverlay and -ConfirmCard each wait for their own log line; pass one.'
 }
 if ($WidthPopoverStep -and -not $WidthPopover) {
     throw '-WidthPopoverStep needs -WidthPopover: it acts on the popover that switch opens.'
@@ -211,12 +224,14 @@ if ($App) {
     $env:YAMV_DEV_THEME_SETTINGS_ENTRY = if ($ThemeSettingsEntry) { $ThemeSettingsEntry } else { $null }
     $env:YAMV_DEV_DROP_OVERLAY = if ($DropOverlay) { $DropOverlay } else { $null }
     $env:YAMV_DEV_CONFIRM_CARD = if ($ConfirmCard) { '1' } else { $null }
+    $env:YAMV_DEV_CONTEXT_MENU = if ($ContextMenu) { '1' } else { $null }
     $readyLine = if ($WidthPopover) { 'Window: (width popover shown|no width popover to show)' }
     elseif ($Toasts) { 'Window: toasts shown' }
     elseif ($ThemeSettingsEntry -eq 'menu') { 'Window: more menu shown' }
     elseif ($ThemeSettingsEntry -eq 'open') { 'Window: (theme settings shown|no theme settings window to show)' }
     elseif ($DropOverlay) { 'Window: drop overlay shown' }
     elseif ($ConfirmCard) { 'Window: confirm card shown' }
+    elseif ($ContextMenu) { 'Copy as raw menu: item added after Copy' }
     else { 'Window: shown' }
 }
 elseif ($ThemeSettings) {
@@ -233,6 +248,7 @@ elseif ($ThemeSettings) {
     $env:YAMV_DEV_THEME_SETTINGS_ENTRY = $null
     $env:YAMV_DEV_DROP_OVERLAY = $null
     $env:YAMV_DEV_CONFIRM_CARD = $null
+    $env:YAMV_DEV_CONTEXT_MENU = $null
     $readyLine = 'Window: shown'
 }
 else {
@@ -244,6 +260,7 @@ else {
     $env:YAMV_DEV_THEME_SETTINGS_ENTRY = $null
     $env:YAMV_DEV_DROP_OVERLAY = $null
     $env:YAMV_DEV_CONFIRM_CARD = $null
+    $env:YAMV_DEV_CONTEXT_MENU = $null
     $readyLine = 'Harness: showing'
 }
 
@@ -318,7 +335,9 @@ try {
         & $capture -ProcessId $process.Id -Out $Out -Title 'Theme settings'
     }
     else {
-        & $capture -ProcessId $process.Id -Out $Out -WithPopups:($WidthPopover -or $Toasts -or $ThemeSettingsEntry -eq 'menu' -or $DropOverlay -or $ConfirmCard)
+        $withPopups = $WidthPopover -or $Toasts -or $ThemeSettingsEntry -eq 'menu' -or $DropOverlay -or $ConfirmCard -or
+            $ContextMenu
+        & $capture -ProcessId $process.Id -Out $Out -WithPopups:$withPopups
     }
     Write-Output "pid=$($process.Id) exited=$($process.HasExited)"
 }

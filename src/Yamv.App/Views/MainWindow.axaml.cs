@@ -217,6 +217,12 @@ public partial class MainWindow : Window
     /// </summary>
     internal bool ConfirmCardWhenShown { get; set; }
 
+    /// <summary>
+    /// Whether the window selects the document's first paragraph and opens the web view's own context menu on it once it has
+    /// shown its first document; the menu writes <c>Copy as raw menu: item added</c>. The hidden-desktop check sets it.
+    /// </summary>
+    internal bool ContextMenuWhenShown { get; set; }
+
     /// <summary>The window's confirm card, which tests ask through.</summary>
     internal ConfirmCardViewModel? ConfirmCardQuestion => _confirmCard;
 
@@ -1400,6 +1406,15 @@ public partial class MainWindow : Window
         _log.LogInfo("Window: confirm card shown");
     }
 
+    /// <summary>Opens the document view's own context menu on its first paragraph; logs when it could not.</summary>
+    private async Task OpenDevContextMenuAsync()
+    {
+        if (_surface is not DocumentView view || !await view.OpenContextMenuForDevAsync())
+        {
+            _log!.LogWarning("Window: could not open the document's context menu");
+        }
+    }
+
     /// <summary>Writes <c>Window: shown</c> once the first document has been shown, or at once for the empty state or missing pane.</summary>
     private async Task LogShownAsync()
     {
@@ -1430,6 +1445,11 @@ public partial class MainWindow : Window
             if (ConfirmCardWhenShown)
             {
                 await ShowDevConfirmCardAsync();
+            }
+
+            if (ContextMenuWhenShown)
+            {
+                await OpenDevContextMenuAsync();
             }
         }
         // The log line is a dev aid; a failure is logged rather than lost in a discarded task.

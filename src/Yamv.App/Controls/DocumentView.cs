@@ -39,6 +39,10 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     private int _generation;
     private TaskCompletionSource? _rendered;
 
+    /// <summary>The Copy as raw item's subscriptions to the native web view's own menu; null while no adapter is attached.</summary>
+    private IDisposable? _webView2Menu;
+    private IDisposable? _wkWebViewMenu;
+
     /// <summary>A view whose page loads from the extracted assets.</summary>
     /// <param name="log">Where the view reports failures.</param>
     /// <param name="elevated">
@@ -58,7 +62,7 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         _elevated = elevated;
         _webView = new NativeWebView();
         _webView.EnvironmentRequested += OnEnvironmentRequested;
-        _webView.AdapterCreated += (_, _) => WebView2Accelerators.Disable(_webView.TryGetPlatformHandle(), _log);
+        _webView.AdapterCreated += OnAdapterCreated;
         _webView.AdapterDestroyed += OnAdapterDestroyed;
         _webView.NavigationStarted += OnNavigationStarted;
         _webView.NewWindowRequested += OnNewWindowRequested;
@@ -212,6 +216,42 @@ public sealed class DocumentView : UserControl, IDocumentSurface
         Dispatcher.UIThread.VerifyAccess();
         ArgumentNullException.ThrowIfNull(fragment);
         return !(await RunAsync(CallKind.Other, "scrollToId", $"window.yamv.scrollToId({Json(fragment)})")).Failed;
+    }
+
+    /// <summary>Asks the page to send the selection's source points for Copy as raw; false when the page script failed.</summary>
+    /// <returns>
+    /// False when the host could not run the page script; true when it ran, or when a newer call or a show replaced it.
+    /// </returns>
+    public async Task<bool> RequestRawCopyAsync()
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        return !(await RunAsync(CallKind.Other, "copyRaw", "window.yamv.copyRaw()")).Failed;
+    }
+
+    /// <summary>
+    /// Selects the first paragraph of the shown document and right-clicks its centre through the DevTools protocol, so the
+    /// web view opens its own context menu. For a hidden-desktop check of the Copy as raw item; Windows (WebView2) only.
+    /// </summary>
+    /// <returns>False when the page script or a DevTools call failed, the page has no paragraph, or this is not WebView2.</returns>
+    internal async Task<bool> OpenContextMenuForDevAsync()
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        const string script =
+            "(() => { const p = document.querySelector('#yamv-content p'); if (!p) { return null; } "
+            + "const range = document.createRange(); range.selectNodeContents(p); const selection = getSelection(); "
+            + "selection.removeAllRanges(); selection.addRange(range); const box = p.getBoundingClientRect(); "
+            + "return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()";
+        string? json = (await RunAsync(CallKind.Other, "devContextMenu", script)).Value;
+        if (string.IsNullOrEmpty(json) || json == "null")
+        {
+            _log.LogWarning("Copy as raw menu: the page has no paragraph to right-click");
+            return false;
+        }
+
+        using var point = JsonDocument.Parse(json);
+        double x = point.RootElement.GetProperty("x").GetDouble();
+        double y = point.RootElement.GetProperty("y").GetDouble();
+        return await WebView2ContextMenu.DispatchRightClickAsync(_webView.TryGetPlatformHandle(), x, y, _log);
     }
 
     /// <summary>Removes every find highlight, leaving the document text as it was.</summary>
@@ -432,8 +472,49 @@ public sealed class DocumentView : UserControl, IDocumentSurface
     internal static string WindowsUserDataFolder(string? overridden, string localAppData, bool elevated) =>
         string.IsNullOrEmpty(overridden) ? Path.Combine(localAppData, "YAMV", elevated ? "webview2-admin" : "webview2") : overridden;
 
+    /// <summary>
+    /// Turns off the browser accelerator keys and adds Copy as raw to the native view's own right-click menu, dropping any
+    /// earlier adapter's menu subscription first so a page that loads again never gets the item twice.
+    /// </summary>
+    private void OnAdapterCreated(object? sender, WebViewAdapterEventArgs e)
+    {
+        DetachMenus();
+        IPlatformHandle? handle = _webView.TryGetPlatformHandle();
+        WebView2Accelerators.Disable(handle, _log);
+        _webView2Menu = WebView2ContextMenu.Attach(handle, OnCopyRawChosen, _log);
+        _wkWebViewMenu = WKWebViewContextMenu.Attach(handle, OnCopyRawChosen, _log);
+    }
+
+    private void DetachMenus()
+    {
+        _webView2Menu?.Dispose();
+        _webView2Menu = null;
+        _wkWebViewMenu?.Dispose();
+        _wkWebViewMenu = null;
+    }
+
+    /// <summary>The native menu's Copy as raw item was chosen; the request runs on the UI thread.</summary>
+    private void OnCopyRawChosen() => Dispatcher.UIThread.Post(() => _ = CopyRawAsync());
+
+    private async Task CopyRawAsync()
+    {
+        try
+        {
+            if (!await RequestRawCopyAsync())
+            {
+                _log.LogWarning("Copy as raw: the page could not take the request");
+            }
+        }
+        // The task is discarded by the posted callback, so a failure is logged here rather than left unobserved.
+        catch (Exception exception)
+        {
+            _log.LogWarning("Copy as raw: the page could not take the request", exception);
+        }
+    }
+
     private void OnAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
     {
+        DetachMenus();
         _ready = false;
         ViewportWidth = null;
         _templateNavigationAllowed = true;
